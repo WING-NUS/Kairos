@@ -1,0 +1,869 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^icvs2008.info^Program.htm_2009-08-05__14-25-14.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^icvs2008.info^Program.htm_2009-08-05__14-25-14.yaml created on Wed Aug 05 17:31:16 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<title>ICVS 2008 Program</title>
+<meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1">
+<meta name="Author" content="Dimitris Chrysostomou">
+<meta name="Abstract" content="The 6th International Conference on Computer Vision Systems (ICVS08) aims to gather researchers and developers from both academia and industry worldwide and to explore the state of the art in vision systems.">
+<meta name="Description" content="The official website of the 6th International Conference in Computer Vision Systems (ICVS08)">
+<meta name="Keywords" content="international, conference, computer vision systems, democritus, university, thrace, Antonis Gasteratos, Dimitris Chrysostomou, dimitris, chrysostomou, santorini, greece, 2008, gryphon lab, group robotics, cognitive systems, production management engineering, Cognitive Systems, Springer, Lecture notes, Computer Science, Robotics">
+<style type="text/css">
+@import"stylesheet.css";
+body {
+	background-image: url(images/wall.gif);
+}
+.style10 {
+	font-size: 12px;
+	color: #003366;
+	font-style: italic;
+}
+</style>
+<script src="SpryAssets/SpryMenuBar.js" type="text/javascript"></script>
+<link href="SpryAssets/SpryMenuBarVertical.css" rel="stylesheet" type="text/css">
+<script type="text/javascript" src="switchcontent.js" >
+</script>
+<style type="text/css">
+/*Style sheet used for demo. Remove if desired*/
+.handcursor {
+	cursor:hand;
+	cursor:pointer;
+}
+</style>
+<style type="text/css">
+<!--
+.style11 {
+	font-size: 14px;
+	color: #003366;
+	font-weight: bold;
+}
+.style13 {
+	color: #003366;
+	font-weight:bold;
+}
+.style16 {
+	color: #EE0000;
+	font-size: 14px;
+}
+.style17 {
+	font-size: 14px
+}
+-->
+</style>
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<div class="clearfix mainarea">
+  <div class="head"><img onmousedown="imd(this)" src="images/nlogo.jpg" alt="logo" width="700" height="100"></div>
+  <div></div>
+  <div class="location style10"><b><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >6th International Conference on Computer Vision Systems</span></b><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >, Vision for Cognitive Systems</span></div>
+  <div class="nav">
+    <ul id="MenuBar1" class="MenuBarVertical">
+      <li><span onclick="return false" style="text-decoration:underline; color:blue" href="index.htm" class="MenuBarItemSubmenu"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span>
+        <ul>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="index.htm" ><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Announcements.htm"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Announcements</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Venue.htm"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Venue</span></span></li>
+        </ul>
+      </li>
+      <li><span onclick="return false" style="text-decoration:underline; color:blue" href="About.htm" class="MenuBarItemSubmenu"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >About the Conference</span></span>
+        <ul>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="About.htm"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >About the Conference</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Commitees.htm"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Conference History.htm"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Conference History</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Contact.htm"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Contact</span></span></li>
+        </ul>
+      </li>
+      <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Authors Info.htm" class="MenuBarItemSubmenu"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Authors Info</span></span>
+        <ul>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Authors Info.htm"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Authors Info</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Call for Papers.htm"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://icvs2008.info/openconf/openconf.php"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Paper Submission</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Registration.htm"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></li>
+        </ul>
+      </li>
+      <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Program.htm" class="MenuBarItemSubmenu"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span>
+        <ul>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Program.htm"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="KeyNote.htm"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Keynote</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Workshops.htm"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></li>
+        </ul>
+      </li>
+      <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Touristic Info.htm" class="MenuBarItemSubmenu"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Touristic Information</span></span>
+        <ul>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Touristic Info.htm"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Touristic Information</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Accomodation.htm"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Accomodation</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Transport.htm"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Transport</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Excursions.htm"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Excursions</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Useful Info.htm"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Useful Information</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Guide.htm"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Santorini Guide</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Athens Pre or Post Stays.htm"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Athens Pre or Post Stays</span></span></li>
+        </ul>
+      </li>
+      <li><span onclick="return false" style="text-decoration:underline; color:blue" href="Sponsors.htm"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></span></li>
+      <li><span onclick="return false" style="text-decoration:underline; color:blue" href="PhotoGallery.htm"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Photo Gallery</span></span></li>
+    </ul>
+    <div><br>
+      <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.springer.com/east/home/computer/lncs?SGWID=5-164-12-72397-0" target="_blank"><img onmousedown="imd(this)" src="images/LNCS-Logo_4c_large.gif" alt="springer" width="112" height="60" border="0"></span> </div>
+    <br>
+    <div><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.eucognition.org" target="_blank"><img onmousedown="imd(this)" src="images/eucognition.gif" alt="" width="120" height="40" border="2"></span></div>
+    <br>
+    <div><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ypepth.gr/en_ec_home.htm" target="_blank"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><img onmousedown="imd(this)" src="images/ypepth.jpg" alt="" width="83" height="98" border="2"></span></div>
+    <br>
+    <div><span onclick="return false" style="text-decoration:underline; color:blue" href="http://poseidon.csd.auth.gr/GAIPDM/" target="_blank"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><img onmousedown="imd(this)" src="images/gaipdm-logo.gif" alt="" width="60" height="60" border="0"></span></div>
+    <br>
+    <div><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.duth.gr/en/" target="_blank"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><img onmousedown="imd(this)" src="images/duth_head.gif" alt="" width="89" height="89" border="0"></span></div>
+    <p><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+  </div>
+  <div class="center">
+    <div class="contenthead">
+      <h1><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Welcome to ICVS 2008</span></h1>
+      <p><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Vision for Cognitive Systems</span></p>
+    </div>
+    <div class="maincontent">
+      <h2><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></h2>
+      <br>
+      <br>
+      <table width="100%" border="0" cellspacing="2" cellpadding="0">
+        <tr>
+          <td width="8%"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          <td width="23%" bgcolor="#DFE9EA"><strong><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >12nd May</span> <br>
+            <span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Monday</span></strong></td>
+          <td width="23%" bgcolor="#DFE9EA"><strong><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >13rd May</span> <br>
+            <span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday</span></strong></td>
+          <td width="23%" bgcolor="#DFE9EA"><strong><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >14th May</span> <br>
+            <span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday</span></strong></td>
+          <td width="23%" bgcolor="#DFE9EA"><strong><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >15th May</span> <br>
+            <span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Thursday</span></strong></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >8:00</span></div></td>
+          <td rowspan="2" bgcolor="#DFE9EA"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          <td rowspan="2" bgcolor="#DFE9EA"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          <td rowspan="2" bgcolor="#DFE9EA"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          <td rowspan="2" bgcolor="#DFE9EA"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >8:30</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >9:00</span></div></td>
+          <td rowspan="8" valign="middle" bgcolor="#C0D8F0"><div align="center"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >WAPCV</span></div></td>
+          <td rowspan="8" bgcolor="#C2DFBF"><div align="center"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >ICVW</span></div></td>
+          <td rowspan="3" valign="middle" bgcolor="#FFCD9B"><div align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="#MonitorSurveillance"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Session 2</span><br>
+              <span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Monitor and</span><br>
+              <span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Surveillance</span></span></div></td>
+          <td rowspan="4" valign="middle" bgcolor="#FFCD9B"><div align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="#Recognition"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Session 6</span><br>
+              <span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Object Recognition and 
+              Tracking</span></span></div>
+            <div align="center"></div>
+            <div align="center"></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >9:30</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >10:00</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >10:30</span></div></td>
+          <td bgcolor="#DFE9EA"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >11:00</span></div></td>
+          <td rowspan="4" valign="middle" bgcolor="#FFCD9B"><div align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="#ComputerVisionArch"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Session 3</span><br>
+              <span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Computer Vision</span><br>
+              <span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Architectures</span></span></div></td>
+          <td bgcolor="#DFE9EA"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >11:30</span></div></td>
+          <td rowspan="3" align="center" valign="middle" bgcolor="#FFCD9B"><span onclick="return false" style="text-decoration:underline; color:blue" href="#Learning"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Session 7</span> <br>
+            <span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Learning</span></span></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >12:00</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >12:30</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >13:00</span></div></td>
+          <td rowspan="3" bgcolor="#DFE9EA"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          <td rowspan="3" bgcolor="#DFE9EA"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          <td rowspan="3" bgcolor="#DFE9EA"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          <td rowspan="23" bgcolor="#F0F0DF"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >13:30</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >14:00</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >14:30</span></div></td>
+          <td rowspan="5" bgcolor="#C0D8F0"><div align="center"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >WAPCV</span></div></td>
+          <td valign="middle" bgcolor="#DFBFFF"><div align="center"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Registration - Welcome</span></div></td>
+          <td rowspan="3" valign="middle" bgcolor="#FFCD9B"><div align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="#Calibration"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Session 4</span><br>
+              <span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Calibration and</span> <br>
+              <span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >15:00</span></div></td>
+          <td rowspan="2" valign="middle" bgcolor="#FFCD9B"><div align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="KeyNote.htm#Bulthoff" target="_self"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Lecture 1</span></span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >15:30</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >16:00</span></div></td>
+          <td rowspan="2" valign="middle" bgcolor="#FFCD9B"><div align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="#Poster1"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session 1</span></span></div></td>
+          <td rowspan="2" valign="middle" bgcolor="#FFCD9B"><div align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="#Poster2"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session 2</span></span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >16:30</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >17:00</span></div></td>
+          <td bgcolor="#DFE9EA"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          <td bgcolor="#DFE9EA"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          <td bgcolor="#DFE9EA"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >17:30</span></div></td>
+          <td rowspan="5" bgcolor="#C2DFBF"><div align="center"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >ICVW</span></div></td>
+          <td rowspan="5" valign="middle" bgcolor="#FFCD9B"><div align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="#CognitiveVision"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Session 1</span><br>
+              <span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Cognitive Vision</span></span></div></td>
+          <td rowspan="2" align="center" valign="middle" bgcolor="#FFCD9B"><div align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="KeyNote.htm#Hogg"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Lecture 2</span></span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >18:00</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >18:30</span></div></td>
+          <td rowspan="3" align="center" valign="middle" bgcolor="#FFCD9B"><span onclick="return false" style="text-decoration:underline; color:blue" href="#CrossModal"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Session 5</span><br>
+            <span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Cross Modal Systems</span></span></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >19:00</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >19:30</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >20:00</span></div></td>
+          <td rowspan="9" bgcolor="#DFE9EA"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          <td rowspan="2" bgcolor="#DFBFFF"><div align="center"><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Welcome Event</span></div></td>
+          <td rowspan="2" bgcolor="#DFE9EA"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >20:30</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >21:00</span></div></td>
+          <td rowspan="7" bgcolor="#DFE9EA"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          <td rowspan="7" bgcolor="#DFBFFF"><div align="center"><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Banquet</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >21:30</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >22:00</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >22:30</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >23:00</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >23:30</span></div></td>
+        </tr>
+        <tr>
+          <td bgcolor="#DFE9EA"><div align="center"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >0:00</span></div></td>
+        </tr>
+      </table>
+      <p><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+      <p><span class="style16"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >(NEW!)</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="downloads/ICVS08_Programme.pdf" class="style17"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Download the ICVS08 final program in pdf format.</span></span><img onmousedown="imd(this)" src="images/ico_pdf.gif" alt="flyer" width="16" height="16"></p>
+      <p><span class="style11"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Sessions</span></span> </p>
+      <p><span class="style13"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >ICVS Poster Sessions</span></span></p>
+      <ul class="bullet">
+        <li>
+          <h3 id="joecontent25-title" class="handcursor"><span onclick="return false" style="text-decoration:underline; color:blue" name="Poster1"></span><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session 1 / Chair: Rita Cucchiara</span></h3>
+          <br>
+          <p id="joecontent25" class="switchgroup2"> <strong><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >A Segmentation Approach In Novel Real Time 3D Plant Recognition System</span></strong><br>
+            <span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Dejan Seatovic</span><br>
+            <strong><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >A Tale of Two Object Recognition Methods for Mobile Robots</span></strong><br>
+            <span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Arnau Ramisa,Shrihari Vasudevan,Ramon L&oacute;pez de M&aacute;ntaras,Roland Siegwart</span><br>
+            <strong><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Object Detection On Aerial Images Using Local Descriptors and Image Synthesis</span></strong><br>
+            <span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Xavier Perrotton, Marc Sturzel, Michel Roux</span><br>
+            <strong><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Bottom-Up and Top-Down Object Matching Using Asynchronous Agents and a contrario Principles</span></strong><br>
+            <span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Nicolas Burrus, Thierry Bernard, Jean-Michel Jolion</span><br>
+            <strong><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >CEDD: Color and Edge Directivity Descriptor. A Compact Descriptor for Image Indexing and Retrieval</span></strong><br>
+            <span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Savvas Chatzichristofis, Yiannis Boutalis</span><br>
+            <strong><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Face Recognition Using a Color PCA Framework</span></strong><br>
+            <span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Mani Thomas, Senthil Kumar, Chandra Kambhamettu</span><br>
+            <strong><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Multiscale Laplacian Operators for Feature Extraction on Irregularly Distributed 3-D Range Data</span></strong><br>
+            <span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Shanmugalingam Suganthan, Sonya Coleman, Bryan Scotney</span><br>
+            <strong><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Online Learning for Bootstrapping of Object Recognition and Localization in a Biologically Motivated Architecture</span></strong><br>
+            <span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Heiko Wersing, Stephan Kirstein, Bernd Schneiders, Ute Bauer-Wersing, Edgar Koerner</span><br>
+            <strong><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Ranking Corner Points by the Angular Difference between Dominant Edges</span></strong><br>
+            <span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Rafael Lemuz, Miguel Arias</span><br>
+            <strong><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Scene Classification Based on Multi-resolution Orientation Histogram of Gabor Features</span></strong><br>
+            <span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Kazuhiro Hotta</span><br>
+            <strong><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Skeletonization Based on Metrical Neighborhood Sequences</span></strong><br>
+            <span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Attila Fazekas, K&aacute;lm&aacute;n Pal&aacute;gyi, G&aacute;bor N&eacute;meth, Gy&ouml;rgy Kov&aacute;cs</span><br>
+            <strong><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Vein Segmentation in Infrared Images Using Compound Enhancing and Crisp Clustering</span></strong><br>
+            <span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Marios Vlachos, Evangelos Dermatas</span><br>
+            <strong><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Weighted Dissociated Dipoles: An Extended Visual Feature Set</span></strong><br>
+            <span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Xavier Bar&oacute;, Jordi Vitri&agrave;</span><br>
+            <strong><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Rk-means: A k-means Based Clustering Algorithm</span></strong><br>
+            <span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Domenico Daniele Bloisi, Luca Iocchi</span><br>
+            <strong><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Smoke Detection in Video Surveillance: a MoG Model in the Wavelet Domain</span></strong><br>
+            <span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Simone Calderara, Paolo Piccinini, Rita Cucchiara</span></p>
+        </li>
+        <li>
+          <h3 id="joecontent26-title" class="handcursor"><span onclick="return false" style="text-decoration:underline; color:blue" name="Poster2"></span><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session 2 / Chair: Petia Radeva</span></h3>
+          <br>
+          <p class="switchgroup2" id="joecontent26"> <strong><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Covert Attention with a Spiking Neural Network</span></strong><br>
+            <span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Sylvain Chevallier, Philippe Tarroux</span><br>
+            <strong><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Enhancing Robustness of a Saliency-based Attention System for Driver Assistance</span></strong><br>
+            <span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Thomas Michalke, Jannik Fritsch, Christian Goerick</span><br>
+            <strong><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Salient Region Detection and Segmentation</span></strong><br>
+            <span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Radhakrishna Achanta, Francisco Estrada, Patricia Wils, Sabine S&uuml;sstrunk</span><br>
+            <strong><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >A Novel Feature Selection based Semi-Supervised method for Image Classification</span><br>
+            </strong><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Muhammad  Tahir, Edward Smith, Praminda Caleb-Solly</span><br>
+            <strong><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Increasing Classification Robustness with Adaptive Features</span></strong><br>
+            <span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Christian Eitzinger, Manfred Gmainer, Wolfgang Heidl, Edwin Lughofer</span> <br>
+            <strong><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Learning Contextual Variations for Video Segmentation</span><br>
+            </strong><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Vincent Martin, Monique Thonnat</span><br>
+            <strong><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Learning to Detect Aircrafts at Low Resolutions</span><br>
+            </strong><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Stavros Petridis, Christopher Geyer, Sanjiv Singh</span><br>
+            <strong><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Learning Visual Quality Inspection from Multiple Humans using Ensembles of Classifiers</span><br>
+            </strong><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Davy Sannen, Hendrik Van Brussel, Marnix Nuttin</span><br>
+            <strong><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Sub-class Error-Correcting Output Codes</span></strong><br>
+            <span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Sergio Escalera, Oriol Pujol, Petia Radeva</span> <br>
+            <strong><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Initialization for Facial Analysis in Interactive Robotics</span></strong><br>
+            <span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Ahmad Rabie, Christian Lang, Marc Hahnheide, Modesto Castrillon Santana, Gerhard Sagerer</span> <br>
+            <strong><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Face Recognition across Pose Using View Based Active Appearance Models (VBAAMs) on CMU Multi-PIE Dataset</span></strong><br>
+            <span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Jingu Heo, Marios Savvides</span> <br>
+            <strong><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Spatio-temporal 3D Pose Estimation of Objects in Stereo Images</span></strong><br>
+            <span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Bjoern Barrois, Christian Woehler</span><br>
+            <strong><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >An On-Line Interactive Self-Adaptive Image Classification Framework</span></strong><br>
+            <span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Davy Sannen, Marnix Nuttin, Praminda Caleb-Solly, Jim Smith, Muhammad Tahir</span><br>
+            <strong><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Communication-Aware Face Detection Using Noc Architecture</span></strong><br>
+            <span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Hung-Chih Lai, Marios Savvides, Tsuhan Chen</span><br>
+            <strong><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Open Source Multiview Reconstruction and Evaluation</span></strong><br>
+            <span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Keir Mierle, James MacLean</span> </p>
+        </li>
+      </ul>
+      <p><span class="style13"><span onclick="return false" style="text-decoration:underline; color:blue" name="CognitiveVision"></span><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Session 1 - Cognitive Vision / Chair: B&auml;rbel Mertsching</span></span><br>
+        <span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday, 13th May , 17:30-19:10</span></p>
+      <ul class="bullet">
+        <li>
+          <h3 id="joecontent1-title" class="handcursor"><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Visual search in static and dynamic scenes using fine-grain top-down visual attention</span></h3>
+          <p id="joecontent1" class="switchgroup2"><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Artificial visual attention is one of the key methodologies inspired from nature that can lead to robust and efficient visual search by machine vision systems. A novel approach is proposed for modeling of top-down visual attention in which separate saliency maps for the two attention pathways are suggested. The maps for the bottom-up pathway are built using unbiased rarity criteria while the top-down maps are created using fine-grain feature similarity with the search target as suggested by the literature on natural vision. The model has shown robustness and efficiency during experiments on visual search using natural and artificial visual input under static as well as dynamic scenarios.</span> </p>
+          <span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Muhammad Zaheer Aziz, B&auml;rbel Mertsching</span> </li>
+        <li>
+          <h3 id="joecontent2-title" class="handcursor"><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Integration of Visual and Shape Attributes for Object Action Complexes</span></h3>
+          <p id="joecontent2" class="switchgroup2"> <span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Our work is oriented towards the idea of developing cognitive
+            capabilities in artificial systems through Object Action Complexes (OACs) [10].
+            The theory comes up with the claim that objects and actions are inseparably
+            intertwined. Categories of objects are not built by visual appearance only, as
+            very common in computer vision, but by the actions an agent can perform and
+            by attributes perceivable. The core of the OAC concept is constituting objects
+            from a set of attributes, which can be manifold in type (e.g. color, shape, mass,
+            material), to actions. This twofold of attributes and actions provides the base
+            for categories. The work presented here is embedded in the development of an
+            extensible system for providing and evolving attributes, beginning with attributes
+            extractable from visual data.</span></p>
+          <span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Kai Huebner, M&aring;rten Bj&ouml;rkman, Babak Rasolzadeh, Martina Schmidt, Danica Kragic</span> </li>
+        <li>
+          <h3 id="joecontent3-title" class="handcursor"><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >3D Action Recognition and Long-term Prediction of Human Motion</span></h3>
+          <p id="joecontent3" class="switchgroup2"> <span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >In this contribution we introduce a novel method for 3D trajectory based recognition of working actions and long-term motion prediction. The 3D pose of the human hand-forearm limb is tracked over time with a multi-hypothesis Kalman Filter framework using the Multiocular Contracting Curve Density algorithm (MOCCD) as a 3D pose estimation method. A novel trajectory classification approach is introduced which relies on the Levenshtein Distance on Trajectories (LDT) as a measure for the similarity between trajectories. Experimental investigations are performed on 10 real-world test sequences acquired from different viewpoints in a working environment. The system performs the simultaneous recognition of a working action and a cognitive long-term motion prediction. Trajectory recognition rates around 90% are achieved, requiring only a small number of training sequences. The proposed prediction approach yields significantly more reliable results than a Kalman Filter based reference approach.</span></p>
+          <span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Markus Hahn, Christian Woehler, Lars Krueger,</span> </li>
+        <li>
+          <h3 id="joecontent4-title" class="handcursor"> <span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Tracking of Human Hands and Faces through Probabilistic Fusion of Multiple Visual Cues</span></h3>
+          <p id="joecontent4" class="switchgroup2"><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >This paper describes a novel approach for real time segmentation and tracking of human hands and faces on image sequences. The proposed method builds on our previous research on color-based, skin-color tracking, eliminating inherent limitations of the existing approach such as its inability to distinguish between human hands, faces and other skin-colored regions in the background. To overcome these limitations, the proposed approach allows the utilization of additional information cues including motion information given by means of a background substraction algorithm, and top-down information regarding the formed image segments such as their spatial location, velocity and shape. All information cues are combined under a probabilistic framework which furnishes the proposed approach with the ability to cope with uncertainty due to noise. The proposed approach runs in real time on a standard, personal computer. Experimental results presented in this paper, confirm the effectiveness of the proposed methodology and its advantages over previous approaches.</span></p>
+          <span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Haris Baltzakis, Antonis Argyros, Manolis Lourakis, Panos Trahanias</span><br>
+          <br>
+        </li>
+      </ul>
+      <p><span class="style13"><span onclick="return false" style="text-decoration:underline; color:blue" name="MonitorSurveillance"></span><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Session 2 - Monitor and Surveilance / Chair: James Ferryman</span> </span><br>
+        <span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, 14th May , 09:00-10:15</span></p>
+      <ul class="bullet">
+        <li>
+          <h3 id="joecontent5-title" class="handcursor"><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >The SAFEE On-Board Threat Detection System</span></h3>
+          <p id="joecontent5" class="switchgroup2"><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Under the framework of the European Union Funded SAFEE project, this paper gives an overview of a novel monitoring and scene analysis system developed for use onboard aircraft in spatially constrained environments. The techniques discussed herein aim to warn on-board crew about pre-determined indicators of threat intent (such as running or shouting in the cabin), as elicited from industry and security experts. The subject matter experts belive that activities such as these are strong indicators of the beginnings of undesirable chains of events, which should not be allowed to develop aboard aircraft. These events may lead to situations involving unruly passengers or be indicative of the precursors to terrorist threats. With a state of the art tracking system using homography intersections of motion images, and probability based Petri nets for scene understanding, the SAFEE behavioural analysis system automatically assesses the output from multiple intelligent sensors, and creates recommendations that are presented to the crew using an integrated airborn user interface. Evaluation of the system is conducted within a full size aircraft mockup, and experimental results are presented, showing that the SAFEE system is well suited to monitoring people in confined environments, and that meaningful and instructive output regarding human intentions can be derived from the sensor network within the cabin.</span></p>
+          <span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >Nicholas Carter, James Ferryman</span> </li>
+        <li>
+          <h3 id="joecontent6-title" class="handcursor"><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Region of Interest Generation in Dynamic Environments Using Local Entropy Fields</span></h3>
+          <p id="joecontent6" class="switchgroup2"><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >This paper presents a novel technique to generate regions of interest in image sequences containing independent motions. The technique uses a novel motion segmentation method to detect independent relative motions using a local entropies field. Local entropy values are computed for each vector of the optical flow with respect to their neighborhood. These values are used as input vectors for a two state Markov Random Field that is used to discriminate the boundaries of the clusters. The idea is to exploit the local entropy values as highly informative cues about the amount of information contained in the vector's neighborhood. High values represent significative motion differences, low values express uniform movements. After a graph cutting labeling, the cluster motion information is used to create a multiple hypothesis prediction for the following frame based on nearest neighbor greedy data association technique. The algorithm can be used as an hypothesis generator on area of interest because it already gives results within two frames. In order to show the validity of the proposed algorithm experiments have been performed in standard datasets and real-world outdoor environment showing promising results.</span></p>
+          <span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Luciano Spinello, Roland Siegwart</span> </li>
+        <li>
+          <h3 id="joecontent7-title" class="handcursor"><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >Real-time Face Tracking for Attention Aware Adaptive Games</span></h3>
+          <p id="joecontent7" class="switchgroup2"><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >This paper presents a real time face tracking and head pose estimation system which is included in an attention aware game framework. This fast tracking system enables the detection of the player&rsquo;s attentional state using a simple attention model. This state is then used to adapt the game unfolding in order to enhance user&rsquo;s experience (in the case of adventure game) and improve the game attentional attractiveness (in the case of pedagogical game).</span></p>
+          <span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Matthieu Perreira Da Silva, Vincent Courboulay, Armelle Prigent, Pascal Estraillier</span><br>
+          <br>
+        </li>
+      </ul>
+      <p><span class="style13"><span onclick="return false" style="text-decoration:underline; color:blue" name="ComputerVisionArch"></span><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Session 3 - Computer Vision Architectures / Chairs: Marios Savvides, Markus Vincze</span></span><br>
+        <span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, 14th May , 11:00-12:40</span></p>
+      <ul class="bullet">
+        <li>
+          <h3 id="joecontent9-title" class="handcursor"><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Feature Extraction and Classification by Genetic Programming</span></h3>
+          <p id="joecontent9" class="switchgroup2"> <span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >This paper explores the use of genetic programming for constructing vision systems. A two-stage approach is used, with separate evolution of the feature extraction and classification stages. The strategy taken for the classifier is to evolve a set of partial solutions, each of which works for a single class. It is found that this approach is significantly faster than conventional genetic programming, and frequently results in a better classifier. The effectiveness of the approach is explored on three image classification problems.</span></p>
+          <span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >Olly Oechsle, Adrian Clark</span> </li>
+        <li>
+          <h3 id="joecontent10-title" class="handcursor"><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >GPU-based Multigrid: Real-Time Performance in High Resolution Nonlinear Image Processing</span></h3>
+          <p id="joecontent10" class="switchgroup2"><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Multigrid methods provide fast solvers for a wide variety of problems encountered in computer vision. Recent graphics hardware is ideally suited for the implementation of such methods, but this potential has not yet been fully realized. Typically, work in that area focuses on linear systems only, or on implementation of numerical solvers that are not as efficient as multigrid methods. We demonstrate that nonlinear multigrid methods can be used to great effect on modern graphics hardware. Specifically, we implement two applications: a nonlinear denoising filter and a solver for variational optical flow. We show that performing these computations on graphics hardware is between one and two orders of magnitude faster than comparable CPU-based implementations.</span></p>
+          <span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Harald Grossauer, Peter Thoman</span> </li>
+        <li>
+          <h3 id="joecontent11-title" class="handcursor"><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Attention Modulation using Short- and Long-term Knowledge</span></h3>
+          <p id="joecontent11" class="switchgroup2"><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >A fast and reliable visual search is crucial for representing visual scenes. Here the modulation of bottom-up attention plays an important role. Often the knowledge about target features is used to bias the bottom-up pathway. In this paper we propose a system which does not only make use of knowledge about the target features, but also uses already acquired knowledge about objects in the current scene to speed up the visual search. Main ingredients are a relational short term memory in connection with a semantic relational long term memory and an adjustable bottom-up saliency. The focus of this work is to investigate mechanisms to use the memory of the system efficiently. We show a proof-of-concept implementation which is working in a real-world environment and performs visual search tasks. It becomes clear that using the relational semantic memory in combination with spatial and feature modulation of the bottom-up path is beneficial for speeding up such search tasks.</span></p>
+          <span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Sven Rebhan, Florian Roehrbein, Julian Eggert, Edgar Koerner</span> </li>
+        <li>
+          <h3 id="joecontent12-title" class="handcursor"><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >PCA Based 3D shape Reconstruction of Human Foot Using Multiple Viewpoint Cameras</span></h3>
+          <p id="joecontent12" class="switchgroup2"><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >This article describes a multiple camera based method to reconstruct a 3D shape of a human foot. From a feet database, an initial 3D model of the foot represented by a cloud of points is built. In addition, some shape parameters, which characterize any foot at more than 92%, are defined by using Principal Component Analysis. Then, the 3D model is adapted to the foot of interest captured in multiple images based on &quot;active shape models&quot; methods by applying some constraints (edge points' distance, color variance for example). We insist here on the experiment part where we demonstrate the efficiency of the proposed method on a plastic foot model, and on real human feet with various shapes. We compare different ways to texture the foot, and conclude that using projectors can improve drastically the reconstruction's accuracy. Based on experimental results, we finally propose some improvements regarding to the system integration.</span></p>
+          <span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >Edmee Amsutz, Tomoaki Teshima, Makoto Kimura, Masaaki Mochimaru, Hideo Saito</span> <br>
+          <br>
+        </li>
+      </ul>
+      <p><span class="style13"><span onclick="return false" style="text-decoration:underline; color:blue" name="Calibration"></span><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Session 4 - Calibration and Registration / Chair: Fiora Pirri</span> </span><br>
+        <span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, 14th May , 14:30-15:45</span></p>
+      <ul class="bullet">
+        <li>
+          <h3 id="joecontent13-title" class="handcursor"><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >A System for Geometrically Constrained Single View Reconstruction</span></h3>
+          <p id="joecontent13" class="switchgroup2"><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >This paper presents an overview of a system for recovering 3D models corresponding to scenes for which only a single perspective image is available. The system encompasses a versatile set of semi-automatic single view reconstruction techniques and couples them with limited interactive user input in order to reconstruct textured 3D graphical models corresponding to the imaged input scenes. Such 3D models can serve as the digital content for supporting interactive multimedia and virtual reality applications. Furthermore, they can support novel applications in areas such as video games, 3D photography, visual metrology, computer-assisted study of art and forensics, etc.</span> </p>
+          <span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Manolis Lourakis</span> </li>
+        <li>
+          <h3 id="joecontent14-title" class="handcursor"><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Monocular Omnidirectional Visual Odometry for Outdoor Ground Vehicles</span></h3>
+          <p id="joecontent14" class="switchgroup2"><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >In this paper, we describe a real-time algorithm for computing the ego-motion of a vehicle relative to the road. The algorithm uses as only input images provided by a single omnidirectional camera mounted on the roof of the vehicle. The front ends of the system are two different trackers. The first one is a homography-based tracker that detects and matches robust scale invariant features that most likely belong to the ground plane. The second one uses an appearance based approach and gives high resolution estimates of the rotation of the vehicle. This 2D pose estimation method has been successfully applied to videos from an automotive platform. We give an example of camera trajectory estimated purely from omnidirectional images over a distance of 450 meters. For performance evaluation, the estimated path is superimposed onto a Google Earth image of the same test environment. In the end, we use image mosaicing to obtain a textured 2D reconstruction of the estimated path.</span></p>
+          <span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Davide Scaramuzza, Roland Siegwart</span> </li>
+        <li>
+          <h3 id="joecontent15-title" class="handcursor"><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >Eyes and Cameras Calibration for 3d World Gaze Detection</span></h3>
+          <p id="joecontent15" class="switchgroup2"><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Gaze tracking is a promising research area with application that goes from advanced human machine interaction systems, to human attention processes studying, modeling and use in cognitive vision fields. In this paper we propose a novel approach for the calibration and use of a head mounted dual eye gaze tracker. Key aspects are a robust pupil tracking algorithm based on prediction from infrared LED purkinje image position, and a new gaze localization method based on 3D lines of sight computation, and trifocal geometry considerations.</span></p>
+          <span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >Stefano Marra, Fiora Pirri</span><br>
+          <br>
+        </li>
+      </ul>
+      <p><span class="style13"><span onclick="return false" style="text-decoration:underline; color:blue" name="CrossModal"></span><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Session 5 - Cross Modal Systems / Chair: Monique Thonnat</span></span><br>
+        <span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, 14th May , 18:30-19:45</span></p>
+      <ul class="bullet">
+        <li>
+          <h3 id="joecontent23-title" class="handcursor"><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Object Category Detection using Audio-visual Cues</span></h3>
+          <p id="joecontent23" class="switchgroup2"><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >Categorization is one of the fundamental building blocks of cognitive systems. Object categorization has traditionally been addressed in the vision domain, even though cognitive agents are intrinsically multimodal. Indeed, biological systems combine several modalities in order to achieve robust categorization. In this paper we propose a multimodal approach to object category detection, using audio and visual information. The auditory channel is modeled on biologically motivated spectral features via a discriminative classifier. The visual channel is modeled by a state of the art part based model. Multimodality is achieved using two fusion schemes, one high level and the other low level. Experiments on six different object categories, under increasingly difficult conditions, show strengths and weaknesses of the two approaches, and clearly underline the open challenges for multimodal category detection.</span> </p>
+          <span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >Jie Luo, Barbara Caputo, Alon Zweig, Joerg-Hendrik Bach, Joern Anemueller</span> </li>
+        <li>
+          <h3 id="joecontent24-title" class="handcursor"><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >Multimodal Interaction Abilities for a Robot Companion</span></h3>
+          <p id="joecontent24" class="switchgroup2"><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >Among the cognitive abilities a robot companion must be endowed with, human perception and speech understanding are both fundamental in the context of multimodal human-robot interaction. The two components we have developed and integrated on a mobile robot are presented in this paper. First, we detail an interactively distributed multiple object tracker dedicated to two-handed gestures and head location in 3D. The on-board speech understanding system is then depicted. For both components, associated in- and off-line evaluations from data acquired by the robot highlight their relevance. Implementation and preliminary experiments on a household robot companion are then demonstrated. The latter illustrate how vision can assist speech by specifying location references, object/person IDs in verbal statements in order to interpret natural deictic commands given by human beings. Extensions of our work are finally discussed.</span></p>
+          <span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >Brice Burger, Isabelle Feranne, Frederic Lerasle</span> </li>
+      </ul>
+      <br>
+      <br>
+      <p><span class="style13"><span onclick="return false" style="text-decoration:underline; color:blue" name="Recognition"></span><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >Session 6 - Object Recognition and Tracking / Chair: Bernd Neumann</span></span><br>
+        <span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, 15th May , 09:00-10:40</span></p>
+      <ul class="bullet">
+        <li>
+          <h3 id="joecontent16-title" class="handcursor"><span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >Diagnostic System for Intestinal Motility Disfunctions Using Video Capsule Endoscopy</span></h3>
+          <p id="joecontent16" class="switchgroup2"><span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >Wireless Video Capsule Endoscopy is a clinical technique consisting of the analysis of images from the intestine which are provided by an ingestible device with a camera attached to it. In this paper we propose an automatic system to diagnose severe intestinal motility disfunctions using the video endoscopy data. The system is based on the application of computer vision techniques within a machine learning framework in order to obtain the characterization of diverse motility events from video sequences. We present experimental results that demonstrate the effectiveness of the proposed system and compare them with the ground-truth provided by the gastroenterologists.</span></p>
+          <span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >Santi Segu&iacute;, Laura Igual, Fernando Vilari&ntilde;o, Petia Radeva, Carolina Malagelada</span> </li>
+        <h3 id="joecontent17-title" class="handcursor"><span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >Detecting and Recognizing Abandoned Objects in Crowded Environments</span></h3>
+        <p id="joecontent17" class="switchgroup2"><span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >In this paper we present a framework for detecting and recognizing abandoned objects in crowded environments. The two main components of the framework include background change detection and object recognition. Moving blocks are detected using dynamic thresholding of spatiotemporal texture changes. The background change detection is based on analyzing wavelet transform coefficients of non-overlapping and non-moving 3D texture blocks. Detected changed background becomes the region of interest which is scanned to recognize various objects under surveillance such as abandoned luggage. The object recognition is based on model histogram ratios of image gradient magnitude patches. Supervised learning of the objects is performed by support vector machine. Experimental results are demonstrated using various benchmark video sequences (PETS, CAVIAR, i-Lids) and an object category dataset (CalTech256).</span></p>
+        <span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >Roland Miezianko, Dragoljub Pokrajac</span>
+        </li>
+        <li>
+        <li>
+          <h3 id="joecontent18-title" class="handcursor"><span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >An Approach for Tracking the 3D Object Pose Using Two Object Points</span></h3>
+          <p id="joecontent18" class="switchgroup2"><span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >In this paper, a novel and simple approach for tracking the object pose, position and orientation, using two object points when the object is rotated about one of the axes of the reference coordinate system is presented. The object rotation angle can be tracked up to a range of 180&deg; for object rotations around each axis of the reference coordinate system from an initial object situation. The considered two object points are arbitrary points of the object which can be uniquely identified in stereo images. Since the approach requires only two object points, it is advantageous for the robotic applications where very few feature points can be obtained because of lack pattern information on the objects. The paper also presents the results for the pose estimation of a meal tray in a rehabilitation robotics environment</span></p>
+          <span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >Sai Krishna Vuppala, Axel Gr&auml;ser</span> </li>
+        <li>
+          <h3 id="joecontent19-title" class="handcursor"><span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >Adaptive Motion-based Gesture Recognition Interface for Mobile Phones</span></h3>
+          <p id="joecontent19" class="switchgroup2"><span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >In this paper, we introduce a new vision based interaction technique for mobile phones. The user operates the interface by simply moving a finger in front of a camera. During these movements the finger is tracked using a method that embeds the Kalman filter and Expectation Maximization (EM) algorithms. Finger movements are interpreted as gestures using Hidden Markov Models (HMMs). This involves first creating a generic model of the gesture and then utilizing unsupervised Maximum a Posteriori (MAP) adaptation to improve the recognition rate for a specific user. Experiments conducted on a recognition task involving simple control commands clearly demonstrate the performance of our approach.</span></p>
+          <span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >Jari Hannuksela, Mark Barnard, Pekka Sangi, Janne Heikkil&auml;</span><br>
+          <br>
+        </li>
+      </ul>
+      <p><span class="style13"><span onclick="return false" style="text-decoration:underline; color:blue" name="Learning"></span><span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >Session 7 - Learning / Chair: Antonios Argyros</span> </span><br>
+        <span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, 15th May , 11:20-12:35</span></p>
+      <ul class="bullet">
+        <li>
+          <h3 id="joecontent20-title" class="handcursor"><span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >A System that Learns to Tag Videos by Watching Youtube</span></h3>
+          <p id="joecontent20" class="switchgroup2"><span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >We present a system that automatically tags videos, i.e. detects high-level semantic concepts like objects or actions in them. To do so, our system does not &ndash; in contrast to previous work &ndash; rely on datasets manually annotated for research purposes. Instead, we propose to use videos from online portals like youtube.com as a novel source of training data, where tags provided by users during upload serve as ground truth annotations. This allows our system to learn autonomously by automatically downloading its training set. The key contribution of this work is a number of large-scale quantitative experiments on real-world online videos, in which we investigate the influence of the individual system components, and how well our tagger generalizes to novel content. Our key results are: (1) Fair tagging results can be obtained by a late fusion of several kinds of visual features. (2) Using more than one keyframe per shot is helpful. (3) To generalize to different video content (e.g., another video portal), the system can be adapted by expanding its training set.</span></p>
+          <span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >Adrian Ulges, Christian Schulze, Daniel Keysers, Thomas M. Breuel</span> </li>
+        <li>
+          <h3 id="joecontent21-title" class="handcursor"><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >Geo-located Image Grouping Using Latent Descriptions</span></h3>
+          <p id="joecontent21" class="switchgroup2"><span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >Image categorization is undoubtedly one of the most challenging problems faced in Computer Vision. The scientific literature is plenty of methods dedicated to specific classes of images; further, commercial systems are also going to be advertised in the market. Nowadays, additional data can also be associated to the images, enriching its semantic interpretation beyond the pure appearance. This is the case of geo-location data, that contain information about the geographical place where an image has been captured. This data allow, if not require, a different management of the images, for instance, to the purpose of easy retrieval and visualization from a geo-referenced image repository. This paper constitutes a first step in this sense, presenting a method for geo-referenced image categorization. The solution presented here places in the wide literature on the statistical latent descriptions, where the probabilistic Latent Semantic Analysis (pLSA) is one of the most known representative. In particular, we extend the pLSA paradigm, introducing a latent variable modelling the geographical area in which an image has been captured. In this way, we are able to describe the entire image dataset grouping effectively proximal images with similar appearance. Experiments on categorization have been carried out, employing a wellknown geographical image repository: results are actually very promising, opening new interesting challenges and applications in this research field.</span></p>
+          <span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >Marco Cristani, Vittorio Murino</span> </li>
+        <li>
+          <h3 id="joecontent22-title" class="handcursor"><span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >Functional Object Class Detection Based on Learned Affordance Cues</span></h3>
+          <p id="joecontent22" class="switchgroup2"><span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >Current approaches to visual object class detection mainly focus on the recognition of abstract object categories, such as cars, motorbikes, mugs and bottles. Although these approaches have demonstrated impressive performance in terms of recognition, their restriction to abstract categories seems artificial and inadequate in the context of embodied, cognitive agents. Here, distinguishing objects according to functional aspects based on object affordances is vital for a meaningful human-machine interaction. In this paper, we propose a complete system for the detection of functional object classes, based on a representation of visually distinct hints on object affordances (affordance cues). It spans the complete cycle from tutor-driven acquisition of affordance cues, one-shot learning of corresponding object models, and detecting novel instances of functional object classes in real images.</span></p>
+          <span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >Michael Stark, Philipp Lies, Michael Zillich, Bernt Schiele</span> <br>
+          <br>
+        </li>
+      </ul>
+      <script type="text/javascript">
+
+var joeexample=new switchcontent("switchgroup2", "p") 
+joeexample.setStatus('[-] ', '[+] ')
+joeexample.setColor('black', '#003366')
+joeexample.collapsePrevious(false)
+joeexample.setPersist(false)
+joeexample.init()
+</script>
+      <p><span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+    </div>
+  </div>
+</div>
+<div class="footer">
+  <div align="center"><span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >This site is maintained by the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://robotics.pme.duth.gr"><span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >Group of Robotics and Cognitive Systems</span>

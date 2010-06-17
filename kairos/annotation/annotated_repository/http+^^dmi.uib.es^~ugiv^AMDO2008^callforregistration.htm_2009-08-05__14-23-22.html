@@ -1,0 +1,921 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml"><!-- InstanceBegin template="/Templates/amdo3.dwt" codeOutsideHTMLIsLocked="false" -->
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^dmi.uib.es^~ugiv^AMDO2008^callforregistration.htm_2009-08-05__14-23-22.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^dmi.uib.es^~ugiv^AMDO2008^callforregistration.htm_2009-08-05__14-23-22.yaml created on Wed Aug 05 17:31:08 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<title>AMDO 2008 -  V Conference on Articulated Motion and Deformable Objects</title>
+
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+
+
+
+<style type="text/css">
+<!--
+@import url("barras.css");
+body {
+	color: #333333;
+	font-family: Verdana, Arial, Helvetica, sans-serif;
+	font-size: 10px;
+		
+		}
+.Estilo2 {
+	color: #FF9900;
+	font-weight: bold;
+	font-size: 18px;
+}
+.Estilo3 {color: #FFCC33}
+
+
+a.menu:link {color: #666633;  text-decoration: none}
+a.menu:visited {color: #FF9900; text-decoration: none}
+a.menu:hover { color: #993300; text-decoration: underline}
+
+a.mail:visited, a.mail:link {color: #FF9900; text-decoration: none}
+a.mail:hover { color: #FFCC33; text-decoration: underline}
+
+td,th {
+	color: #333333;
+	font-family: Verdana, Arial, Helvetica, sans-serif;
+	font-size: 10px;
+}
+a:link {
+	color: #ff9900;
+}
+a:visited {
+	color: #cc6600;
+}
+a:hover {
+	color: #993300;
+}
+a:active {
+	color: #666633;
+}
+.Estilo4 {font-size: 16px; color:#FF9900}
+.Estilo5 {color: #FFCC33; font-size: 14px; }
+.Estilo6 {
+	font-size: 14px;
+	font-weight: bold;
+}
+
+-->
+
+</style>
+<!-- InstanceBeginEditable name="head" -->
+
+
+<style type="text/css">
+<!--
+.style2 {
+	color: #993300;
+	font-weight: bold;
+}
+-->
+</style>
+<!-- InstanceEndEditable -->
+
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)" topmargin="0"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<table width="100%" align="left" bgcolor="#FFCC33">
+  <tr>
+    <td width="22%" nowrap="nowrap" bgcolor="#FFFFFF"><div align="left"><img onmousedown="imd(this)" src="images/sargantana.jpg" width="159" height="150" /></div></td>
+    <td width="78%" bgcolor="#993300"><div align="center"><img onmousedown="imd(this)" src="images/logoamdo.jpg" width="349" height="93" align="absbottom" /> <span class="Estilo2"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >2008</span><br />
+          <span class="Estilo5"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; V</span> <strong><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Conference on Articulated Motion and Deformable Objects &nbsp;</span></strong></span><span class="Estilo6"></span>
+		  <span class="Estilo4"><strong><br />
+          </strong><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Andratx, Mallorca, Spain. 9-11 July , 2008</span></span></span></div></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top"><table bordercolor="#993300">
+      <tr>
+        <td colspan="2"><div align="center"></div></td>
+      </tr>
+      <tr>
+        <td width="85"><img onmousedown="imd(this)" src="images/mecanopeq.gif" width="85" height="152" /></td>
+        <td width="134" bgcolor="#FFFFFF"><div align="left"><strong><img onmousedown="imd(this)" src="images/arrow_orange.gif" width="13" height="13" /><span onclick="return false" style="text-decoration:underline; color:blue" href="index.htm" class="menu"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span><br />
+	 		  <img onmousedown="imd(this)" src="images/arrow_orange.gif" width="13" height="13" /><span onclick="return false" style="text-decoration:underline; color:blue" href="callforpapers.htm" class="menu"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span><br />
+			  <img onmousedown="imd(this)" src="images/arrow_orange.gif" width="13" height="13" /><span onclick="return false" style="text-decoration:underline; color:blue" href="callforregistration.htm" class="menu"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Call for Registration</span></span><br />
+    	      <img onmousedown="imd(this)" src="images/arrow_orange.gif" width="13" height="13" /><span onclick="return false" style="text-decoration:underline; color:blue" href="callforsponsors.htm" class="menu"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Call for Sponsors</span></span> <br/>
+              <img onmousedown="imd(this)" src="images/arrow_orange.gif" width="13" height="13" /><span onclick="return false" style="text-decoration:underline; color:blue" href="news.htm" class="menu"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Latest News</span></span><br />
+              <img onmousedown="imd(this)" src="images/arrow_orange.gif" width="13" height="13" /><span onclick="return false" style="text-decoration:underline; color:blue" href="dates.htm" class="menu"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Dates</span></span><br />
+              <img onmousedown="imd(this)" src="images/arrow_orange.gif" width="13" height="13" /><span onclick="return false" style="text-decoration:underline; color:blue" href="program.htm" class="menu"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span><br />
+          	  <img onmousedown="imd(this)" src="images/arrow_orange.gif" width="13" height="13" /><span onclick="return false" style="text-decoration:underline; color:blue" href="committe.htm" class="menu"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Committee</span></span> <br />
+          <img onmousedown="imd(this)" src="images/arrow_orange.gif" width="13" height="13" /><span onclick="return false" style="text-decoration:underline; color:blue" href="hotels.htm" class="menu"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Hotels</span></span><br />
+          <img onmousedown="imd(this)" src="images/arrow_orange.gif" width="13" height="13" /><span onclick="return false" style="text-decoration:underline; color:blue" href="transport.htm" class="menu"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Transport</span></span> <br />
+          
+		  </strong></div></td>
+      </tr>
+      <tr bgcolor="#FFFFFF">
+        <td colspan="2"><div align="left"><strong>              
+			  <img onmousedown="imd(this)" src="images/arrow_orange.gif" width="13" height="13" /><span onclick="return false" style="text-decoration:underline; color:blue" href="photos.htm" class="menu"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Awards and Photos</span></span><br />
+              <!--<img onmousedown="imd(this)" src="../images/arrow_orange.gif" width="13" height="13" /><span onclick="return false" style="text-decoration:underline; color:blue" href="awards.htm" class="menu">Awards</span><br />-->
+              <img onmousedown="imd(this)" src="images/arrow_orange.gif" width="13" height="13" /><span onclick="return false" style="text-decoration:underline; color:blue" href="events.htm" class="menu"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Upcoming Events</span></span><br />
+          <img onmousedown="imd(this)" src="images/arrow_orange.gif" width="13" height="13" /><span onclick="return false" style="text-decoration:underline; color:blue" href="http://dmi.uib.es/%7Eugiv/AMDO2006/" class="menu"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Old AMDO Editions</span></span> </strong></div></td>
+      </tr>
+      <tr bgcolor="#FFFFFF">
+        <td colspan="2"><div align="center"><img onmousedown="imd(this)" src="images/mecanorot.gif" width="152" height="85" /></div></td>
+      </tr>
+	     <tr>
+        <td colspan="2" valign="top"><div align="center"></div></td>
+        </tr>
+		<tr><td colspan="2">
+		
+		   <div align="center">
+			<!-- CQ Counter code start -->
+			<script type="text/javascript" language="javascript"><!--
+			_d=document; _n=navigator; _t=new Date(); function t() { _d.write(
+			"<img onmousedown="imd(this)" src=\"http://es.2.cqcounter.com/cgi-bin/c?_id=AMDO08&_z=0&_r="+
+			_r+"&_c="+_c+"&_j="+_j+"&_t="+(_t.getTimezoneOffset())+"&_k="+_k+
+			"&_l="+escape(_d.referrer)+"\" width=70 height=15 "+
+			"border=0>");} _c="0"; _r="0"; _j="U"; _k="U"; _d.cookie="_c=y";
+			_d.cookie.length>0?_k="Y":_k="N";//--></script>
+			<script type="text/javascript" language="javascript1.2"><!--
+			_n.javaEnabled()?_j="Y":_j="N";_b=screen; _r=_b.width;
+			_n.appName!="Netscape"?_c=_b.colorDepth : _c=_b.pixelDepth;//--></script>
+			<span onclick="return false" style="text-decoration:underline; color:blue" title="Web Tracker" href="http://cqcounter.com/?_id=AMDO08&_lo=es2"
+			target="_top"><script type="text/javascript" language="javascript"><!--
+			t(); //--></script></span><noscript><img onmousedown="imd(this)" width="70" height="15" border="0"
+			alt="Counter" src="http://es.2.cqcounter.com/cgi-bin/c?_id=AMDO08&_z=0"><br>
+			<span onclick="return false" style="text-decoration:underline; color:blue" title="Free Hit Counter" href="http://cqcounter.com/"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Free Web Counter</span></span></noscript>
+			<!-- CQ Counter code end -->
+		
+       
+	      </div>
+</td>
+		</tr>
+    </table></td>
+    <td rowspan="2" bgcolor="#FFCC33" valign="top">  	
+	  <!-- InstanceBeginEditable name="contenido" -->
+	  
+	  <table width="100%" align="center" cellpadding="5" bgcolor="#FFFFFF">
+        <tr><td><div align="center">
+          <h1 align="left"><span class="Estilo6"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Call for registration</span> </span></h1></div></td>
+        </tr>
+		
+		<tr><td><div><span class="style2"><br><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;READ FIRST:</span></span></div> 
+		<ol>
+		  <li><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Papers with one missing required issue (CRC, Copyright or Registration) won't be published.</span> <strong><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >DEADLINE:</span></strong> <span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >April 30th, 2008</span>  <br/>
+		  </li><br/>
+		  <li><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Camera-Ready format is available in:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="llncs.zip" target="_blank"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >LNCS paper format style</span></span>  <span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >(For Latex format) and</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="word.zip" target="_blank"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >LNCS paper format WORD</span></span> <span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >(For WORD format).</span> 
+		  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://dmi.uib.es/~ugiv/AMDO2008/openconf/openconf.php"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Upload Camera-Ready.</span></span> <br/>
+		  </li><br/>
+		  <li><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >A</span> <strong><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >copy of the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Docs/CopyrightLNCS.pdf"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Copyright Form</span> </span></strong> <span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >and a</span> <strong><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >copy</span></strong> <span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >of the</span> <strong><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Bank Transfer Receipt</span></strong> <span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >must be sent by fax, and the</span> <strong><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >original</span></strong> <span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >must be sent to the following address:</span> <br>
+		  		<blockquote class="Estilo12">
+                <p class="Estilo17"><span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:amdo@uib.es"><strong><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Dr. Franciso Perales</span></strong></span> <br/>
+					 <b> <span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Ed. Anselm. Turmeda</span> </b><br />
+                      <b><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Dept. Ci&egrave;ncies Matem&agrave;tiques i Inform&agrave;tica.</span></b><br />
+        				<span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Universitat de les Illes Balears (UIB)</span><br />
+        				<span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >c/Valldemossa km. 7.5.</span><br />
+                  	  <b><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Palma de Mallorca, 07122. (SPAIN)</span><br />
+                  	</b><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Tel: +34 971 17 2711</span><br />
+        			<span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Fax: +34 971 17 30 03.</span></p>
+              </blockquote>
+		  </li>
+		  <li><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >At least one of the registrations MUST be</span> <strong><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >FULL REGISTRATION</span></strong><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >.</span><br/></li> <br/> 
+		  <li><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >In case of author papers, all participants MUST apply for FULL REGISTRATION. Members of IAPR, AERFIA, or EUROGRAPHICS must send a copy of the association ID card, or a copy
+		  of the annual payment, to the address mentioned above, for reduced fee.</span><br/></li><br/>
+		  <li><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >In case your status had not changed in a considerable amount of time after the submission of any documentation, please let us know. Received bank receipts will be updated on</span> <strong><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >May 4th</span></strong><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >, due to transfer confirmation times (2/3 days). We appreciate your patience.</span> <br/>
+		  </li><br/>
+		</ol>
+		</td></tr>
+		
+		<!--<tr><td class="Estilo5" align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="registration.htm">REGISTRATION</span></td></tr>-->
+		<TR><td><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td></TR>
+		
+	  	<tr><td>
+			<table border="1" bordercolor="#cccccc" bgcolor="#FFFFFF">
+ 			 <tr><td colspan="6" align="center" class="Estilo6"><em><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >REGISTRATION STATUS</span></em></td>
+ 			 </tr>
+			 <tr>
+			  <td width="55" height="30"><div align="left"><strong><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >PAPERID</span></strong></div></td>
+			  <td width="619" height="30" align="center"><strong><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >TITLE</span></strong></td>
+			  <td width="122" height="30"><strong><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >NAME</span></strong></td>
+			  <td width="93" height="30"><strong><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Camera Ready (CRC)</span></strong></td>
+  			  <td width="79" height="30"><strong><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Copyright Form</span></strong></td>
+  			  <td width="77" height="30"><strong><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Bank Receipt</span></strong></td>
+			 </tr>
+			 
+			 <tr  >
+			  <td height="47"><div align="left"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >10</span></div></td>
+			  <td><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Inverse Kinematics using Sequential Monte Carlo Methods</span></td>
+			  <td><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Nicolas Courty</span></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="47"><div align="left"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >11</span></div></td>
+			  <td height="47"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Estimation of dense, non-rigid motion fields from a multi-camera array
+			  using a hierarchical mixture model</span></td>
+			  <td height="47"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Roland</span><span style='mso-spacerun:yes'><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" > </span> </span><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Wilson</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >16</span></div></td>
+			  <td height="30"><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Learning to look at humans - what are the parts of a moving body?</span></td>
+			  <td><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Thomas Walther</span><span style='mso-spacerun:yes'><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" > </span></span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >17</span></div></td>
+			  <td height="30"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Continuous Hand Gesture Recognition in the Learned Hierarchical Latent
+			  Variable Space</span></td>
+			  <td height="30"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Wei Liang</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg"></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >18</span></div></td>
+			  <td height="30"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Real-Time 3D Body Pose Tracking from Multiple 2D Images</span></td>
+			  <td height="30"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Chi-Wei Chu</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg"></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg"></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >21</span></div></td>
+			  <td height="30"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Human Action Recognition by CRF Using Robust Contour-Extracted Feaures</span></td>
+			  <td height="30"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Maria Angeles Mendoza</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg"></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >22</span></div></td>
+			  <td height="30"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Bone Glow: An Improved Method for the Assignment of Weights for Mesh Deformation</span></td>
+			  <td height="30"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Richard Wareham</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >23</span></div></td>
+			  <td height="30"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Analysis of human motion, based on the reduction of multidimensional
+			  captured data– Application to hand gesture compression, segmentation and synthesis</span></td>
+			  <td height="30"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Sylvie Gibet</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >24</span></div></td>
+			  <td height="30"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Exploiting Structural Hierarchy in Articulated Objects towards Robust
+			  Motion Capture</span></td>
+			  <td height="30"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Cristian Canton-Ferrer</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >25</span></div></td>
+			  <td height="30"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Estimating Human Skeleton Parameters and Configuration in Real-time from
+			  Markered Optical Motion Caputre</span></td>
+			  <td height="30"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Jonathan Cameron</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >26</span></div></td>
+			  <td height="30"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Dealing with Self-occlusion in Region Based Motion Capture by Means of
+			  Internal Regions</span></td>
+			  <td height="30"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Christian Schmaltz</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg"></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >27</span></div></td>
+			  <td height="30"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Model-Based Analysis and Synthesis of Time-Varying Mesh</span></td>
+			  <td height="30"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Takashi Maeda</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg"></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg"></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >28</span></div></td>
+			  <td height="30"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Mesh Vertex Pose and Position Interpolation using Geometric Algebra</span></td>
+			  <td height="30"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Richard Wareham</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >30</span></div></td>
+			  <td height="30"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >An audiovisual talking head for augmented speech generation: Models and
+			  animations based on a real speaker’s articulatory data</span></td>
+			  <td height="30"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Pierre Badin</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >31</span></div></td>
+			  <td height="30"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Towards Efficiency in Cloth Simulation</span></td>
+			  <td height="30"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Fernando Birra</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >32</span></div></td>
+			  <td height="30"><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >2D Articulated Body Tracking with self-occultations handling</span></td>
+			  <td height="30"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Eric Para</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >33</span></div></td>
+			  <td height="30"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >A Two-Step Approach For Detecting Individuals Within Dense Crowds</span></td>
+			  <td height="30"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Chern-Horng Sim</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >35</span></div></td>
+			  <td><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >3D Modeling for Deformable
+			  Objects</span><span style='mso-spacerun:yes'><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >  </span></span></td>
+			  <td height="30"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Yi Song</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >36</span></div></td>
+			  <td><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Active-Vision
+			  System Reconfiguration for Form Recognition in the Presence of Dynamic
+			  Obstacles</span><span style='mso-spacerun:yes'><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" > </span></span></td>
+			  <td height="30"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Matthew Mackay</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >37</span></div></td>
+			  <td height="30"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >View-invariant human action detection using component-wise HMM of body
+			  parts</span></td>
+			  <td height="30"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Bhaskar Chakraborty</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >38</span></div></td>
+			  <td height="30"><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >A Generative Model for Motion Synthesis And Blending Using Probability
+			  Density Estimation</span></td>
+			  <td height="30"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Dumebi</span><span style='mso-spacerun:yes'><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" > </span> </span><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Okwechime</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg"></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >39</span></div></td>
+			  <td height="30"><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Gestural Interaction Using Feature Classification</span></td>
+			  <td height="30"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Cornelius Malerczyk</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >40</span></div></td>
+			  <td height="30"><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Predicting Missing Markers to Drive Real-Time Centre of Rotation
+			  Estimation</span></td>
+			  <td height="30"><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Andreas Aristidou</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >41</span></div></td>
+			  <td height="30"><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Accurate Human Motion Capture Using an Ergonomics Based Anthropometric
+			  Human Model</span></td>
+			  <td height="30"><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Jan Bandouch</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >42</span></div></td>
+			  <td height="30"><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >A Deformable Surface Model with Volume Preserving Springs</span></td>
+			  <td height="30"><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Sylvester Arnab</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg"></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >43</span></div></td>
+			  <td height="30"><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Temporal Nearest End-Effectors for Real-Time Full-Body Human Actions
+			  Recognition</span></td>
+			  <td height="30"><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Oscar Mena</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >44</span></div></td>
+			  <td height="30"><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Fusing Edge Cues to Cope Chroma Camouflage Problems in Segmentation</span></td>
+			  <td height="30"><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Ivan Huerta Casado</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >45</span></div></td>
+			  <td height="30"><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Body-part templates for recovery of 2D human poses under occlusion</span></td>
+			  <td height="30"><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Ronald Poppe</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >46</span></div></td>
+			  <td height="30"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Autonomous Virtual Agents for Performance Evaluation of Tracking
+			  Algorithms</span></td>
+			  <td height="30"><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Pau Baiget</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg"></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >47</span></div></td>
+			  <td height="30"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >A Manipulable Vision-Based 3D Input Device for Space Curves</span></td>
+			  <td height="30"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Alessandro Giusti</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="22"><div align="left"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >49</span></div></td>
+			  <td height="30"><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >A Comparative Study on using Zernike Velocity Moments and Hidden Markov
+			  Models for Hand Gesture Recognition</span></td>
+			  <td height="30"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Moaath Al-Rajab</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >50</span></div></td>
+			  <td height="30"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Deformable Volumetric Simplex Meshes</span></td>
+			  <td height="30"><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Luis Gerardo de la Fraga</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >54</span></div></td>
+			  <td height="30"><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Analytical Simulation of B-Spline Surfaces Deformation</span></td>
+			  <td height="30"><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >González Hidalgo Manuel</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >56</span></div></td>
+			  <td height="30"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Appearance-based tracking and face identification in video sequences</span></td>
+			  <td height="30"><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Luis Baumela</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg"></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >57</span></div></td>
+			  <td height="30"><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Interactive Constrained Deformations of NURBS Surfaces: N-SCODEF</span></td>
+			  <td height="30"><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >González Hidalgo Manuel</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >58</span></div></td>
+			  <td height="30"><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >A 3D shape descriptor for human pose recovery</span></td>
+			  <td height="30"><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Laetitia Gond</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >60</span></div></td>
+			  <td height="30"><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Fast Detection and Modeling of Human-Body Parts from Monocular Video</span></td>
+			  <td height="30"><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Weilun Lao</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >62</span></div></td>
+			  <td height="30"><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Kinetic Pseudo-Energy History for Human Dynamic Gestures Recognition</span></td>
+			  <td height="30"><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Luis Unzueta</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >65</span></div></td>
+			  <td height="30"><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >SUCCESSIVE APPROXIMATIONS - BASED ALGORITHM FOR INDEPENDENT COMPONENT
+			  ANALYSIS</span></td>
+			  <td height="30"><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Constantin Doru</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >66</span></div></td>
+			  <td height="30"><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Adjustment of Rigs to Extracted Skeletons</span></td>
+			  <td height="30"><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Jorge E. Ramírez</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >70</span></div></td>
+			  <td height="30"><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Real-time recognition of human gestures for 3D interaction&nbsp;</span></td>
+			  <td height="30"><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Antoni Jaume-i-Capó</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg"></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr  >
+			  <td height="30"><div align="left"><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >74</span></div></td>
+			  <td height="30"><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Effective emotional classification combining of facial classifiers and
+			  user assessment</span></td>
+			  <td height="30"><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Isabelle Hupont</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 <tr>
+			  <td height="30"><div align="left"><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >75</span></div></td>
+			  <td height="30"><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Online and Offline Fingerprint Template Update Using Minutiae: an
+			  Experimental Comparison</span></td>
+			  <td height="30"><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Gian Luca Marcialis</span></td>
+			  <td height="47" align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg"></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			  <td align="center"><img onmousedown="imd(this)" src="images/yes_p.jpg" /></td>
+			 </tr>
+			 
+			</table>
+</td>
+</tr></table>
+	  
+	  
+	  <!-- InstanceEndEditable -->
+</td>
+  </tr>
+  <tr>
+    <td align="center" valign="baseline" nowrap="nowrap" bgcolor="#993300"><p align="center"><span class="Estilo3"><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >e-mail:</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:amdo@uib.es" class="mail"><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >amdo@uib.es</span>

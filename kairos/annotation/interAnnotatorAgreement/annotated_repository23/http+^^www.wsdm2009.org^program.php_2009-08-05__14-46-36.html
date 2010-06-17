@@ -1,0 +1,652 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en"><head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/12/annotation/annotated_repository/http+^^www.wsdm2009.org^program.php_2009-08-05__14-46-36.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/12/annotation/annotated_repository/http+^^www.wsdm2009.org^program.php_2009-08-05__14-46-36.yaml created on Thu Aug 13 13:59:24 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+
+<title>WSDM 2009 - Second ACM International Conference on Web Search and Data Mining</title><link href="css/estilos.css" type="text/css" rel="stylesheet" />
+<style type="text/css">
+<!--
+.style1 {color: #000000}
+.style2 {color: #033163}
+-->
+</style>
+</head>
+<!--[if lt IE 7.]>
+<script defer type="text/javascript" src="pngfix.js"></script>
+<![endif]-->
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<!-- logo -->
+<table width="100%" border="0" align="center" class="encabezado">
+<tbody><tr>
+  <td class="encabezado" align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.php"><img onmousedown="imd(this)" style="border: 0px solid ; width: 298px; height: 112px; float: left;" alt="WSDM 2009 logo"
+  src="images/newlogo2.png" hspace="0" vspace="0" /></span></td>
+  
+  <td class="encabezado" align="center"><p><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Second ACM International Conference</span><br />
+    <span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >on Web Search and Data Mining</span><br />
+      <span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >WSDM 2009</span> <br />
+      <span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Barcelona, Spain - February 9-12, 2009</span> </p>    </td>
+  
+  <td class="encabezado" align="center"><h2><span class="style1"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Sponsored by:</span></span><br />
+      <img onmousedown="imd(this)" src="/images/acm.png" alt="acm_logo" width="206" height="72" /></h2></td>
+</tr>
+</tbody></table>
+
+<!-- menu -->
+<table width="100%" align="center" class="menu">
+<tbody><tr>
+<td valign="middle" class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="callforpapers.php"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span></td>
+<td valign="middle" class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings.php"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></span></td>
+<!--
+<td class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="keynote_speakers.php">Keynote Speakers</span></td>
+-->
+<td valign="middle" class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="important_dates.php"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></td>
+<td valign="middle" class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="program.php"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span></td>
+<td valign="middle" class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="submissions.php"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Submissions</span></span></td>
+<!--
+<td class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="registration.php">Registration</span></td>
+-->
+<td valign="middle" class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="organization.php"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Organization</span></span><br />
+  <span class="style2"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >&amp;</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="pc.php"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Prog. Committee</span></span></td>
+<td valign="middle" class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="/venue.php"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span><br />
+  <span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >&amp; Venue</span></span></td>
+<td valign="middle" class="menu style2"><span onclick="return false" style="text-decoration:underline; color:blue" href="late_results.php"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Late Breaking-Results</span> </span></td>
+<!--<td class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="program.php">Program</span></td>
+<td class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="news.php">News</span></td>-->
+</tr>
+</tbody></table>
+<br />
+
+<!-- content -->
+<table class="contenido" align="center" width="98%">
+<tbody><tr><td>
+
+<td>
+
+<h1 align=center><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >WSDM '09  Preliminary Program</span></h1>
+<p align=center><span onclick="return false" style="text-decoration:underline; color:blue" href="/brochure.pdf" style="font-weight: bold"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >(Download the full PDF brochure)</span> </span></p>
+<h1 align=center><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Monday, Feb 9</span></h1>
+<b><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >9:00</span></b><b> <span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Workshops - Two parallel sessions</span></b>
+<span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >(see</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="esair2009_program.php"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >ESAIR 2009 program</span></span> <span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >and</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="wscd2009_program.php"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >WSCD workshop program</span></span><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >)</span>
+<h1 align=center><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday, Feb 10</span></h1>
+<p><b><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >8:30</span></b> <b><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Registration starts</span></b><br />
+<b><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >9:00</span></b> <b><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Welcome and Introduction</span></b><br />  
+    <b><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >9:30</span></b> <b><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span><br />
+    <br />
+    </b><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Jeff
+  Dean, Google, USA  (</span><span onclick="return false" style="text-decoration:underline; color:blue" href="dean_abs_bio.php"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >abstract and short bio</span></span><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+  <span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Challenges in Building Large-Scale Information Retrieval Systems</span><br />
+  <b><br />
+    <span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >10:30</span></b>
+  <b><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span></b><BR>
+  
+  <b><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >11:00</span></b> <b><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Web Search</span></b>
+  <BR>
+</p>
+<UL>
+	<LI><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Diversifying
+	Search Results</span><br> <span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Rakesh Agrawal, Sreenivas
+	Gollapudi, Alan Halverson and Samuel Ieong</span>
+	<LI><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Discovering
+	and Using Groups to Improve Personalized Search</span> 	              
+	<br><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Jaime Teevan, Meredith Ringel Morris and Steve Bush</span>
+	<LI><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Adaptive
+	Subjective Triggers for Opinionated Document Retrieval</span><br>		 <span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Kazuhiro
+	Seki and Kuniaki Uehara</span>
+</UL>
+<UL>
+	<LI><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Query
+	by Document</span><br>	 						       <span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Yin Yang, Nilesh Bansal, Wisam Dakka,
+	Panagiotis Ipeirotis, Nick Koudas and Dimitris Papadias</span> 
+	
+	<LI><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Wikipedia
+	Pages as Entry Points for Book Search</span><br>			             <span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Marijn Koolen,
+	Gabriella Kazai and Nick Craswell</span>
+</UL>
+
+<b><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >13:30</span></b> <b><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></b>
+<BR>
+
+<b><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >15:00</span></b> <b><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Classification
+&amp; Clustering</span></b>
+<BR>
+
+<UL>
+	<LI><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Clustering
+	the Tagged Web</span>
+      <br><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Daniel
+Ramage, Paul Heymann, Christopher Manning and Hector Garcia-Molina</span>
+</UL>
+<UL>
+	<LI><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Classifying
+	Tags using Open Content Resources</span><br>	 		                    <span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Simon
+	Overell, Borkur Sigurbjornsson and Roelof van Zwol</span>
+	<LI><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Cross-Language Query Classification using Web Search for Exogenous Knowledge</span>
+	<br><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Xuerui Wang, Andrei Broder, Evgeniy Gabrilovich, Vanja Josifovski
+	and Bo Pang</span>
+	<LI><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Improving
+	Music Genre Classification Using Collaborative Tagging Data</span><br>	   <span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Ling
+	Chen, Phillip Wright and Wolfgang Nejdl</span>
+	<LI><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Information Arbitrage Across Multi-lingual Wikipedia</span>
+      <br><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Eytan Adar, Michael Skinner and Daniel Weld</span>
+</UL><BR>
+
+<b><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >17:30</span></b> <b><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></b>
+<BR>
+
+<b><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >18:00</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="late_results_papers.php#sess1"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Late Breaking Results I</span></span></b>
+<BR>
+
+<h1 align=center><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, Feb 11</span></h1>
+
+<p><b><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >9:00</span></b><b>
+  <span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span></b><br>
+  <br />
+  <span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Gerhard
+  Weikum, MPG, Germany  (</span><span onclick="return false" style="text-decoration:underline; color:blue" href="weikum_abs_bio.php"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >abstract and short bio</span></span><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >) (</span><span onclick="return false" style="text-decoration:underline; color:blue" href="weikum-wsdm2009.pdf"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >SLIDES</span></span><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >)</span><br>
+  <span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Harvesting,
+  Searching, and Ranking Knowledge from the Web</span>
+  <BR>
+  
+          <b><br />
+          <span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >10:00</span></b> <b><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Web Mining I</span></b>
+          <BR>
+  
+</p>
+<UL>
+	<LI><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Measuring
+	the Similarity between Implicit Semantic Relations using Web Search
+	Engines.</span><br>							              <span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Danushka Bollegala, Yutaka Matsuo and
+	Mitsuru Ishizuka</span>
+	<LI><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >A
+	Model for Fast Web Mining Prototyping</span><br> 
+	
+
+      <span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Alvaro
+Pereira, Ricardo Baeza-Yates, Nivio Ziviani and Jesus Bisbal</span>
+</UL><BR>
+
+<b><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >11:00</span></b><b>
+<span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></b>
+<BR>
+
+<b><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >11:30</span></b><b> <span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >User
+Interaction</span></b>
+<BR>
+
+<UL>
+	<LI><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Efficient
+	Multiple-Click Models in Web Search</span><br>	 		                   <span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Fan Guo,
+	Chao Liu and Yi-Min Wang</span>
+	<LI><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Characterizing
+	the Influence of Domain Expertise on Web Search Behavior</span><br>          
+	<span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Ryen White, Susan Dumais and Jaime Teevan</span>
+	<LI><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Quality-Aware
+	Collaborative Question Answering: Methods and Evaluation</span><br>	  <span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Maggy
+	Anastasia Suryanto, Ee-Peng Lim, Aixin Sun and Roger Chiang</span> 
+	
+	<LI><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >A New Visual Search Interface for Web Browsing</span>
+	<br><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Songhua Xu, Tao Jin and Francis Lau</span>
+</UL><BR>
+
+<b><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >13:30</span></b><b>
+<span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></b>
+<BR>
+
+<b><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >15:00</span></b><b>
+<span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Web Mining II</span></b>
+<BR>
+
+<UL>
+	<LI><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Mining
+	User Web Search Activity with Layered Bayesian Networks or How to
+	Capture a Click in its Context</span><br>					              <span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Benjamin
+	Piwowarski, Georges Dupret and Rosie Jones</span>
+	<LI><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Generating
+	Labels from Clicks.</span><br> <span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Rakesh Agrawal, Alan Halverson, Krishnaram
+	Kenthapadi, Nina Mishra and Panayiotis Tsaparas</span>
+</UL>
+<UL>
+	<LI><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Aggregation
+	of News Content Into Web Results</span><br> 				
+
+      <span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Fernando
+Diaz</span>
+</UL><UL>
+	<LI><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Mining
+	Common Topics from Multiple Asynchronous Text Streams</span><br>		 <span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Xiang Wang,
+	Kai Zhang, Xiaoming Jin and Dou Shen</span>
+	<LI><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Predicting
+	Readability of Short Web Summaries</span><br><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Tapas Kanungo and David Orr</span>
+</UL>
+<BR>
+
+<b><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >17:30</span></b><b>
+<span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></b>
+<BR>
+
+<b><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >18:00</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="late_results_papers.php#sess2"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Late Breaking Results II</span></span></b>
+<BR>
+
+<b><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >20:00</span></b><b>
+<span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Banquet</span></b>
+<BR>
+
+
+<h1 align=center><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, Feb 12</span></h1>
+<b><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >9:00</span></b><b> <span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Web Ranking</span></b>
+<BR>
+
+<UL>
+	<LI><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Effective
+	Latent Space Graph-based Re-ranking Model with Global Consistency</span><br>   
+	<span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Hongbo Deng, Michael Lyu and Irwin King</span>
+	<LI><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Top-</span><I><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >k</span></I>
+	<span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Aggregation Using Intersection of Ranked Inputs</span><br> 		                 
+	<span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Ravi Kumar, Kunal Punera, Torsten Suel and Sergei Vassilvitskii</span>
+	<LI><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Is
+	Wikipedia Link Structure Different?</span><br> 				                   <span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Jaap
+	Kamps and Marijn Koolen</span>
+	<LI><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Less
+	is More: Sampling the Neighborhood Graph Makes SALSA Better and
+	Faster</span><br>                <span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Marc Najork, Sreenivas Gollapudi and Rina
+	Panigrahy</span>
+</UL>
+<BR>
+
+<b><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >11:00</span></b><b> <span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></b>
+<BR>
+
+<b><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >11:30</span></b><b> <span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Graph Mining &amp;
+Web Content</span></b>
+<BR>
+
+<UL>
+	<LI><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Camera
+	Brand Congruence in the Flickr Social Graph</span><br> 		                 <span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Adish
+	Singla and Ingmar Weber.</span>
+	<LI><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Finding
+	Text Reuse on the Web</span><br>	 			                          <span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Michael
+	Bendersky and Bruce Croft</span>
+	<LI><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Speeding
+	up Algorithms on Compressed Web Graphs</span><br> 		          <span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Chinmay Karande,
+	Kumar Chellapilla and Reid Andersen</span>
+	<LI><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >The
+	Web Changes Everything: Understanding the Dynamics of Web Content</span>	
+	<br><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Eytan Adar, Jaime Teevan, Susan Dumais and Jonathan Elsas</span>
+</UL>
+<BR>
+
+<b><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >13:30</span></b><b>
+<span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></b>
+<BR>
+
+<BR>
+
+<b><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >15:00</span></b><b>
+<span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Joint Invited Talk with WAW</span></b>
+	<br>
+	<br />
+	<span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Ravi
+Kumar, Yahoo!, USA  (</span><span onclick="return false" style="text-decoration:underline; color:blue" href="kumar_abs_bio.php"><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >abstract and short bio</span></span><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+	<span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Online
+Social Networks: Modeling and Mining</span>
+<BR>
+
+<b><br />
+<span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >16:00</span></b><b>
+<span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >WAW Starts</span>

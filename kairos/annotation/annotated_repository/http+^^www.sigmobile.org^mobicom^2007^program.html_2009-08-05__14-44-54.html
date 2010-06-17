@@ -1,0 +1,1329 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.sigmobile.org^mobicom^2007^program.html_2009-08-05__14-44-54.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.sigmobile.org^mobicom^2007^program.html_2009-08-05__14-44-54.yaml created on Wed Aug 05 17:32:27 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<title>MobiCom 2007: The Thirteenth Annual International Conference on Mobile Computing and Networking</title>
+<meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1">
+<meta name="description" content="ACM MobiCom 2007,
+the Thirteenth Annual International Conference on
+Mobile Computing and Networking, is the thirteenth in a series of annual
+conferences sponsored by ACM SIGMOBILE dedicated to addressing the
+challenges in the areas of mobile computing and wireless and mobile
+networking.  The MobiCom conference series serves as the premier
+international forum addressing networks, systems, algorithms, and
+applications that support the symbiosis of mobile computers and
+wireless networks.  MobiCom is a highly selective conference focusing
+on all issues in mobile computing and wireless and mobile networking
+at the link layer and above. MobiCom 2007 will be held in
+September 2007 in Los Angeles, California.">
+<meta name="keywords" content="MobiCom, SIGMOBILE, ACM, mobile, computing,
+networking, mobile computing, mobile networking, wireless, communications,
+conference, Los Angeles, applications, middleware, distributed systems,
+ad hoc, sensor, multimedia">
+<link rel="SHORTCUT ICON" href="favicon.ico">
+<style type="text/css" media="all">@import "style_2006.css";</style>
+<script type="text/javascript" src="js_2006.js"></script>
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)" bgcolor="#CCCCCC" leftmargin="0" topmargin="0" marginwidth="0" marginheight="0"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<center>
+
+  <table width="740" border="0" cellspacing="0" cellpadding="0">
+  <tr>
+      <td><img onmousedown="imd(this)" src="images/corner_tl.gif"></td>
+	  <td bgcolor="#FFFFFF"></td>
+	  <td><img onmousedown="imd(this)" src="images/corner_tr.gif"></td>
+  </tr>
+  <tr>
+  	  <td bgcolor="#FFFFFF" width="19"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+      <td bgcolor="#FFFFFF"><center>
+
+        <table width="700" border="0" cellspacing="0" cellpadding="0">
+    <tr>
+              <td><img onmousedown="imd(this)" src="images/banner.jpg" width="700" height="200" border="0" "></td>
+    </tr>
+  </table>
+  <div id="menu">
+  <table width="700" border="0" cellspacing="0" cellpadding="0">
+    <tr> 
+      <td class="topLinksTopL" id="l1"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html"
+	    onMouseOver="roll('l1', 'topLinksTopDL');"
+		onMouseOut="roll('l1', 'topLinksTopL');"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Home&nbsp;</span></span></td>
+
+      <td class="topLinksTop" id="l2"> <span onclick="return false" style="text-decoration:underline; color:blue" href="about.html"
+		onMouseOver="roll('l2', 'topLinksTopD');"
+		onMouseOut="roll('l2', 'topLinksTop');"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;About MobiCom&nbsp;</span></span></td>
+      <td class="topLinksTop" id="l3"><span onclick="return false" style="text-decoration:underline; color:blue" href="cfp.html"
+		onMouseOver="roll('l3', 'topLinksTopD');"
+		onMouseOut="roll('l3', 'topLinksTop');"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Call for Papers&nbsp;</span></span></td>
+      <td class="topLinksTop" id="l4"><span onclick="return false" style="text-decoration:underline; color:blue" href="committees.html"
+		onMouseOver="roll('l4', 'topLinksTopD');"
+		onMouseOut="roll('l4', 'topLinksTop');"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Committees&nbsp;</span></span></td>
+      <td class="topLinksTop" id="l5"><span onclick="return false" style="text-decoration:underline; color:blue" href="registration.html"
+		onMouseOver="roll('l5', 'topLinksTopD');"
+		onMouseOut="roll('l5', 'topLinksTop');"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Registration&nbsp;</span></span> </td>
+      <td class="topLinksTop" id="l6"><span onclick="return false" style="text-decoration:underline; color:blue" href="travel.html"
+		onMouseOver="roll('l6', 'topLinksTopD');"
+		onMouseOut="roll('l6', 'topLinksTop');"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Hotel &amp; Travel&nbsp;</span></span></td>
+
+                <td class="topLinksTopD" id="l7"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Advance Program&nbsp;</span></td>
+    </tr>
+	</table>
+	<div id="menuBG">
+	<table width="700" border="0" cellspacing="0" cellpadding="0">
+	<tr>
+	  <td class="topLinksBotL"  id="l8"> 
+           <span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials.html"
+		onMouseOver="roll('l8', 'topLinksBotDL');"
+		onMouseOut="roll('l8', 'topLinksBotL');"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;Tutorials&nbsp;</span></span></td>
+
+      <td class="topLinksBot" id="l9"><span onclick="return false" style="text-decoration:underline; color:blue" href="panel.html"
+		onMouseOver="roll('l9', 'topLinksBotD');"
+		onMouseOut="roll('l9', 'topLinksBot');"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Panel&nbsp;</span></span></td>
+      <td class="topLinksBot" id="l10"><span onclick="return false" style="text-decoration:underline; color:blue" href="demos.html"
+		onMouseOver="roll('l10', 'topLinksBotD');"
+		onMouseOut="roll('l10', 'topLinksBot');"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Demos &amp; Exhibits&nbsp;</span></span></td>
+      <td class="topLinksBot" id="l11"><span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.html"
+		onMouseOver="roll('l11', 'topLinksBotD');"
+		onMouseOut="roll('l11', 'topLinksBot');"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Workshops&nbsp;</span></span></td>
+      <td class="topLinksBot" id="l12"><span onclick="return false" style="text-decoration:underline; color:blue" href="supporters.html"
+		onMouseOver="roll('l12', 'topLinksBotD');"
+		onMouseOut="roll('l12', 'topLinksBot');"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Corporate Supporters&nbsp;</span></span></td>
+      <td class="topLinksBot" id="l13"><span onclick="return false" style="text-decoration:underline; color:blue" href="talks.html"
+		onMouseOver="roll('l13', 'topLinksBotD');"
+		onMouseOut="roll('l13', 'topLinksBot');"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Invited Talks&nbsp;</span></span></td>
+
+                <td class="topLinksBotR" id="l14"><span onclick="return false" style="text-decoration:underline; color:blue" href="src.html"
+		onMouseOver="roll('l14', 'topLinksBotDR');"
+		onMouseOut="roll('l14', 'topLinksBotR');"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Posters &amp; SRC&nbsp;&nbsp;</span></span></td>
+    </tr>
+	</table>
+	</div>
+	</div>
+	  <table width="700" border="0" cellspacing="0" cellpadding="0">
+          <tr>
+
+		    <td><p class="pageHeading"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p></td>
+            <td width="1"><p class="pageHeadingText"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Advance&nbsp;Program&nbsp;</span></p></td>
+		    <td><p class="pageHeading"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p></td>
+          </tr>
+		  <tr>
+		    <td height="15" colspan="3"></td>
+		  </tr>
+        </table>
+
+  <table width="700" border="0" cellspacing="0" cellpadding="0">
+            <tr> 
+              <td width="700" class="paragraph"> <table width="700" border="0" cellspacing="0" cellpadding="0">
+                  <tr> 
+                    <td width="7" class="paragraphTitleUL"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                    <td width="9"><img onmousedown="imd(this)" src="images/title_slash_4.jpg"></td>
+                    <td width="1" class="paragraphTitle"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Schedule&#8209;at&#8209;a&#8209;Glance&nbsp;</span><em><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >(click&nbsp;on&nbsp;items&nbsp;below&nbsp;for&nbsp;details)</span></em><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+
+                    <td class="paragraphTitleUL"><img onmousedown="imd(this)" src="images/title_slash_2.jpg"></td>
+                    <td width="17"><span onclick="return false" style="text-decoration:underline; color:blue" href="javascript:toggleLayer('pro1', 'proa1');"><img onmousedown="imd(this)" src="images/title_arrow.jpg"  border="0" name="proa1"></span></td>
+                  </tr>
+                </table>
+                <div id="pro1"> 
+                  <!--<p><img onmousedown="imd(this)" src="images/program_schedule.jpg" width="722" height="528" border="0" "></div></p> -->
+                  <p><img onmousedown="imd(this)" src="images/prog_sched.jpg" width="722" height="526" border="0" "></div></p> 
+                <table width="700" border="0" cellspacing="0" cellpadding="0">
+                  <tr> 
+                    <td width="7" class="paragraphTitleUL"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                    <td width="9"><img onmousedown="imd(this)" src="images/title_slash_4.jpg"></td>
+
+                    <td width="1" class="paragraphTitle"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Sunday,&nbsp;September&nbsp;9&nbsp;</span></td>
+                    <td class="paragraphTitleUL"><img onmousedown="imd(this)" src="images/title_slash_2.jpg"></td>
+                    <td width="17"><span onclick="return false" style="text-decoration:underline; color:blue" href="javascript:toggleLayer('pro2', 'proa2');"><img onmousedown="imd(this)" src="images/title_arrow.jpg"  border="0" name="proa2"></span></td>
+                  </tr>
+                </table>
+                <div id="pro2"> 
+				<br>
+                  <table width="700" border="0" cellspacing="0" cellpadding="0">
+
+                    <tr> 
+                      <td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <p><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >8:00AM - 5:00PM</span></td>
+                      <td class="programDesc"><p><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Registration Open</span></p>
+                        </td>
+                    </tr>
+                    <tr>
+                      <td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td>
+
+                    </tr>
+                    <tr> 
+                      <td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <p><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >8:30AM - 12:30PM</span></td>
+                      <td class="programDesc"><p><span onclick="return false" style="text-decoration:underline; color:blue" name="t1"></span><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial 1:</span> 
+                          <span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials.html#tut1"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Security and Cooperation in Wireless Networks</span></span></p>
+                        <ul>
+                          <li><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Jean-Pierre Hubaux and Panos Papadimitratos, EPFL, Switzerland</span></li>
+
+                        </ul></td>
+                    </tr>
+                    <tr>
+                      <td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td>
+                    </tr>
+                    <tr>
+                      <td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >8:30PM - 12:30PM</span></td>
+
+                      <td class="programDesc"> <p><span onclick="return false" style="text-decoration:underline; color:blue" name="t2"></span><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial 2:</span> 
+                          <span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials.html#tut2"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Cognitive Networks</span>
+</span> 
+                        </p>
+                        <ul>
+				<li> <span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Luiz A. DaSilva and Allen B. MacKenzie, Virginia Tech, USA</span> 
+				</li>
+                        </ul></td>
+                    </tr>
+                    <tr>
+
+                      <td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td>
+                    </tr>
+                    <tr>
+                      <td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >1:30PM - 5:30PM</span></td>
+                      <td class="programDesc"> <p><span onclick="return false" style="text-decoration:underline; color:blue" name="t3"></span><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial 3:</span> 
+                          <span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials.html#tut3">
+		<span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Vehicular Ad Hoc Networks</span>	
+			  </span></p>
+
+                        <ul>
+
+
+				<li> <span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Hannes Hartenstein, University of Karlsruhe, Germany</span>  <br> <span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Ken Laberteaux, Toyota Technical Center Ann Arbor, USA</span></li>
+                        </ul></td>
+                    </tr>
+                    <tr>
+
+                      <td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td>
+                    </tr>
+                    <tr>
+                      <td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >1:30PM - 5:30PM</span></td>
+                      <td class="programDesc"> <p><span onclick="return false" style="text-decoration:underline; color:blue" name="t4"></span><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial 4:</span> 
+                          <span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials.html#tut4">
+				  <span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Protecting Location Privacy in Mobile Computing Systems: Architecture and Algorithms</span>
+			  
+			  </span></p>
+
+                        <ul>
+
+
+                          <li> <span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Ling Liu, Georgia Tech, USA</span></li>
+                        </ul></td>
+                    </tr>
+                  </table>
+				  <p></div></p>
+                <table width="700" border="0" cellspacing="0" cellpadding="0">
+                  <tr> 
+                    <td width="7" class="paragraphTitleUL"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+
+                    <td width="9"><img onmousedown="imd(this)" src="images/title_slash_4.jpg"></td>
+                    <td width="1" class="paragraphTitle"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Monday,&nbsp;September&nbsp;10&nbsp;</span></td>
+                    <td class="paragraphTitleUL"><img onmousedown="imd(this)" src="images/title_slash_2.jpg"></td>
+                    <td width="17"><span onclick="return false" style="text-decoration:underline; color:blue" href="javascript:toggleLayer('pro3', 'proa3');"><img onmousedown="imd(this)" src="images/title_arrow.jpg"  border="0" name="proa3"></span></td>
+                  </tr>
+                </table>
+                <div id="pro3">
+
+								<br>
+                  <table width="700" border="0" cellspacing="0" cellpadding="0">
+                    <tr> 
+                      <td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <p><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >8:00AM - 5:00PM</span></td>
+                      <td class="programDesc"><p><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Registration Open</span></p>
+                        </td>
+                    </tr>
+
+                    <tr>
+                      <td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td>
+                    </tr>
+                    <tr> 
+                      <td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <p><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >All Day</span></td>
+                      <td class="programDesc"><p><span onclick="return false" style="text-decoration:underline; color:blue" name="w1"></span><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Concurrent Workshops 
+                          (check individual workshop schedules)</span></p>
+                        <ul>
+
+ <!--                         <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://crawdad.cs.dartmouth.edu/workshop2007" target="_blank">CRAWDAD</span></li>
+                        </ul>
+						<ul>
+                          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.iit.cnr.it/%7Ediwans06/" target="_blank">DIWANS</span></li>
+                                                  </ul>
+						<ul>
+                          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.mobishare.org/" target="_blank">MobiShare</span></li>
+
+                                                  </ul>
+						<ul>
+                          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://wuwnet.engr.uconn.edu/" target="_blank">WUWNET</span></li>
+	  </ul></td> -->
+                    </tr>
+<!--	                <tr>
+                      <td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td>
+                    </tr>
+
+                    <tr>
+                      <td>&nbsp;</td>
+                      <td class="programTime">6:00PM - 8:00PM</td>
+                      <td class="programDesc"><p><span onclick="return false" style="text-decoration:underline; color:blue" name="reception"></span>Welcome 
+                          Reception- Marriot Marina del Rey Hotel</p>
+                        <ul>
+                          <li>Come enjoy refreshments, visit with old friends, 
+                            and meet new ones, before the main conference starts 
+                            Tuesday morning</li>
+                        </ul></td>
+
+		</tr>-->
+	    </table>
+                  <p></div></p>
+                <table width="700" border="0" cellspacing="0" cellpadding="0">
+                  <tr> 
+                    <td width="7" class="paragraphTitleUL"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                    <td width="9"><img onmousedown="imd(this)" src="images/title_slash_4.jpg"></td>
+                    <td width="1" class="paragraphTitle"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Tuesday,&nbsp;September&nbsp;11&nbsp;</span></td>
+
+                    <td class="paragraphTitleUL"><img onmousedown="imd(this)" src="images/title_slash_2.jpg"></td>
+                    <td width="17"><span onclick="return false" style="text-decoration:underline; color:blue" href="javascript:toggleLayer('pro4', 'proa4');"><img onmousedown="imd(this)" src="images/title_arrow.jpg"  border="0" name="proa4"></span></td>
+                  </tr>
+                </table>
+                <div id="pro4"> 
+				<br>
+                  <table width="700" border="0" cellspacing="0" cellpadding="0">
+  <!--                  <tr> 
+                      <td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <p>7:00AM - 8:30PM</td>
+
+                      <td class="programDesc"><p>Continental Breakfast</p>
+                        </td>
+		</tr> -->
+                    <tr>
+                      <td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td>
+                    </tr>
+                    <tr> 
+                      <td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <p><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >8:00AM - 5:00PM</span></td>
+
+                      <td class="programDesc"><p><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Registration Open</span></p>
+                        </td>
+                    </tr>
+                    <tr>
+                      <td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td>
+                    </tr>
+                    <tr> 
+					<td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> 
+                        <p><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >8:30AM - 9:00AM</span></td>
+
+                      <td class="programDesc"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Conference Opening Session</span></td>
+                    </tr><tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td><td width="155" class="programTime">
+                    <span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >9:00AM - 10:00AM</span></td>
+                      <td class="programDesc"> <p><span onclick="return false" style="text-decoration:underline; color:blue" name="k"></span><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Address</span> <br><i><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >(Session Chair: Evangelos Kranakis, Carleton University)</span></i></p>
+                        <ul>
+                          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://geometry.stanford.edu/member/guibas/"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Dr. Leonidas J. Guibas</span></span><br>
+
+			  <b><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >The Geometry of Mobility</span></b><br> </li>
+
+                        </ul></td>
+                    </tr><tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td><td width="155" class="programTime">
+                    <span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >10:00AM - 10:30AM</span></td>
+                      <td class="programDesc"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td>
+
+			      </tr>
+			      <tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td><td width="155" class="programTime">
+                    <span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >10:30AM - 12:00noon</span></td>
+                      <td class="programDesc"> <p><span onclick="return false" style="text-decoration:underline; color:blue" name="s1"></span><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Technical Session: Medium Access Control</span> <BR>
+                          <em><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >(Session chair: Thyaga Nandagopal - Bell-Labs, Alcatel-Lucent)</span></em></p>
+                        <ul>
+<li><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Scheduling Algorithms for Multi-Carrier Wireless Data Systems</span><BR>
+<I><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Matthew Andrews (Bell Labs, Lucent Technologies, US); Lisa Zhang (Bell Labs, Lucent Technologies, US)</span></I>
+                            
+</li> </ul>
+						<ul>
+<li><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Superimposed Code based Channel Assignment in Multi-Radio Multi-Channel Wireless Mesh Networks</span>
+<BR><I><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Kai Xing (The George Washington University, US); Xiuzhen Cheng (The George Washington Univ, US); Qilian Liang (The University of Texas at Arlington, US); Liran Ma (The George Washington University, US)</span> </I>
+<!--<li>Superimposed Code based Interference-free Channel Assignment Algorithm in Multi-radio Multi-channel Wireless Mesh Networks
+<BR><I>Kai Xing (The George Washington University, US); Xiuzhen Cheng (George Washington Univ, US) </I>-->
+</li> </ul>
+
+<ul> <li>
+<span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Optimal Channel Probing and Transmission Scheduling for Opportunistic Spectrum Access</span>
+<BR><I><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Nicholas Chang (University of Michigan, US); Mingyan Liu (University of Michigan, US)</span> </I>
+                            </li> </ul>
+			
+                        </td>
+			</tr>
+
+
+
+			<tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >12:00noon - 1:30PM</span></td>
+
+                      <td class="programDesc"> <p><span onclick="return false" style="text-decoration:underline; color:blue" name="lunch" id="lunch"></span><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></p>
+			<tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >12:30PM - 1:30PM</span></td>
+
+                      <td class="programDesc"> <p><span onclick="return false" style="text-decoration:underline; color:blue" href="panel2.html"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Panel:Mobile Computing and Systems: Where is the Tofu? A Discussion with                  Programs Directors from Agencies and Industry</span></span></p>
+     <!--                   <p>Athena Award Lecture:</p>
+                        <ul>
+                          <li>Prof. Deborah Estrin<br>
+                            Jon Postel Chair in Computer Networks, Computer Science 
+                            Department, UCLA<br>
+                            Director, Center for Embedded Networked Sensing (CENS)<br>
+
+                            <br>
+                            Wireless Sensing Systems: From ecosystems to human 
+                            systems</li>
+	    </ul>-->
+    </td>
+    </tr>
+     <tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >1:30PM - 3:30PM</span></td>
+                      <td class="programDesc"> <p><span onclick="return false" style="text-decoration:underline; color:blue" name="s2"></span><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Technical Session: Sensor Networks</span>
+<BR>
+                          <em><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >(Session chair: Samir Das - SUNY at Stony Brook)</span></em> </p>
+
+<ul> <li>
+<span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Trade-offs Between Mobility and Density for Coverage in Wireless Sensor Networks</span>
+
+<BR><I><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Wei Wang (National University of Singapore, SG); Vikram Srinivasan (National University of Singapore, SG); Kee Chaing Chua (National
+ University of Singapore, SG)</span> </I>
+
+</li> </ul>
+
+<ul> <li>
+
+<span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Rendered Path: Range-Free Localization in Anisotropic Sensor Networks with Holes</span>
+<BR><I><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Mo Li (Hong Kong University of Science and Techonlogy, HK); Yunhao
+Liu (Hong Kong University of Science and Technology, HK)</span> </I>
+</li> </ul>
+
+<ul> <li>
+
+<span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Designing Localized Algorithms for Barrier Coverage</span>
+<BR><I><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Ai Chen (Ohio State University, US); Santosh Kumar (University of
+ Memphis, US); Ten-Hwang Lai (Ohio State university, US)</span> </I>
+</li> </ul>
+
+<ul> <li>
+
+<span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Reliable Density Estimates for Achieving Coverage and Connectivity in Thin Strips of Finite Length</span>
+<BR><I><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Paul Balister (University of Memphis, US); Amites Sarkar (University
+ of Memphis, US); Bela Bollobas (University of Memphis, US); Santosh Kumar
+ (University of Memphis, US)</span> </I>
+</li> </ul>
+
+</td>
+			</tr> 
+
+			<tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+
+                      <td width="155" class="programTime"> <span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >3:30PM - 4:00PM</span></td>
+                      <td class="programDesc"> <span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break + STUDENT POSTERS AND DEMOS</span> </td>
+		      </tr>
+                        <tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+
+                      <td width="155" class="programTime"> <span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >4:00PM - 5:30PM</span></td>
+                      <td class="programDesc"> <span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >STUDENT POSTERS AND DEMOS</span> </td>
+                      </tr>
+
+		      <tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >5:30PM-6:30PM</span></td>
+                      <td class="programDesc"> <span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Open SIGMOBILE Business Meeting</span></td>
+
+                    </tr>
+                  </table>
+				  <p></div></p>
+                <table width="700" border="0" cellspacing="0" cellpadding="0">
+                  <tr> 
+                    <td width="7" class="paragraphTitleUL"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                    <td width="9"><img onmousedown="imd(this)" src="images/title_slash_4.jpg"></td>
+                    <td width="1" class="paragraphTitle"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Wednesday,&nbsp;September&nbsp;12&nbsp;</span></td>
+
+                    <td class="paragraphTitleUL"><img onmousedown="imd(this)" src="images/title_slash_2.jpg"></td>
+                    <td width="17"><span onclick="return false" style="text-decoration:underline; color:blue" href="javascript:toggleLayer('pro5', 'proa5');"><img onmousedown="imd(this)" src="images/title_arrow.jpg"  border="0" name="proa5"></span></td>
+                  </tr>
+                </table>
+                <div id="pro5"> 
+								<br>
+                  <table width="700" border="0" cellspacing="0" cellpadding="0">
+                    <tr> 
+                      <td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <p><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >7:15AM</span></td>
+
+                      <td class="programDesc"><p><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Breakfast (</span><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.comsoc.org/n2women/"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >N2Women</span></span><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >)</span>    </P><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Organizer: Tracy Camp (Colorado School of Mines)</span> 
+                        </td>
+                    </tr>
+                    <tr>
+                      <td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td>
+	      </tr>
+                    <tr> 
+                      <td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <p><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >8:00AM - 5:00PM</span></td>
+
+                      <td class="programDesc"><p><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Registration Open</span></p>
+                        </td>
+                    </tr>
+                    <tr>
+                      <td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td>
+                    </tr>
+                    <tr> 
+                      <td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"><p><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >8:30AM - 10:30AM</span></td>
+
+                      <td class="programDesc"> <p><span onclick="return false" style="text-decoration:underline; color:blue" name="s3"></span><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Technical Session: Security and Privacy</span><BR>
+                          <em><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >(Session chair: Hamid Sadjadpour - University of California at Santa Cruz)</span></em></p> <ul> <li> </li> </ul> 
+			<ul><li> 
+			<span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >DARWIN: Distributed and Adaptive Reputation mechanism for Wireless ad-hoc Networks</span>
+<BR><I><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Juan Jose Jaramillo (University of Illinois at Urbana-Champaign, US);
+R. Srikant (University of Illinois at Urbana-Champaign, US)</span> </I>
+			</li> </ul> 
+
+			<ul><li>
+			<span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >802.11 User Fingerprinting</span>
+<BR><I><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Jeffrey Pang (Carnegie Mellon University, US); Benjamin Greenstein
+ (Intel Research Seattle, US); Ramakrishna Gummadi (University of
+ Southern California, US); Srinivasan Seshan (Carnegie Mellon
+ University, US); David Wetherall (University of Washington, US)</span> </I>
+
+			</li> </ul>
+
+			<ul><li> 
+			<span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Robust Location Distinction using Temporal Link Signatures</span>
+<BR><I><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Neal Patwari (University of Utah, US); Sneha Kasera (University of
+ Utah, US)</span> </I>
+			</li></ul>
+
+			<ul><li> 
+			<span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Mining call data to increase the robustness of cellular networks to signaling DoS attacks</span>
+<BR><I><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Hui Zang (Sprint ATL, US); Jean Bolot (Sprint, US)</span> </I>
+			</li></ul>
+
+			</td></tr>
+			<tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >10:30AM - 11:00AM</span></td>
+                      <td class="programDesc"> <span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td>
+		      </tr>
+		      <tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+
+                      <td width="155" class="programTime"> <span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >11:00AM - 12:00noon</span></td>
+						  
+                      <td class="programDesc"><p><span onclick="return false" style="text-decoration:underline; color:blue" name="s4"></span><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Technical Session: Cross-layer Techniques</span>
+<BR>
+                          <em><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >(Session chair: Suman Banerjee - University of Wisconsin, Madison)</span></em> </p>
+
+                        <ul><li>
+                        <span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Adaptive Network Coding and Scheduling for Maximizing Throughput in Wireless Networks</span>
+<BR><I><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Prasanna Chaporkar (Norwegian University of Science and Technology,
+NO); Alexandre Proutiere (Microsoft Research, UK)</span> </I>
+
+                        </li></ul>
+
+                        <ul><li>
+                        <span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Beyond the Bits: Cooperative Packet Recovery Using PHY Information</span>
+<BR><I><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Grace Woo (Massachusetts Institute of Technology, US); Pouya
+
+Kheradpour (MIT, US); Dawei Shen (MIT, US); Dina Katabi (MIT, US)</span> </I>
+                        </li></ul>
+
+
+                        </td>
+			</tr>
+
+<tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >12:00noon - 1:30PM</span></td>
+		      <td class="programDesc"> <span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span> </td></tr><tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr>
+	      
+<tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >12:30pm - 1:30PM</span></td>
+		      <td class="programDesc"> <span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >SIGMOBILE's Outstanding Contributions Award Lecture</span>
+<br><i>
+<span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >(Session Chair: Victor Bahl, Microsoft Research)</span></i>
+<UL><LI>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.berkeley.edu/~culler/">
+<span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >David Culler</span></span>
+<br>
+<span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >TinyOS and Low-Power Wireless Networking - a Study in Realistic 
+Abstraction</span></UL>
+</td></tr><tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr>
+	      
+	      <tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >1:30PM - 3:30PM</span></td>
+
+                      <td class="programDesc"> <p><span onclick="return false" style="text-decoration:underline; color:blue" name="s5"></span><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Technical Session: Mobility/Interference Models</span> <BR>
+
+                          <em><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >(Session chair: Volkan Rodoplu - University of California at Santa Barbara)</span></em> </p>
+
+
+                        <ul><li>
+                       	<span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Crossing Over the Bounded Domain: From Exponential To Power-law Inter-meeting Time in MANET</span>
+<BR><I><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Han Cai (North Carolina State University, US); Do Young Eun (North
+Carolina State University, US)</span> </I>
+ 
+                        </li></ul>
+
+                        <ul><li>
+			<!--Modeling Wireless Interference: A General Model and its Empirical Validation-->
+		<span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >A General Model of Wireless Interference</span>	
+<BR><I><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Lili Qiu (The University of Texas at Austin, US); Yin Zhang (University of Texas at Austin, US); Feng Wang (University of Texas at Austin, US); Mi Kyung Han (University of Texas at Austin, US); Ratul Mahajan (Microsoft Research, US)</span> </I>
+                        </li></ul>
+
+                        <ul><li>
+			<span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Power law and exponential decay of inter contact times between mobile devices</span>
+<BR><I> <span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Thomas Karagiannis (Microsoft Research, UK); Jean-Yves Le Boudec
+(EPFL, CH); Milan Vojnovic (Microsoft Research, UK)</span>
+ </I>
+                        </li></ul>
+
+                        <ul><li>
+			<span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Study of a Bus-Based Disruption Tolerant Network: Mobility Modeling and Impact on Routing</span>
+<BR><I><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Xiaolan Zhang (University of Massachusetts, Amherst, US); James F.
+ Kurose (University of Massachusetts at Amherst, US); Brian Levine
+ (University of Massachusetts at Amherst, US); Don Towsley (University
+ of Massachusetts at Amherst, US); Honggang Zhang (Suffolk University,
+ US)</span> </I>
+                        </li></ul>
+
+
+			</td> </tr> 
+
+
+			<tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td><td width="155" class="programTime">
+
+                          <span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >3:30PM - 4:00PM</span></td>
+
+                      <td class="programDesc"> <span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span> </td>
+                    </tr>
+
+			<tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td><td width="155" class="programTime">
+
+                          <span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >3:30PM - 5:30PM</span></td>
+
+                      <td class="programDesc"> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="http://www.sigmobile.org/mobicom/2007/src.html"><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >EXTENDED ABSTRACTS POSTERS</span></span></td>
+                    </tr>
+
+			<tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >4:30PM - 5:30PM</span></td>
+                      <td class="programDesc"> <p><span onclick="return false" style="text-decoration:underline; color:blue" name="s6"></span> <span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Technical Session: Challenges</span>  <BR>
+                          <em><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >(Session chair: Sneha Kasera - University of Utah)</span></em> </p>
+                            
+                        <ul><li>
+			<span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Challenges: Towards Truly Scalable  Ad Hoc Networks</span>
+<BR><I><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Zheng Wang (University of California Santa Cruz, US); Hamid
+ Sadjadpour (University of California, Santa Cruz, US); J.J. Garcia-Luna-Aceves
+(University of California at Santa Cruz, US)</span> </I>
+
+                        </li></ul>
+
+                        <ul><li>
+			<span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Challenges: Peers on Wheels - A Road to New Traffic Information Systems</span>
+<BR><I><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Jedrzej Rybicki (Heinrich Heine University Duesseldorf, DE); Bjorn Scheuermann (Heinrich Heine University Dusseldorf, DE); Wolfgang Kiess (Heinrich Heine University Duesseldorf, DE); Christian Lochert (Heinrich Heine University Dusseldorf, DE); Pezhman Fallahi Khorasani (Heinrich Heine University Dusseldorf, DE); Martin Mauve (Heinrich Heine University Dusseldorf, DE)</span> </I>
+                        </li></ul>
+
+                        <ul><li>
+			<span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Challenges: Device-free Passive Localization for Wireless Environments</span>
+<BR><I><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Moustafa Youssef (University of Maryland, US); Matthew Mah (University of Maryland, US); Ashok K. Agrawala (University of Maryland, US)</span> </I>
+                        </li></ul>
+
+                        
+
+</td>
+
+                    </tr>
+<tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >5:30PM - 7:00PM</span></td>
+                      <td class="programDesc"> <span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >SRC Talks</span> 
+</td>
+                    </tr>
+		<tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >7:30PM &#8211; 9:30PM</span></td>
+
+                      <td class="programDesc"> <span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Conference Banquet</span>  
+                        </td>
+                      <td class="programDesc"><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+	      </tr>
+                  </table>
+				  <p></div>
+                </p> 
+                <table width="700" border="0" cellspacing="0" cellpadding="0">
+                  <tr> 
+                    <td width="7" class="paragraphTitleUL"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+
+                    <td width="9"><img onmousedown="imd(this)" src="images/title_slash_4.jpg"></td>
+                    <td width="1" class="paragraphTitle"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Thursday,&nbsp;September&nbsp;13&nbsp;</span></td>
+                    <td class="paragraphTitleUL"><img onmousedown="imd(this)" src="images/title_slash_2.jpg"></td>
+                    <td width="17"><span onclick="return false" style="text-decoration:underline; color:blue" href="javascript:toggleLayer('pro6', 'proa6');"><img onmousedown="imd(this)" src="images/title_arrow.jpg"  border="0" name="proa6"></span></td>
+                  </tr>
+                </table>
+                <div id="pro6">
+
+				<br>
+                  <table width="700" border="0" cellspacing="0" cellpadding="0">
+                   <!-- <tr> 
+                    <tr> 
+                      <td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <p>7:00AM - 8:30PM</td>
+                      <td class="programDesc"><p>Continental Breakfast</p>
+                        </td>
+
+		</tr>-->
+                    <tr>
+                      <td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td>
+                    </tr>
+                    <tr> 
+                      <td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <p><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >8:00AM - 5:00PM</span></td>
+                      <td class="programDesc"><p><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Registration Open</span></p>
+
+                        </td>
+		</tr>
+
+<tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td><td width="155" class="programTime">
+                    <span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >9:00AM - 10:00AM</span></td>
+
+                      <td class="programDesc"> <p><span onclick="return false" style="text-decoration:underline; color:blue" name="k2"></span><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Address</span><BR><I>
+<span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >(Session Chair: Nitin Vaidya, University of Illinois at Urbana-Champaign)</span></I></p>
+                        <ul>
+                          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.eecs.berkeley.edu/~dtse/"><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Dr. David Tse</span></span><br>
+
+
+<b><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Breaking the Interference Barrier</span></b>
+                            </li>
+                        </ul></td>
+
+                    </tr>
+                    <tr>
+                      <td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td>
+                    </tr>
+                    <tr> 
+                      <td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <p><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >10:00AM - 10:30AM</span></td>
+                      <td class="programDesc"><p><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></p>
+
+                        </td>
+		</tr>
+                    <!--<tr>
+                      <td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td>
+                    </tr>
+                      <td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <p>8:30AM - 10:15AM</td>
+                      <td class="programDesc"> <p><span onclick="return false" style="text-decoration:underline; color:blue" name="s7"></span>Sensor Networks 
+                          II (<em>Session chair: Guohong Cao)</em></p>
+
+                        <ul>
+                          <li>Localized Algorithm for Aggregate Fairness in Wireless 
+                            Sensor Networks<br>
+                            Shigang Chen (University of Florida, US); Zhan Zhang 
+                            (University of Florida, US)</li>
+                                                  </ul>
+						<ul><li>Double Rulings for Information Brokerage in Sensor 
+                            Networks<br>
+                            Rik Sarkar (Stony Brook University, US); Xianjin Zhu 
+                            (Stony Brook University, US); Jie Gao (Stony Brook 
+                            University, US) Routing Algorithms for Delay-insensitive 
+                            and</li>
+                                                  </ul>
+
+						<ul><li>Routing Algorithms for Delay-insensitive and Delay-sensitive Applications in Underwater Sensor Networks<br>
+                            Dario Pompili (Georgia Institute of Technology, US); 
+                            Tommaso Melodia (Georgia Institute of Technology, 
+                            US); Ian Akyildiz (Georgia Institute of Technology, 
+                            US)</li>
+                                                  </ul>
+						<ul><li>On Optimal Communication Cost for Gathering Correlated 
+                            Data through Wireless Sensor Networks<br>
+                            Junning Liu (University of Massachusetts at Amherst, 
+                            US); Micah Adler (University of Massachusetts at Amherst, 
+                            US); Don Towsley (University of Massachusetts at Amherst, 
+                            US); Chun Zhang (IBM T.J. Watson Research Center, 
+                            US)</li>
+                        </ul></td>
+				</tr>-->
+				
+				<tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td><td width="155" class="programTime">
+
+                          <span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >10:30AM - 12:00noon</span></td>
+		  <td class="programDesc"> <span onclick="return false" style="text-decoration:underline; color:blue" href="panel.html"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Panel: Bonobos Vs Chimps: Cooperative and Non-Cooperative Behavior in Wireless Networks</span></span><br>
+		  
+			  <b><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Organizer and Moderator</span></b><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >: Jean-Pierre Hubaux, EPFL</span><br><br>
+
+			  <b><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Participants:</span></b><br>
+			  <span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Ramesh Johari, Stanford University</span><br>
+			  <span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >P. R. Kumar, UIUC</span><br>
+			  <span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Joseph Mitola, MITRE Corp.
+			  Heather Zheng, UCSB</span><br><br>
+
+			  <b><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Panel Co-chairs</span></b><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >:</span><br>
+			  <span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Martha Steenstrup (steenie@rcn.com)</span>  <br>
+			  <span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Ioanis Nikolaidis (yannis@cs.ualberta.ca)</span>
+			  
+			  
+		  
+		  </td>
+			      </tr>
+			      
+			      <!-- <tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td><td width="155" class="programTime">
+
+                          10:30AM - 12:00noon</td>
+                      <td class="programDesc"> <p><span onclick="return false" style="text-decoration:underline; color:blue" name="p"></span>Panel: Wired 
+                          vs Wireless access: the Race to Higher Speeds</p>
+
+                        <ul>
+                          <li>Organizer and Moderator:<br>
+                            Mauro Sentinelli (Telecom Italia)</li>
+                                                  </ul>
+						<ul><li>Participants: <br>
+                            Erik Ekudden (VP Head of Standardization, Ericsson)<br>
+                            Kevin Kahn (Senior Fellow, Director, Communications 
+                            Technology, Intel)<br>
+
+                            Larry Lang (Cisco Systems)<br>
+                            Dick Lynch (CTO, Verizon Wireless)<br>
+                            Bob Miller (AT&amp;T Labs Research)<br>
+                            Hossein Moiin (VP Head of Next Generation, T-Mobile)<br>
+                            Roberto Padovani (CTO, Qualcomm)<br>
+                            Jon Summer (VP Product Development, Cingular)<br>
+
+                            Barry West (CTO, Sprint)</li>
+                        </ul></td>
+				</tr>-->
+				
+				<tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td><td width="155" class="programTime">
+
+                          <span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >12:00noon - 1:30PM</span></td>
+		  <td class="programDesc"> <span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></td></tr><tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr>
+	   <tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td><td width="155" class="programTime">
+
+                          <span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >1:30PM - 3:00PM</span></td>
+
+                      <td class="programDesc"> <p><span onclick="return false" style="text-decoration:underline; color:blue" name="s8"></span><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Technical Session: Measurements</span> 
+ <BR>
+                          <em><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >(Session chair:  David Kotz - Dartmouth College)</span></em> </p>
+
+                        <ul> <li>
+			<span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Adaptive Contact Probing Mechanisms for Delay Tolerant Applications</span>
+<BR><I><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Wei Wang (National University of Singapore, SG); Vikram Srinivasan (National University of Singapore, SG); Mehul Motani (National University of Singapore, SG)</span> </I>
+                           
+                        </li> </ul>
+
+                        <ul> <li>
+                           
+			<span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >A Measurement-Based Approach to Modeling Link Capacity in 802.11-based Wireless Networks</span>
+<BR><I><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Anand Kashyap (SUNY at Stony Brook, US); Samir Das (SUNY at Stony Brook, US); Samrat Ganguly (NEC Labs, US)</span> </I>
+                        </li> </ul>
+
+                        <ul> <li>
+			<span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >MDG: Measurement-Driven Guidelines for 802.11 WLAN Design</span>
+<BR><I><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Ioannis Broustis (University of California, Riverside, US); Konstantina Papagiannaki (Intel Research, US); Srikanth Krishnamurthy (University of California, Riverside, US); Michalis Faloutsos (University of California Riverside, US); Vivek Mhatre (Bell Labs, IN)</span> </I>
+                           
+                        </li> </ul>
+
+
+                        </td>
+                    </tr>
+			<tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td><td width="155" class="programTime">
+
+                          <span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >3:00PM - 3:30PM</span></td>
+                      <td class="programDesc"> <span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td>
+                    </tr>
+<tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td><td width="155" class="programTime">
+
+                          <span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >3:30PM - 5:00PM</span></td>
+
+                      <td class="programDesc"> <p><span onclick="return false" style="text-decoration:underline; color:blue" name="s9"></span><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Technical Session: Routing and Multicasting</span> <BR>
+                          <em><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >(Session chair: Stefano Basagni - Northeastern University)</span></em> </p>
+
+
+                        <ul> <li>
+			<span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Multicast Capacity for Wireless Networks</span>
+<BR><I><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Xiang-Yang Li (Microsoft Research Asia, Beijing; Illinois Institute of Technology, US); Shao-Jie Tang (Illinois Institute of Technology, US); Ophir Frieder (Illinois Institute of Technology, US)</span> </I>
+                        </li> </ul>
+
+                        <ul> <li>
+			<span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >On Designing Collusion-Resistant Routing Schemes for Non-Cooperative Wireless Ad Hoc Networks</span>
+<BR><I><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Sheng Zhong (SUNY Buffalo, US); Fan Wu (State University of New York at Buffalo, US)</span> </I>
+                        </li> </ul>
+
+                        <ul> <li>
+			<span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Weak State Routing for Large Scale Dynamic Networks</span>
+<BR><I><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Utku Acer (Rensselaer Polytechnic Institute, US); Shivkumar Kalyanaraman (Rensselaer Polytechnic Institute, US); Alhussein Abouzeid (Rensselaer Polytechnic Institute, US)</span> </I>
+                        </li> </ul>
+
+
+		</td>
+                      <td class="programDesc"><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+	      </tr>
+			<tr><td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td></tr><tr><td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td><td width="155" class="programTime">
+
+                          <span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >5:00PM - 5:30PM</span></td>
+                      <td class="programDesc"> <span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Closing</span></td>
+                    </tr>
+                  </table>
+				  <p>
+                  
+                </div>
+                </p>
+                <table width="700" border="0" cellspacing="0" cellpadding="0">
+                  <tr> 
+                    <td width="7" class="paragraphTitleUL"><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+
+                    <td width="9"><img onmousedown="imd(this)" src="images/title_slash_4.jpg"></td>
+                    <td width="1" class="paragraphTitle"><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Friday,&nbsp;September&nbsp;14&nbsp;</span></td>
+                    <td class="paragraphTitleUL"><img onmousedown="imd(this)" src="images/title_slash_2.jpg"></td>
+                    <td width="17"><span onclick="return false" style="text-decoration:underline; color:blue" href="javascript:toggleLayer('pro7', 'proa7');"><img onmousedown="imd(this)" src="images/title_arrow.jpg"  border="0" name="proa7"></span></td>
+                  </tr>
+                </table>
+                <div id="pro7"> 
+								<br>
+
+                  <table width="700" border="0" cellspacing="0" cellpadding="0">
+                    <tr> 
+                      <td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <p><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >8:00AM - 12:00PM</span></td>
+                      <td class="programDesc"><p><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >Registration Open</span></p>
+                        </td>
+                    </tr>
+                    <tr>
+
+                      <td><img onmousedown="imd(this)" src="images/spacer.gif" height="10"></td>
+                    </tr>
+                    <tr> 
+                      <td width="15"><img onmousedown="imd(this)" src="images/spacer.gif" width="15"></td>
+                      <td width="155" class="programTime"> <p><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >All Day</span></td>
+                      <td class="programDesc"><p><span onclick="return false" style="text-decoration:underline; color:blue" name="w2"></span><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >Concurrent Workshops 
+                          (check individual workshop schedules)</span></p>
+                        <!--<ul>
+                          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.sigmobile.org/workshops/vanet2007/" target="_blank">VANET</span></li>
+
+                                                  </ul>
+						<ul>
+                          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://chenyen.cs.ucla.edu/events/wintech06/" target="_blank">WiNTECH</span></li>
+                                                  </ul>
+						<ul>
+                          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ee.washington.edu/research/nsl/wise2007/" target="_blank">WiSe</span></li>
+                                                  </ul>
+						<ul>
+
+                          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://wmash06.dit.unitn.it/" target="_blank">WMASH</span></li>
+	  </ul>-->
+  </td>
+                    </tr>
+                  </table>
+                  <p></div></p>
+                </td>
+    </tr>
+  </table>
+
+  
+        <table width="700" border="0" cellspacing="0" cellpadding="0">
+          <tr><td height="10"></td></tr>
+	<tr>
+	   <td width="15"><p class="pageHeading"><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p></td>
+	   <td width="5"><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+	   <td width="1"> <span onclick="return false" style="text-decoration:underline; color:blue" href="#top" target="_top" 
+		onMouseOver="roll2('topButton', 'images/bottom_top_purp.jpg');"
+		onMouseOut="roll2('topButton', 'images/bottom_top.jpg');"><img onmousedown="imd(this)" src="images/bottom_top.jpg" name="topButton" border="0"></span></td>
+	   <td width="5"><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+	   <td><p class="pageHeading"><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p></td>
+
+	   <td width="5"><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+	   <td width="1"><span onclick="return false" style="text-decoration:underline; color:blue" href="javascript:collapseAll('expand', 'pro');"
+		onMouseOver="roll2('expandButton', 'images/bottom_expand_purp.jpg');"
+		onMouseOut="roll2('expandButton', 'images/bottom_expand.jpg');"><img onmousedown="imd(this)" src="images/bottom_expand.jpg" name="expandButton" border="0"></span></td>
+	   <td width="5"><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+	        <td width="1" class="divider"><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >|</span></td>
+	   <td width="5"><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+	   <td width="1"><span onclick="return false" style="text-decoration:underline; color:blue" href="#top"
+		onMouseOver="roll2('collapseButton', 'images/bottom_collapse_purp.jpg');"
+		onMouseOut="roll2('collapseButton', 'images/bottom_collapse.jpg');"
+		onClick="collapseAll('collapse', 'pro');"><img onmousedown="imd(this)" src="images/bottom_collapse.jpg" name="collapseButton" border="0"></span></td>
+	   <td width="5"><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+	   <td width="15"><p class="pageHeading"><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p></td>
+
+	</tr>
+    <tr><td height="10"></td></tr>
+	</table>
+  
+  
+  <table width="700" border="0" cellspacing="0" cellpadding="0">
+    <tr> 
+      <td width="8"><img onmousedown="imd(this)" src="images/links_left.jpg"></td>
+      <td width="679" class="bottomLinksBg">
+          <p><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html"><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span>
+		    <span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="about.html"><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >About MobiCom</span></span> 
+            <span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="cfp.html"><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span>
+
+			<span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="committees.html"><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></span> 
+            <span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="registration.html"><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span>
+			<span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="travel.html"><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Hotel and Travel</span></span> 
+            <span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="program.html"><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Advance Program</span></span><br>
+              <span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials.html"><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span>
+
+			<span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="panel.html"><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Panel</span></span>
+			<span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="demos.html"><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Demos and Exhibits</span></span>
+			<span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.html"><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span>
+			<span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="supporters.html"><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Corporate Supporters</span></span>
+			<span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="talks.html"><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talks</span></span>
+
+			<span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="src.html"><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >Posters &amp; SRC</span></span></p>
+          </td>
+      <td width="8"><img onmousedown="imd(this)" src="images/links_right.jpg"></td>
+    </tr>
+  </table>
+  <table width="700" border="0" cellspacing="0" cellpadding="0">
+    <tr>
+
+      <td><div align="center" class="copyright"><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >Copyright &copy; 2007, ACM Annual 
+          International Conference on Mobile Computing and Networking</span>

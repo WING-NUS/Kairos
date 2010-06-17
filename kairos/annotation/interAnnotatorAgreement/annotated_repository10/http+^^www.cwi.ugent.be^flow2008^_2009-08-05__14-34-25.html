@@ -1,0 +1,614 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/1/annotation/annotated_repository/http+^^www.cwi.ugent.be^flow2008^_2009-08-05__14-34-25.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/1/annotation/annotated_repository/http+^^www.cwi.ugent.be^flow2008^_2009-08-05__14-34-25.yaml created on Thu Aug 13 13:55:44 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<meta http-equiv="content-type" content="text/html; charset=utf-8" />
+<meta name="description" content="First International Workshop on
+Fuzzy Logic on the Web (FLOW 2008)" />
+<meta name="keywords" content="fuzzy logic, flow 2008, flow, web,
+wi-iat, heymans, cwi" />
+<meta name="author" content="Stijn Heymans / Original design: Andreas Viklund - http://andreasviklund.com/" />
+<link rel="stylesheet" type="text/css" href="andreas01.css" media="screen" title="andreas01 (screen)" />
+<link rel="stylesheet" type="text/css" href="print.css" media="print"
+/>
+<title>International Workshop on Fuzzy Logic On the Web (FLOW 2008)</title>
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span><div id="wrap">
+
+<img onmousedown="imd(this)" id="frontphoto" src="flow2008.jpg" width="760" height="175" alt="" />
+
+<div id="header">
+<h1><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >International Workshop on Fuzzy Logic On the Web (FLOW 2008)</span></h1>
+<p><strong><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >A workshop at the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://datamining.it.uts.edu.au/wi08/html/"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >IEEE/WIC/ACM
+International Conferences on Web
+      Intelligence  and Intelligent Agent Technology (WI-IAT 2008)</span></span><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >,
+      Sydney, Australia, 9 December 2008</span></strong></p>
+</div>
+
+
+<div id="avmenu">
+<h2 class="hide"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Menu:</span></h2>
+<ul>
+ <li><span onclick="return false" style="text-decoration:underline; color:blue" href="#description" title="Description"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >&#8250; Description</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="#topics" title="Topics"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >&#8250; Topics</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="#submissions" title="Submissions"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >&#8250; Submissions</span></span></li>
+
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="#dates" title="Important Dates"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >&#8250; Important Dates</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="#org" title="Organizing Committee"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >&#8250; Organizing Committee</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="#pc" title="Program Committee"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >&#8250; Program Committee</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="#reg" title="Registration"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >&#8250; Registration</span></span></li>
+          <li><span onclick="return false" style="text-decoration:underline; color:blue" href="#schedule" title="Workshop Schedule"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >&#8250; Accepted Papers</span></span></li>
+
+</ul>
+
+<!--
+<div class="announce">
+<h3>Latest news:</h3>
+<p><strong>23 May, 2008:</strong><br />
+New design</p>
+<p class="textright"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html"></span></p>
+</div>
+-->
+
+</div>
+
+<!--
+<div id="extras">
+<h3>More info:</h3>
+<p>This is the third column, which can be used in many different ways. For example, it can be used for comments, site news, external links, ads or for more navigation links. It is all up to you!</p>
+
+<h3>Links:</h3>
+<p>- <span onclick="return false" style="text-decoration:underline; color:blue" href="http://andreasviklund.com/">My website</span><br />
+- <span onclick="return false" style="text-decoration:underline; color:blue" href="http://oswd.org/">OSWD.org</span><br />
+- <span onclick="return false" style="text-decoration:underline; color:blue" href="http://validator.w3.org/check/referer">Valid XHTML</span><br />
+- <span onclick="return false" style="text-decoration:underline; color:blue" href="http://jigsaw.w3.org/css-validator/check/referer">Valid CSS</span></p>
+
+<p class="small">Version: 1.0<br />(July 25, 2005)</p>
+</div>
+
+-->
+
+<div id="content">
+<h2 id="description"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Description of the Workshop</span></h2>
+
+<p>
+<span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >A lot of research on how to make the Web Intelligent is centered around
+the question of how to introduce a form of automated reasoning in
+Web-related activities. For example, an intelligent search would amount
+to posing queries that use deduction to obtain results instead of
+queries that return results based on the keywords of the query. An
+important subgoal of establishing this kind of automated reasoning is
+to make knowledge on the Web understandable by machines.</span>
+</p>
+
+<p>
+<span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >As witnessed by approaches like the Semantic Web the traditional
+choice of establishing machine-understandability was obtained by
+formalizing knowledge with ontologies using two-valued logics like
+Description Logics or Logic Programming. However, fuzzy logic is
+inherently better suited for expressing knowledge on the Web, i.e.,
+knowledge that is uncertain, imprecise, and potentially inconsistent.
+Nonetheless, the  take-up of fuzzy logic for making the Web more
+intelligent is a slow one, and a major issue is the lack of
+cross-fertilization between the world of fuzzy logic researchers and
+the world of Web researchers. Hence, the workhop's main goal will be
+to bring these two worlds closer together, and thus stimulate
+cross-over research between two different areas that are trying to
+make the Web more intelligent.</span>   	</p>	
+
+<p>
+ <span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >The workshop will be an important part of events of the IEEE/WIC/ACM
+ International Conferences on Web Intelligence  and Intelligent Agent
+ Technology which has been ranked at top 15 from 620 Artificial
+ Intelligence / Machine Learning conferences in the following popular
+ rankings:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs-conference-ranking.org/home.html"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >http://www.cs-conference-ranking.org/home.html</span></span><BR><BR>
+
+	<h2 id="topics"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Topics</span> </h2>
+
+<p>
+<span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Applications of fuzzy logic to Web areas such as</span>
+</p><ul>
+    <li> <span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Ontology languages</span>
+    </li><li> <span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Intelligent Search</span>
+    </li><li> <span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Knowledge management and reasoning</span>
+    </li><li> <span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Ontology mapping, merging, and alignment</span>
+    </li><li> <span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Web Service Description, Discovery, Composition</span>
+    </li><li> <span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Information extraction / Multimedia retrieval</span>
+    </li><li> <span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Collaborating agents</span>
+    </li><li> <span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Social Network Analysis</span>
+    </li><li> <span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Web-based recommender systems</span>
+    </li><li> <span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Question answering systems</span>
+    </li><li> <span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Geographic Information Retrieval</span>
+    </li><li> <span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >...</span>
+
+</li></ul>
+
+
+	<h2 id="submissions"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Submissions</span></h2>
+
+<p>
+<span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >All submitted papers will be reviewed on the basis of technical
+quality, relevance, significance, and clarity. All workshops are
+required to use the WI-IAT 2008 Cyberchair system for on-line paper
+submission and review process:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://wi-consortium.org/cyberchair/wiiat08/scripts/ws_submit.php"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >http://wi-consortium.org/cyberchair/wiiat08/scripts/ws_submit.php</span></span><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >.</span>
+</p>
+
+<p>
+<span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >The length of accepted papers should NOT exceed 4 pages (IEEE-CS
+format, extra payment is only available for one more extra
+page). Accepted workshop papers will be published in the Proceedings of
+WI-IAT08 Workshops by IEEE-CS Press.</span>
+</p>
+
+	<h2 id="dates"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></h2>
+   <br> 
+<b><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Deadline for Submissions:</span></b> <del><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >July 30, 2008</span></del> <font color=red> <span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >August 7, 2008 (extended deadline)</span></font><br>
+<b><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Notification of acceptance:</span></b> <span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >September 3, 2008</span> <br>
+
+<b><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Camera-ready versions:</span></b> <span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >September 30, 2008</span><br>
+<b><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Workshop:</span></b> <span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >December 9, 2008</span><br>
+<b><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >WI-IAT 2008 Conference:</span></b> <span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >December 9 - 12, 2008</span><br>
+
+<br/>
+
+	<h2 id="org"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Organizing Committee</span></h2>
+<br>
+<b><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Stijn Heymans</span></b><br>
+<span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Knowledge Based Systems Group</span><br>
+<span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Institute of Information Systems</span><br>
+<span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Technische Universitaet Wien</span><br>
+<span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Favoritenstrasse 9-11</span><br>
+<span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >A-1040 Vienna, Austria</span><br>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:heymans@kr.tuwien.ac.at"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >heymans@kr.tuwien.ac.at</span></span><br>
+
+<br>
+<b><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Martine De Cock</span></b><br>
+
+<span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Computational Web Intelligence</span><br>
+<span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Dept. of Applied Mathematics and Computer Science</span><br>
+<span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Ghent University</span><br>
+<span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Krijgslaan 281 (S9)</span><br>
+<span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >9000 Gent, Belgium</span><br>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:Martine.Decock@UGent.be"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Martine.Decock@UGent.be</span></span><br>
+
+<br>
+<b><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Dirk Vermeir</span></b><br>
+
+<span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Theoretical Computer Science Lab</span><br>
+<span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Dept. of Computer Science</span><br>
+<span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Vrije Universiteit Brussel</span><br>
+<span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Pleinlaan 2</span><br>
+<span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >1050 Brussel, Belgium</span><br>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:dvermeir@vub.ac.be"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >dvermeir@vub.ac.be</span></span><br>
+
+<br>
+<b><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Elie Sanchez</span></b><br>
+
+<span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Laboratoire d'Informatique Fondamentale</span><br>
+<span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Biomathematiques et Informatique Medicale</span><br>
+<span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Faculte de Medecine (Universite Aix-Marseille II)</span><br>
+<span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >27 Bd Jean Moulin,</span><br>
+<span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >13385 Marseille Cedex5, France</span><br>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:elie.sanchez@medecine.univ-mrs.fr"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >elie.sanchez@medecine.univ-mrs.fr</span></span><br>
+
+<br>
+
+
+
+
+
+	<h2 id="pc"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></h2>
+	<br>
+	<span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Paulo Cesar G. da Costa, George Mason University, USA</span> <br>
+	<span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Ernesto Damiani, Universita degli Studi di Milano, Italy</span> <br>
+
+	<span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Jos de Bruijn, Free University of Bolzano, Italy</span> <br>
+	<span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Pieter De Leenheer, Free University of Brussels, Belgium</span> <br>
+	<span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Cristina Feier,	TU Vienna, Austria</span> <br>
+	<span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Martin Hepp, Bundeswehr University Munich, Germany</span> <br>
+	<span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Mustafa Jarrar,	University of Cyprus, Cyprus</span> <br>
+	<span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Janusz Kacprzyk, Polish Academy of Sciences, Poland</span> <br> 
+	<span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Anne Laurent, LIRMM, France</span> <br>
+
+	<span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Jie Lu, University of Technology Sydney, Australia</span> <br>
+	<span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Thomas Lukasiewicz, Oxford University / TU Vienna, U.K. / Austria</span> <br>
+	<span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Trevor Martin, University of Bristol, UK</span> <br>
+	<span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Jose Angel Olivas Varela, Universidad Castilla-La Mancha, Spain</span> <br>
+	<span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Gabriella Pasi, University of Milano, Italy</span> <br>
+	<span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Axel Polleres,	DERI Galway, Ireland</span> <br>
+
+	<span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Giorgos Stamou, National Technical University of Athens,
+	Greece</span> <br>
+	<span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Umberto Straccia, IST-C.N.R, Italy</span> <br>
+	<span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Ankur Teredesai, University of Washington, USA</span> <br>
+	<span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Peter Vojtas, Charles University Prague, Czech Republic</span> <br>
+<br>
+
+
+	<h2 id="reg"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></h2>
+<br>
+
+<span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >At least one author of an accepted paper has to be registered for the paper to be included in the proceedings:</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="https://earth.azu.com/~ws11245/cyberchair/wiiat08/scripts/register.php?subarea=S"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >https://earth.azu.com/~ws11245/cyberchair/wiiat08/scripts/register.php?subarea=S</span></span>
+
+
+<br/>
+<br/>
+	<h2 id="schedule"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers</span></h2>
+
+<br>
+<UL>
+<LI> <span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Personalized Ontology-Based Query Expansion</span><BR>
+<span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Silvia Calegari and Gabriella Pasi</span>
+<LI> <span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Towards a Fuzzy Answer Set Semantics for Residuated Logic Programs</span><BR>
+<span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Nicolás Madrid and Manuel Ojeda-Aciego</span>
+<LI> <span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Acquiring Vague Temporal Information from the Web</span><BR>
+<span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Steven Schockaert, Martine De Cock, and Etienne E. Kerre</span>
+<LI> <span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Filtering Short Queries by Means of Fuzzy Semantic-Lexical Relations
+for Meta-searchers Using WordNet</span><BR>
+<span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Jesus Serrano-Guerrero, Francisco P. Romero, and Jose A. Olivas</span>
+<LI> <span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Combining Fuzzy Description Logics and Fuzzy Logic Programs</span><BR>
+<span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Jidi Zhao and Harold Boley</span>
+<LI> <span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Conjunctive Query Answering over an f-ALC Knowledge Base</span><BR>
+<span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Jingwei Cheng, Z.M. Ma, Fu Zhang, and Xing Wang</span>
+</UL>
+
+</div>
+
+<div id="footer">
+<span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Copyright &copy; 2008 (Stijn Heymans). Original design by</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://andreasviklund.com"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Andreas Viklund</span></span><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >.</span>

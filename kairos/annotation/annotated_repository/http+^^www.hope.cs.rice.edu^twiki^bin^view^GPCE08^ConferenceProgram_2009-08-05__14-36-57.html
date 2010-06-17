@@ -1,0 +1,546 @@
+<?xml version="1.0"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<p />
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.hope.cs.rice.edu^twiki^bin^view^GPCE08^ConferenceProgram_2009-08-05__14-36-57.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.hope.cs.rice.edu^twiki^bin^view^GPCE08^ConferenceProgram_2009-08-05__14-36-57.yaml created on Wed Aug 05 17:32:01 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+  <title>The International Conference on Generative Programming and Component Engineering</title>
+  <link rel="alternate" href="/twiki/bin/view/GPCE08/WebRss?skin=rss" type="application/rss+xml" title="Recent Changes" />
+  <link rel="shortcut icon" href="%WEBICON%" type="image/x-icon" />
+  <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-15" />
+  
+  <style type="text/css" media="all">
+	 @import url("http://www.hope.cs.rice.edu/twiki/pub/TWiki/FlexPatternSkin/layout.css");
+	 @import url("http://www.hope.cs.rice.edu/twiki/pub/TWiki/FlexPatternSkin/style.css");
+	 @import url("http://www.hope.cs.rice.edu/twiki/pub/TWiki/FlexPatternSkin/flexmenu.css");
+	 .twikiToc li {
+		list-style-image:url(http://www.hope.cs.rice.edu/twiki/pub/TWiki/FlexPatternSkin/i_arrow_down.gif);
+	 }
+  </style>
+  <style type="text/css" media="all"></style>
+  <script type="text/javascript">
+  <!-- HIDE
+	function initPage() { }
+  -->
+  </script>
+  <script type="text/javascript" src="http://www.hope.cs.rice.edu/twiki/pub/TWiki/FlexPatternSkin/flexmenu.js"></script>
+
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)" class="twikiViewPage" onload="initPage()"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span><div class="fullPage">
+<div class="twikiMiddleContainer"><div class="twikiLeftBar">
+  <div class="twikiLeftBarContents">
+	 <img onmousedown="imd(this)" src="/twiki/pub/GPCE08/WebLeftBar/gpce-logo.jpg" alt="gpce-logo.jpg" width='100' height='120' />
+<p />
+<strong><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gpce.org/" target="_top"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >GPCE Home</span></span></strong>
+<br />
+<strong><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/WebHome" class="twikiLink"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >GPCE'08 Home</span></span></strong>
+<br />
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/ConferenceProgram" class="twikiLink"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span>
+<br />
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/ConferenceOrganization" class="twikiLink"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Organization</span></span>
+<br />
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/ImportantDates" class="twikiLink"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Dates</span></span>
+<br />
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/ConferenceVenue" class="twikiLink"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Venue</span></span>
+<br />
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/ConferenceRegistration" class="twikiLink"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span>
+<p />
+<strong><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/GpceTutorials" class="twikiLink"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span></strong>
+<br>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/MdeTutorial" class="twikiLink"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >GP1: MDE Systems</span></span>
+<br>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/PowerGenericsTutorial" class="twikiLink"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >GP2: S. Jarzabek</span></span>
+<br>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/MultiStageProgrammingTutorial" class="twikiLink"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >GP3: W. Taha</span></span>
+<p />
+<strong><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/GpceWorkshops" class="twikiLink"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></strong>
+<br>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.labri.fr/perso/reveille/DSPD/2008/" target="_top"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >DSPD 2008</span></span>
+<br>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.infosun.fim.uni-passau.de/cl/staff/apel/McGPLE2008/index.html" target="_top"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >McGPLE 2008</span></span>
+<br>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.program-transformation.org/Sts/STS08" target="_top"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >STS 2008</span></span>
+<p />
+<strong><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Calls for</span></strong>
+<br>
+  <span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/CallForPapers" class="twikiLink"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Papers</span></span>
+<br>
+  <span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/CallForTutorials" class="twikiLink"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span>
+<br>
+  <span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/CallForWorkshops" class="twikiLink"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span>
+<p />
+<strong><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.easychair.org/conferences/?conf=gpce2008" target="_top"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Electronic</span><br><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Submission</span></span></strong>
+<p />
+  </div>
+</div><div class="twikiMain"><div class="toolBar">
+<div class="flexMenuBar"><div> </div><div class="flexMenu" onmouseover="return showMenu(event, 100);" onmouseout="return hideMenu(event, 100);">
+  <p><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Page</span></p>
+  <div id="flexMenuContent100" class="flexMenuContent">
+	 <ul>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/edit/GPCE08/ConferenceProgram?t=1249454219"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Edit Page</span></span></li>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/rename/GPCE08/ConferenceProgram"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Rename Page</span></span></li>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/attach/GPCE08/ConferenceProgram"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Attach File</span></span></li>
+	 </ul>
+	 <ul>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/ConferenceProgram?skin=print.pattern"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Printable</span></span></li>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/ConferenceProgram?skin=text&amp;raw=on&amp;contenttype=text/plain"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Wiki Source</span></span></li>
+	 </ul>
+	 <ul>
+		<li><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >r38&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" rel="nofollow" href="/twiki/bin/rdiff/GPCE08/ConferenceProgram?rev1=38;rev2=37"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >&lt;</span></span><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" rel="nofollow" href="/twiki/bin/view/GPCE08/ConferenceProgram?rev=37"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >r37</span></span><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" rel="nofollow" href="/twiki/bin/rdiff/GPCE08/ConferenceProgram?rev1=37;rev2=36"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >&lt;</span></span><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" rel="nofollow" href="/twiki/bin/view/GPCE08/ConferenceProgram?rev=36"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >r36</span></span><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" rel="nofollow" href="/twiki/bin/rdiff/GPCE08/ConferenceProgram?rev1=36;rev2=35"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >&lt;</span></span><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" rel="nofollow" href="/twiki/bin/view/GPCE08/ConferenceProgram?rev=35"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >r35</span></span><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" rel="nofollow" href="/twiki/bin/rdiff/GPCE08/ConferenceProgram?rev1=35;rev2=34"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >&lt;</span></span><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" rel="nofollow" href="/twiki/bin/view/GPCE08/ConferenceProgram?rev=34"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >r34</span></span></li> 
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/rdiff/GPCE08/ConferenceProgram"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Total History</span></span></li>
+	 </ul>
+	 <ul>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/oops/GPCE08/ConferenceProgram?template=oopsmore&amp;param1=38&amp;param2=38"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >More ...</span></span></li>
+	 </ul>
+  </div>
+</div>
+<div class="flexMenu" onmouseover="return showMenu(event, 102);" onmouseout="return hideMenu(event, 102);">
+  <p><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Web</span></p>
+  <div id="flexMenuContent102" class="flexMenuContent">
+	 <ul>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/WebChanges" class="twikiLink"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Recent Changes</span></span></li>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/WebNotify" class="twikiLink"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Notify Service</span></span></li>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/WebNews" class="twikiLink"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >News</span></span></li>
+	 </ul>
+	 <ul>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/WebIndex" class="twikiLink"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Page Index</span></span></li>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/WebSearch" class="twikiLink"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Search</span></span></li>
+		</ul>
+		<ul>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/oops/GPCE08/ConferenceProgram?template=oopsmore&amp;param1=38&amp;param2=38"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >More ...</span></span></li>
+		</ul>
+  </div>
+</div>
+<div class="flexMenu" onmouseover="return showMenu(event, 103);" onmouseout="return hideMenu(event, 103);">
+  <p><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Wiki</span></p>
+  <div id="flexMenuContent103" class="flexMenuContent">
+	 <ul>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/TWiki/WebHome"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >About TWiki</span></span></li>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/TWiki/TextFormattingRules"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Text Formatting</span></span></li>
+	 </ul>
+	 <ul>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/TWiki/TWikiRegistration"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></li>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/TWiki/ChangePassword"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Change Password</span></span></li>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/TWiki/ResetPassword"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Reset Password</span></span></li>
+	 </ul>
+		<ul>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/Main/TWikiUsers"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Users</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/Main/TWikiGroups"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Groups</span></span></li>
+		</ul>
+  </div>
+</div> 
+</div>
+</div> <div class="twikiTopic">
+<h1 class="twikiTopicTitle"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Conference Program</span></h1>
+<div class="twikiWebTitle"><it><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Generative Programming and Component Engineering</span></it></div><h2><span onclick="return false" style="text-decoration:underline; color:blue" name="Technical_Papers"></span> <span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Technical Papers</span> </h2>
+<p />
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="Sunday_October_19"></span> <span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Sunday, October 19</span> </h3>
+<p />
+<span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >8:50-9:00</span> <strong><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Welcome</span></strong>
+<p />
+<span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >9:00-10:00</span> <strong><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Keynote</span></strong> <br>
+<span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Julia Lawall</span> <ul>
+<li> <em><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Emerging Challenges for Large Scale Systems Integration</span></em> <br> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.accenture.com/Global/Services/Accenture_Technology_Labs/R_and_I/AndrewFano.html" target="_top"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Dr. Andrew Fano</span></span> <span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >(Accenture)</span> <br> <span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/EmergingChallengesForLargeScaleSystemsIntegration" class="twikiLink"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >abstract and bio</span></span>
+</li></ul> 
+<p />
+<span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >10:30-12:00</span> <strong><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Technical papers 1</span></strong> <br>
+<span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Julia Lawall</span> <ul>
+<li> <em><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Code Generation to Support Static and Dynamic Composition of Software Product Lines</span></em> <br><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Marko Rosenmueller, Norbert Siegmund, Sven Apel and Gunter Saake.</span> 
+</li> <li> <em><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Compilation Techniques for Large Scale Feature Models</span></em> <br><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Marcilio Mendonca, Andrzej Wasowski, Krzysztof Czarnecki and Don Cowan.</span>
+</li> <li> <em><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >On the Modularity of Feature Interactions</span></em> <br><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Chang Hwan Peter Kim, Christian Kaestner and Don Batory.</span>
+</li></ul> 
+<p />
+<span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >13:30-15:00</span> <strong><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Technical papers 2</span></strong> <br>
+<span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Jaakko Jarvi</span> <ul>
+<li> <em><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Using Simple Mathematics as a Modeling Language</span></em> <br> <span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Don Batory.</span> 
+</li> <li> <em><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >From Generic to Specific: Off-line Optimization for General Constraint Solver</span></em> <br><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Ye Zhang, Torben Amtoft and Flemming Nielson.</span>  
+</li> <li> <em><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Generating Incremental Implementations of Object-Set Queries</span></em> <br><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Tom Rothamel and Yanhong A. Liu.</span> 
+</li></ul> 
+<p />
+<span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >15:30-17:00</span> <strong><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Technical papers 3</span></strong> <br>
+<span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Aniruddha Gokhale</span> <ul>
+<li> <em><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Integrating Semantics and Compilation</span></em> <br> <span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Peter Gottschling and Andrew Lumsdaine.</span> 
+</li> <li> <em><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Generating Customized Verifiers for Automatically Generated Code</span></em> <br> <span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Ewen Denney and Bernd Fischer.</span> 
+</li> <li> <em><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Property Models: From Incidental Algorithms to Reusable Components</span></em> <br> <span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Jaakko Jarvi, Mat Marcus, Sean Parent, John Freeman and Jacob Smith.</span>
+</li></ul> 
+<p />
+<span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >17:00-17:30</span> <strong><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >PC chair's report</span></strong>
+<p />
+<strong><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >18:30 GPCE Reception</span></strong> <span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >(in conference room)</span>
+<p />
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="Monday_October_20"></span> <span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Monday, October 20</span> </h3>
+<p />
+<span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >9:00-10:00</span> <strong><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Keynote</span></strong> <br>
+<span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Jeremy Siek</span> <ul>
+<li> <em><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Fundamentalist Functional Programming</span></em> <br> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.microsoft.com/~emeijer/" target="_top"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Erik Meijer</span></span> <span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >(Microsoft)</span> <br> <span onclick="return false" style="text-decoration:underline; color:blue" href="/twiki/bin/view/GPCE08/FundamentalistFunctionalProgramming" class="twikiLink"><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >abstract and bio</span></span>
+</li></ul> 
+<p />
+<span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >10:30-12:00</span> <strong><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Technical papers 4</span></strong> <br>
+<span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Andrew Lumsdaine</span> <ul>
+<li> <em><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Feature Featherweight Java: A Calculus for Feature-Oriented Programming and Stepwise Refinement</span></em> <br> <span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Sven Apel, Christian Kastner and Christian Lengauer.</span> 
+</li> <li> <em><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Lightweight Dependent Classes</span></em> <br> <span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Tetsuo Kamina and Tetsuo Tamai.</span> 
+</li> <li> <em><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Typing Communicating Component Assemblages</span></em> <br> <span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Michael Lienhardt, Alan Schmitt and Jean-Bernard Stefani.</span>
+</li></ul> 
+<p />
+<span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >14:00-15:00</span> <strong><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Technical papers 5</span></strong> <br>
+<span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: David Abrahams</span> <ul>
+<li> <em><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Polymorphic Embedding of DSLs</span></em> <br> <span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Christian Hofer, Klaus Ostermann, Tillmann Rendel and Adriaan Moors.</span> 
+</li> <li> <em><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Pantaxou: a Domain-Specific Language for Developing Safe Coordination Services</span></em> <br> <span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Julien Mercadal, Nicolas Palix, Charles Consel and Julia Lawall.</span>
+</li></ul> 
+<p />
+<span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >15:30-17:00</span> <strong><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Technical papers 6</span></strong> <br>
+<span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Mark Grechanik</span> <ul>
+<li> <em><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Program Refactoring using Functional Aspects</span></em> <br> <span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Sven Apel, Christian Kastner and Don Batory.</span>
+</li> <li> <em><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Rigorous and Practical Refactoring-Based Framework Upgrade</span></em> <br> <span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Ilie Savga, Michael Rudolf, Sebastian Gotz and Uwe Assmann.</span> 
+</li> <li> <em><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >An abstraction for reusable MDD components</span></em> <br> <span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Vinay Kulkarni and Sreedhar Reddy.</span>

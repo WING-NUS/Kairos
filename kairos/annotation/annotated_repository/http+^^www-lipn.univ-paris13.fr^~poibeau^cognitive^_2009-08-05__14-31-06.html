@@ -1,0 +1,780 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN"> 
+<html>
+ <head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www-lipn.univ-paris13.fr^~poibeau^cognitive^_2009-08-05__14-31-06.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www-lipn.univ-paris13.fr^~poibeau^cognitive^_2009-08-05__14-31-06.yaml created on Wed Aug 05 17:31:31 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+<!-- saved from url=(0054)http://www-lipn.univ-paris13.fr/~poibeau/cognitive/ -->
+   <title>
+     EACL 2009 Workshop on Cognitive Aspects of Computational Language Acquisition
+   </title> 
+   <meta http-equiv="Content-Type" content="text/html; charset=windows-1252"><link href="http://www.cl.cam.ac.uk/~alk23/cognitive/cognitive_files/acl03.css" type="text/css" rel="stylesheet"> 
+   <meta content="MSHTML 6.00.2900.2963" name="GENERATOR">
+ </head>
+
+ <body onload="on_load()" onkeyup="on_key_up(event)" bgcolor="#ffffff"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span> 
+ <blockquote><br> 
+  <center>
+    <span style="font-weight: bold; font-size: 18px;"><font color="#000000">
+      <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.eacl2009.gr/"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >EACL-2009</span></span> <span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Workshop on</span> </font></span></center><br><br>
+      <center><span style="font-weight: bold; font-size: 18px;"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >COGNITIVE ASPECTS OF COMPUTATIONAL LANGUAGE ACQUISITION</span></span>
+      <br><br><!-- br><span style="font-weight: bold; font-size: 18px;"><font color="#990000">CALL FOR PAPERS
+      </font>
+    </span>
+    <br --><br><br><b><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >31 March 2009, Athens, Greece</span></b><br>
+    <br><!-- img src="cognitive_files/acl-logo-small.gif" height="17" width="25" --> 
+
+</center>
+
+<!-- br><br><span style="font-weight: bold; font-size: 18px;"><font color="#990000">The full program will be available by mid-Februry</font><p>
+
+The workshop program will include two invited talks given by <span onclick="return false" style="text-decoration:underline; color:blue" href="http://alpha-leonis.lids.mit.edu/~berwick/Professor%20Robert%20C.%20Berwick.html">Robert Berwick</span> (MIT) and <span onclick="return false" style="text-decoration:underline; color:blue" href="http://cswww.essex.ac.uk/staff/poesio/">Massimo Poesio</span> (University of Essex/University of Trento)
+      </font>
+    </span>
+    <br><br>
+<hr>
+<p>
+<span style="font-weight: bold; font-size: 18px;"><font color="#990000">The submission webpage is available:</font>
+<blink><span onclick="return false" style="text-decoration:underline; color:blue" href="https://www.softconf.com/eacl09/cog-acq/">here</span></blink>.</span>
+<p>
+<b>
+Final submissions are due by 10 February 2009 and must to be formatted using the EACL 2009 stylefiles, available at: <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.eacl2009.gr/conference/authors">http://www.eacl2009.gr/conference/authors</span>
+<p>
+
+<hr>
+
+  </center><br --> 
+
+
+  <blockquote> 
+  <center>
+  <span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >This workshop is the second of a series which has been initiated during</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://ufal.mff.cuni.cz/acl2007/"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >ACL 2007</span></span><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >, held in Prague.</span> <br>
+  <span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >The</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cl.cam.ac.uk/~alk23/cognitive/cognitive.htm"><font color="#000099"><b><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >program</span></b></font></span>
+  <span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >as well as the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aclweb.org/anthology-new/W/W07/#0600"><font color="#000099"><b><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >proceedings</span></b></font></span>
+  <span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >of the first edition of this workshop are available online</span> <br>
+  <span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >(the first edition of the workshop was organised by</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cl.cam.ac.uk/~alk23"><font color="#000099"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Anna Korhonen</span></font></span><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >,</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cl.cam.ac.uk/~pjb48/"><font color="#000099"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Paula Buttery</span></font></span> 
+<span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >and</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.inf.ufrgs.br/~avillavicencio/"><font color="#000099"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Aline Villavicencio</span></font></span><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >).</span>
+  </center>
+  <p><br>
+  </blockquote>
+
+  <hr> 
+
+  <center><b><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www-lipn.univ-paris13.fr/~poibeau/cognitive/index.html#description"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Description</span></span>  <span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >*</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www-lipn.univ-paris13.fr/~poibeau/cognitive/index.html#programme"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Programme</span></span> 
+  <span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >*</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www-lipn.univ-paris13.fr/~poibeau/cognitive/index.html#papers"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >List of Accepted Papers</span></span> <span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >*</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www-lipn.univ-paris13.fr/~poibeau/cognitive/index.html#dates"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Important
+  Dates</span></span> <span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >*</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www-lipn.univ-paris13.fr/~poibeau/cognitive/index.html#chairs"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Workshop
+  Chairs</span></span><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >*</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www-lipn.univ-paris13.fr/~poibeau/cognitive/index.html#pc"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >programme Committee</span></span> 
+  </b><br></center> 
+  <hr> 
+
+<p>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="description"></span> 
+  <h3><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Description</span></h3> 
+  <p><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >This workshop is focused on the relevance of computational learning
+methods for research on human language acquisition. Developing and
+applying such computational techniques that can improve our
+understanding of human language acquisition will not only benefit
+cognitive sciences in general, but will also reflect back to NLP and
+place us in a better position to develop useful language models.</span>
+
+<p><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >The workshop aims to bring together researchers from the diverse
+fields of NLP, machine learning, artificial intelligence,
+(psycho)linguistics, etc. who are interested in the relevance of
+computational techniques for understanding human language learning.
+The workshop is intended to bridge the gap between the computational
+and cognitive communities, promote knowledge and resource sharing, and
+help initiate interdisciplinary research projects. Success in this
+type of research requires close collaboration between NLP and
+cognitive scientists. To this end, interdisciplinary workshops can
+play a key role in advancing existing and initiating new research.
+This was demonstrated by some successful events like the previous
+edition of this workshop held at ACL 2007.</span>
+<p>
+
+<hr>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="programme"></span> 
+  <h3><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Programme</span></h3> 
+<p>
+
+<table> 
+ 
+<tbody> 
+ 
+<tr> 
+<td> <font color="#000000"> <b> <span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >9:20-9:30</span>   </b> 
+</font></td> 
+<td> <font color="#006633"><b>  <span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Welcome</span> </b> </font> 
+</td> 
+</tr> 
+<tr> 
+<td> <br> </td> 
+<td> <br> </td> 
+</tr> 
+ 
+<tr> 
+<td> <font color="#000000"> <b> <span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >9:30-10:30</span>   </b> 
+</font></td> 
+<td> <b><i> <span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span> </i></b><br>
+<font color="#009966">
+<span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Conceptual Descriptions: Evidence from Corpora, the Mind, and the Brain</span></font> 
+</td> 
+</tr> 
+<tr> 
+<td> <br><br> 
+</td> 
+<td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://cswww.essex.ac.uk/staff/poesio/"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Massimo Poesio</span></span> <span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >(Joint work with Marco Baroni, Brian Murphy, Eduard Barbu, and Abdulrahman Almuhareb, among others)</span><br> 
+<span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >University of Essex and University of Trento</span> 
+<br><br> 
+</td> 
+</tr> 
+
+<tr> 
+<td> <font color="#000000"> <b> <span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >10:30-11:00</span>  <br> </b> 
+</font></td> 
+<td> <font color="##006633"><b><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >COFFEE BREAK</span></b><br> </font> 
+</td> 
+ 
+ 
+<tr> 
+<td><br>  <b> <span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >11:00-12:30</span>   </b> 
+</font></td> 
+<td>  <br><font color="##006633"><b><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >SESSION 2: Theoretical and practical aspects of language
+acquisition</span></b></font>
+</td> 
+</tr> 
+<tr> 
+<td> <br><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >11:00-11:30</span> 
+</td> 
+<td> <br><font color="#009966"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Towards a formal view of
+corrective feedback</span></td></tr> 
+<tr><td></td><td><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Staffan Larsson and Robin Cooper</span></td></tr>
+</font> 
+</td> 
+</tr> 
+
+<tr> 
+<td> <span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >11:30-12:00</span> 
+</td> 
+<td> <font color="#009966"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >A Collaborative Tool for the Computational Modelling
+of Child Language Acquisition</span></td></tr> 
+<tr><td></td><td><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Kris Jack</span> </td></tr>
+</font>  
+</td> 
+</tr> 
+<tr> 
+<td> <span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >12:00-12:30</span> </b>
+</td> 
+<td> <font color="#009966"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >What's in a Message?</span></td></tr> 
+
+<tr><td></td><td><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Stergos Afantenos and Nicolas Hernandez</span></td></tr>
+</font> 
+</td> 
+</tr> 
+
+
+
+ 
+<tr> 
+<td><br>  <b> <span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >12:30-14:00</span>   </b> 
+</td> 
+<td>  <br><b><font color="#006633"> <span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >LUNCH BREAK</span></font></b></font>
+</td> 
+</tr> 
+<tr> 
+<td><br>  <b> <span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >14:00-16:00</span>   </b> 
+</font></td> 
+<td>  <br><font color="#006633"><b><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >SESSION 3: Learnability and grammatical inference</span></b></font>
+</td> 
+</tr> 
+<tr></tr>
+<tr> 
+<td> <font color="#000000"> <b><br> <span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >14:00-15:00</span>   </b> 
+</font></td> 
+<td><br><b><i><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span></i></b><br><font color="#009966"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Treebank Parsing and Knowledge of Language: A Cognitive Perspective</span> </font>  
+</td> 
+</tr> 
+<tr> 
+<td> <br><br> 
+</td> 
+<td> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://alpha-leonis.lids.mit.edu/~berwick/Professor%20Robert%20C.%20Berwick.html"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Robert Berwick</span></span> <span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >(Joint work with Prof. Sandiway Fong, University of Arizona)</span><br> 
+<span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Massassuchets Institute of Technology</span>
+</td> 
+</tr> 
+
+<tr> 
+<td><br> <span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >15:00-15:30</span> 
+</td> 
+<td> <br><font color="#009966"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Another look at indirect
+negative evidence</span></td></tr> 
+<tr><td></td><td><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Alexander Clark and Shalom Lappin</span></td></tr>
+</font>  
+</td> 
+</tr> 
+<tr> 
+<td> <span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >15:30-16:00</span>
+</td> 
+<td> <font color="#009966"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Categorizing Local Contexts
+as a Step in Grammatical Category Induction</span></td></tr> 
+<tr><td></td><td><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Markus Dickinson and Charles Jochim</span></td></tr>
+</font> <br><br> 
+</td> 
+</tr> 
+
+
+
+
+<tr> 
+<td>  <br><b> <span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >16:00-16:30</span>  <br> </b> 
+</td> 
+<td> <br><font color="#006633"><b><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >COFFEE BREAK</span></b><br> </font> 
+</td> 
+ 
+ 
+<tr> 
+<td><br>  <b> <span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >16:30-17:30</span>   </b> 
+</td> 
+<td>  <br><font color="#006633"><b><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >SESSION 4: Ecology of languages</span></b></font>
+</td> 
+</tr> 
+
+<tr> 
+<td><br> <b><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >16:30-17:00</span> </b>
+</td> 
+<td><br> <font color="#009966"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Darwinised Data-Oriented Parsing - Statistical NLP
+with added sex and death</span></td></tr> 
+<tr><td></td><td><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Dave Cochran</span></td></tr>
+</font>  
+</td> 
+</tr> 
+<tr> 
+<td> <b><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >17:00-17:30</span> </b>
+</td> 
+<td> <font color="#009966"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Language Diversity across the Consonant
+Inventories: A Study in the Framework of Complex Networks</span></td></tr> 
+<tr><td></td><td><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Monojit Choudhury, Animesh Mukherjee, Anupam Basu, Niloy
+Ganguly, Ashish Garg and Vaibhav Jalan</span></td></tr>
+</font> 
+</td> 
+</tr> 
+
+
+</tbody> 
+</table> 
+
+
+<hr>
+<span onclick="return false" style="text-decoration:underline; color:blue" name="papers"></span> 
+  <h3><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >List of accepted papers</span></h3> 
+<p>
+
+<ul>
+<li>
+<font color="#000099"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Categorizing Local Contexts as a Step in Grammatical Category Induction</span></font><br>
+<span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Markus Dickinson and Charles Jochim</span><p>
+</li><li>
+<font color="#000099"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Towards a formal view of corrective feedback</span></font><br>
+<span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Staffan Larsson and Robin Cooper</span><p>
+</li><li>
+<font color="#000099"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Another look at indirect negative evidence</span></font><br>
+<span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Alexander Clark and Shalom Lappin</span><p>
+</li><li>
+<font color="#000099"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Darwinised Data-Oriented Parsing - Statistical NLP with added sex and death</span></font><br>
+<span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Dave Cochran</span><p>
+</li><li>
+<font color="#000099"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >What's in a Message?</span></font><br>
+<span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Stergos Afantenos and Nicolas Hernandez</span><p>
+</li><li>
+<font color="#000099"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >A Collaborative Tool for the Computational Modelling of Child Language
+Acquisition</span></font><br>
+<span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Kris Jack</span><p>
+</li><li>
+<font color="#000099"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Language Diversity across the Consonant Inventories: A Study in the Framework
+of Complex Networks</span></font><br>
+<span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Monojit Choudhury, Animesh Mukherjee, Anupam Basu, Niloy Ganguly, Ashish Garg
+and Vaibhav Jalan</span><p>
+</li>
+</ul>
+
+<p>
+
+
+
+<!-- a name="areas"></span> 
+  <h3>Areas of Interest</h3> 
+<p>
+Papers are invited on, but not limited to, the following topics:
+
+<ul>
+<li><font color="#990000">
+Computational learning theory and analysis of language learning
+</li><br><li>
+Computational models of human (first, second and bilingual) language acquisition
+</li><br><li>
+Computational models of various aspects of language acquisition,
+  and their interaction with each other
+</li><br><li>
+Computational models of the evolution of language
+</li><br><li>
+Data resources and tools for investigating computational models of
+  human language acquisition
+</li><br><li>
+Empirical and theoretical comparisons of the learning environment
+  and its impact on the acquisition task
+</li><br><li>
+Computational methods for acquiring various linguistic information
+  (related to e.g. speech, morphology, lexicon, syntax, semantics, and
+  discourse) and their relevance to research on human language acquisition
+</li><br><li>
+Investigations and comparisons of supervised, unsupervised and
+  weakly-supervised methods for learning (e.g. machine learning,
+  statistical, symbolic, biologically-inspired, active learning,
+  various hybrid models) from the cognitive aspect
+</li></font></ul>
+
+  <p>Papers can cover one or more of these areas.
+<p> 
+
+  
+  <span onclick="return false" style="text-decoration:underline; color:blue" name="info"></span> 
+  <h3>Submission Information</h3> 
+
+
+  <p>
+Final submissions are to be formatted using the EACL 2009 stylefiles, available at: <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.eacl2009.gr/conference/authors">http://www.eacl2009.gr/conference/authors</span>
+
+
+<p>
+<span style="font-weight: bold; font-size: 18px;"><font color="#000000">
+Submission will be electronic. The only accepted format for
+submitted papers is Adobe PDF. Papers must be submitted
+no later than December 19, 2008 using the submission webpage:
+<span onclick="return false" style="text-decoration:underline; color:blue" href="https://www.softconf.com/eacl09/cog-acq/">here</span>.
+</font></span>
+<p>
+Submissions will be reviewed by 3 members of the Program
+Committee. Authors of accepted papers will receive guidelines
+regarding how to produce camera-ready versions of their papers
+for inclusion in the EACL workshop proceedings.
+
+<p>
+Notification of receipt will be emailed to the contact author. -->
+
+<hr>
+  
+  <span onclick="return false" style="text-decoration:underline; color:blue" name="dates"></span> 
+  <h3><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></h3> 
+  <ul>
+    <li><s><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Paper submission deadline: &nbsp;</span> <font color="#990000"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >19 December 2008</span></font></s></li>    
+    <li><s><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Paper submission deadline: &nbsp;</span> <font color="#990000"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >23 December 2008 (extended deadline)</span></font></s></li>    <li><s><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Acceptance notification sent: &nbsp;</span> <font color="#990000"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >30 January 2009</span></font></s></li>
+    <li><s><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Final version deadline: &nbsp;</span> <font color="#990000"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >10 February 2009</span></font></s></li>
+    <li><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Workshop date: &nbsp;</span> <font color="#990000"> <span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >31 March 2009</span></font></li>
+  </ul>
+
+
+<p>
+<hr>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="chairs"></span> 
+  <h3><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Chairs</span></h3> 
+  
+<ul>
+  <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.coli.uni-saarland.de/~afra/"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Afra Alishahi</span></span><br> <span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >(University of Saarland, Germany)</span></li><br>
+  <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www-lipn.univ-paris13.fr/~poibeau/"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Thierry Poibeau</span></span><br> <span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >(CNRS and University Paris 13, France)</span></li><br>
+  <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.inf.ufrgs.br/~avillavicencio/"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Aline Villavicencio</span></font></span><br> <span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >(Federal University of Rio Grande do Sul, Brazil and University of Bath, UK)</span></li>
+</ul>
+
+<span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Address any queries regarding the workshop to:
+&nbsp;</span>
+  
+    <span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:cognitive2009@gmail.com"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >cognitive2009@gmail.com</span></span><br>
+<hr>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="pc"></span> 
+  <h3><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></h3> 
+
+<ul>
+<li><font color="#000099"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Colin J Bannard</span></font>    <span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >(Max Planck Institute for Evolutionary Anthropology, Germany)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Marco Baroni</span></font>    <span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >(University of Trento, Italy)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Robert C. Berwick</span></font>    <span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >(Massachusetts Institute of Technology, USA)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Jim Blevins</span></font>    <span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >(University of Cambridge, UK)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Rens Bod</span></font>     <span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >(University of Amsterdam, Netherlands)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Antal van den Bosch</span></font>    <span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >(Tilburg University, The Netherlands)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Chris Brew</span></font>    <span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >(Ohio State University, USA)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Ted Briscoe</span></font>    <span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >(University of Cambridge, UK)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Robin Clark</span></font>    <span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >(University of Pennsylvania, USA)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Stephen Clark</span></font>    <span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >(University of Oxford, UK)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Matthew W. Crocker</span></font>    <span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >(Saarland University, Germany)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >James Cussens</span></font>    <span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >(University of York, UK)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Walter Daelemans</span></font>    <span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >(University of Antwerp, Belgium and Tilburg University, The Netherlands)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Ted Gibson</span></font>    <span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >(Massachusetts Institute of Technology, USA)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Henriette Hendriks</span></font>    <span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >(University of Cambridge, UK)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Julia Hockenmaier</span></font>    <span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >(University of Illinois at Urbana-Champaign, USA)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Marco Idiart</span></font>    <span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >(Federal University of Rio Grande do Sul, Brazil)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Mark Johnson</span></font>    <span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >(Brown University, USA)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Aravind Joshi</span></font>    <span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >(University of Pennsylvania, USA)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Anna Korhonen</span></font>    <span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >(University of Cambridge, UK)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Alessandro Lenci</span></font>    <span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >(University of Pisa, Italy)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Massimo Poesio</span></font>    <span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >(University of Trento, Italy)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Brechtje Post</span></font>    <span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >(University of Cambridge, UK)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Ari Rappoport</span></font>    <span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >(The Hebrew University of Jerusalem, Israel)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Dan Roth</span></font>    <span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >(University of Illinois at Urbana-Champaign, USA)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Kenji Sagae</span></font>    <span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >(University of Southern California, USA)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Sabine Schulte im Walde</span></font>    <span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >(University of Stuttgart, Germany)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Mark Steedman</span></font>    <span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >(University of Edinburgh, UK)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Suzanne Stevenson</span></font>    <span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >(University of Toronto, Canada)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Patrick Sturt</span></font>    <span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >(University of Edinburgh, UK)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Bert Vaux</span></font>    <span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >(University of Wisconsin, USA)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Charles Yang</span></font>    <span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >(University of Pennsylvania, USA)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Menno van Zaanen</span></font>    <span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >(Macquarie University, Australia)</span>
+</li><li><font color="#000099"><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Michael Zock</span></font>    <span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >(LIF, CNRS, Marseille, France)</span>

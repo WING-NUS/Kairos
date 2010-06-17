@@ -1,0 +1,1219 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^liris.cnrs.fr^dgci2008^program.html_2009-08-05__14-27-05.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^liris.cnrs.fr^dgci2008^program.html_2009-08-05__14-27-05.yaml created on Wed Aug 05 17:31:22 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+<meta http-equiv="content-type" content="text/html; charset=utf-8"/>
+    
+<script type="text/javascript" src="flashembed.min.js"></script> 
+
+<link rel="stylesheet" type="text/css" media="screen" href="DGCI3.css" />
+
+ <style type="text/css">.vevent {border: 1px solid black; padding: 0px; margin-bottom: 10px;}
+div.key {font-style: italic; margin-left: 3px;}
+div.value {margin-left: 20px;}
+div.key {display: none;}
+div.value { text-align: left;}
+div.summary {background: #c0c0c0; color:#ffffff; font-weight: bold;
+      margin: 0px; padding: 3px;}
+
+.dtstart {border: none; color: #DD0000; text-align: right; font-style: italic;}
+.dtend {border: none; color: #DD0000; text-align: right; font-style: italic;}
+.summarykey {display: none;}
+
+</style>
+
+<title>DGCI 2008 - International Conference on Discrete Geometry for Computer Imagery </title>
+<style type="text/css">
+<!--
+.Style3 {
+	font-size: 10px;
+	font-style: italic;
+}
+.Style4 {
+	color: #FFFFFF;
+	font-size: 14px;
+        font-weight: bold;
+}
+-->
+</style>
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+	<div id="conteneur_global">
+<div id="Titre">
+<p><b><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >14th IAPR International Conference on</span><br/><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Discrete Geometry
+for Computer Imagery</span></b><br/><br/>
+<span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >16-18 April 2008 Lyon, France</span></p>
+</div>
+		<div id="haut_global">	</div>
+		<div id="milieu_global">
+
+
+<h2><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Scientific Program</span></h2>
+
+
+<p> <span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >You can also download the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="DGCI2008.ics"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >DGCI 2008 Electronic Calendar
+	(ICS format)</span><img onmousedown="imd(this)" border=0 src="ics.png"></span><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >.</span></p>
+
+
+<p align = left><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Quick Access:</span><span onclick="return false" style="text-decoration:underline; color:blue" href="program.png"><img
+	  src="program.png" border=0  width=150 align="right"></span>
+
+<ul>
+	  <li> <span onclick="return false" style="text-decoration:underline; color:blue" href="#wed"> <span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, 16th</span></span>
+	  <li> <span onclick="return false" style="text-decoration:underline; color:blue" href="#thu"> <span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, 17th</span></span>
+	  <li> <span onclick="return false" style="text-decoration:underline; color:blue" href="#fri"> <span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Friday, 18th</span></span>
+</ul></p>
+<br>
+
+<br><br><br><br><br><br><br><br><br>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="wed"></span>
+    <h1> <span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, 16th</span></h1>
+    
+    
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080416T081500"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Mer 16 Avr 2008 08:15</span></abbr>
+          <span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080416T090000"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >09:00</span></abbr>
+        </div>
+      </div>
+    </div>
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Bienvenue Talk</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080416T090000"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Mer 16 Avr 2008 09:00</span></abbr>
+          <span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080416T091500"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >09:15</span></abbr>
+        </div>
+      </div>
+    </div>
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Invited Lecture: Jean-Pierre Reveillès</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080416T091500"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Mer 16 Avr 2008 09:15</span></abbr>
+          <span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080416T101500"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >10:15</span></abbr>
+        </div>
+      </div>
+      <div>
+        <div class="key"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Description</span></div>
+        <div class="value"><b><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Weak Rational Computing for Digital Geometry</span></b></div>
+      </div>
+    </div>
+   
+ <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080416T153000"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Mer 16 Avr 2008 10:15</span></abbr>
+          <span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080416T160000"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >10:45</span></abbr>
+        </div>
+      </div>
+    </div>
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Models for Discrete Geometry</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080416T101500"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Mer 16 Avr 2008 10:45</span></abbr>
+          <span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080416T110500"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >12:25</span></abbr>
+        </div>
+      </div>
+      <div>
+        <div class="key"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Description</span></div>
+        <pre class="description"></div>
+        <div class="value"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >*  A First Look into a Formal and Constructive Approach for Discrete Geometry using Nonstandard Analysis</span>
+	  <br />
+	  <span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >L. Fuchs,  G. Largeteau-Skapin,  G. Wallet, E.
+	  Andres, and  A. Chollet</span>
+	  <br /><br />
+	  <span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >* Generation and Recognition of Digital Planes using
+	    Multi-dimensional Continued Fractions</span> 
+	  <br />
+	  
+	  <span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >T. Fernique</span>
+       <br /><br />
+       <span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >* Combinatorial View of Digital Convexity</span>
+          <br/>
+          <span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >S. Brlek, J.-O. Lachaud, and X. Provençal</span>
+          <br/>
+          
+          <br/>
+          <span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >*  About the frequencies of some patterns in digital planes. Application to area estimators</span>
+          <br/>
+          <span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >A. Daurat, M. Tajine, and M. Zouaoui</span>
+        </div>
+      </div>
+    
+
+    
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Lunch Break</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080416T122500"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Mer 16 Avr 2008 12:25</span></abbr>
+          <span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080416T143000"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >14:30</span></abbr>
+        </div>
+      </div>
+    </div>
+    <div class="vevent">
+         <div>
+        <div class="key summarykey"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Fast Track 1 (5 minutes per poster)</span></div>
+	
+   <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080416T143000"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Mer 16 Avr 2008 14:30</span></abbr>
+          <span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080416T153000"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >15:30</span></abbr>
+        </div>
+      </div>
+	<div class="value">
+        <table>
+<tr><td><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >* Continued Fractions and Digital Lines with Irrational Slopes</span>
+          <br/>
+          <span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >H. Uscka-Wehlou</span> 
+          <br/>
+          
+          <br/>
+          <span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >* Digitally Continuous Multivalued Functions</span>
+	  <br/>
+	  <span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >C. Escribano, A. Giraldo, and M. Asunción Sastre Rosa</span>
+	  <br/>
+
+	  <br/>
+	  <span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >* Decomposition and Construction of Neighbourhood Operations using Linear Algebra</span>
+	  <br/>
+	  <span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >A. Imiya, Y. Kameda, and N. Ohnishi</span> 
+	  <br/>
+
+	  <br/>
+	  <span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >* Tangential Cover For Thick Digital Curves</span>
+	  <br/>
+	  <span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >A. Faure and F. Feschet</span>
+	  <br/>
+
+	  <br/>
+	  <span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >* Robust Estimation of Curvature along Digital Contours with Global Optimization</span>
+	  <br/>
+	  <span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >B. Kerautret and J.-O. Lachaud</span> 
+	  <br/>
+
+	  <br/>
+	  <span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >* Digital Planar Surface Detection using Local Geometric Patterns</span>
+	  <br/>
+	  <span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Y. Kenmochi, L. Buzer, A. Sugimoto, and I. Shimizu</span> 
+	  <br/>
+</td><td>
+	  <br/>
+	  <span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >* An Efficient and Quasi-Linear Worst-Case Time Algorithm for Digital Plane Recognition</span>
+	  <br/>
+	  <span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >L. Buzer and E. Charrier</span>
+	  <br/>
+
+	  <br/>
+	  <span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >* Binomial Convolutions and Derivatives Estimation from Noisy Discretizations</span>
+	  <br/>
+	  <span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >R. Malgouyres, F. Brunet, and S. Fourey</span> 
+	  <br/>
+
+	  <br/>
+	  <span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >* 3D Image Topological Structuring with an Oriented Boundary Graph for Split and Merge Segmentation</span>
+	  <br/>
+	  <span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >F. Baldacci, A. Braquelaire, P. Desbarats, and J.-P. Domenger</span>
+	 <br/>
+
+	  <br/>
+	  <span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >* Adaptive Morphological Filtering using Similarities based on Geodesic Time</span>
+	  <br/>
+	  <span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >J. Grazzini and P. Soille</span>
+	  <br/>
+
+	  <br/>
+	  <span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >* Book Scanner Dewarping with Weak 3d Measurements and a Simplified Surface Model</span>
+	  <br/>
+	  <span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >E. Lilienblum and B. Michaelis</span> 
+	  <br/>
+</td></tr></table>
+        </div>
+      </div>
+
+    </div>
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080416T153000"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Mer 16 Avr 2008 15:30</span></abbr>
+          <span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080416T160000"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >16:00</span></abbr>
+        </div>
+      </div>
+    </div>
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Discrete Shape Representation, Recognition &amp; Analysis</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080416T160000"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Mer 16 Avr 2008 16:00</span></abbr>
+          <span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080416T174000"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >17:40</span></abbr>
+        </div>
+      </div>
+      <div>
+        <div class="key"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Description</span></div>
+        <div class="value">
+        <span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >* Geometric Feature Estimators for Noisy Discrete Surfaces</span>
+          <br/>
+          <span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >L. Provot and I. Debled-Rennesson</span>
+          <br/>
+          
+          <br/>
+          <span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >* Normals and Curvature Estimation for Digital Surfaces based on Convolutions</span>
+          <br/>
+          <span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >S. Fourey and R. Malgouyres</span>
+          <br/>
+          
+          <br/>
+          <span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >* On Minimal Moment of Inertia Polyominoes</span>
+          <br/>
+          <span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >S. Brlek, G. Labelle, and A. Lacasse</span>
+          <br/>
+          
+          <br/>
+          <span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >* Gift-Wrapping based Preimage Computation</span>
+          <br/>
+          <span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Y. Gerard, F. Feschet, and D. Coeurjolly</span>
+        </div>
+      </div>
+    </div>
+   
+<span onclick="return false" style="text-decoration:underline; color:blue" name="thu"></span>
+    <h1> <span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, 17th</span></h1>
+
+
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >TC18 Meeting (optional)</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080417T083000"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Jeu 17 Avr 2008 08:30</span></abbr>
+          <span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080417T090000"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >09:00</span></abbr>
+        </div>
+      </div>
+    </div>
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Invited Lecture: Ullrich Köthe</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080417T090000"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Jeu 17 Avr 2008 09:00</span></abbr>
+          <span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080417T100000"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >10:00</span></abbr>
+        </div>
+      </div>
+      <div>
+        <div class="key"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Description</span></div>
+        <div class="value"><b><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >What can we learn from discrete images about the Continuous
+  World ?</span></b></div>
+      </div>
+    </div>
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Discrete and Combinatorial Tools for Image Segmentation and Analysis</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080417T100000"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Jeu 17 Avr 2008 10:00</span></abbr>
+          <span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080417T105000"><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >10:50</span></abbr>
+        </div>
+      </div>
+      <div>
+        <div class="key"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Description</span></div>
+        <div class="value">
+      <span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >* Optimal Difference Operator Selection</span>
+          <br/>
+          <span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >P. Veelaert and K. Teelen</span>
+          <br/>
+          
+          <br/>
+          <span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >* First Results for 3D Image Segmentation with Topological Map</span>
+          <br/>
+          <span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >A. Dupas and G. Damiand</span>    
+        </div>
+      </div>
+    </div>
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080417T105000"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Jeu 17 Avr 2008 10:50</span></abbr>
+          <span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080417T111500"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >11:15</span></abbr>
+        </div>
+      </div>
+    </div>
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Morphological Analysis</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080417T111500"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Jeu 17 Avr 2008 11:15</span></abbr>
+          <span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080417T123000"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >12:30</span></abbr>
+        </div>
+      </div>
+      <div>
+        <div class="key"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Description</span></div>
+        <div class="value">
+          <span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >* Advances in Constrained Connectivity</span>
+          <br/>
+          <span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >P. Soille and J. Grazzini</span>
+          <br/>
+          
+          <br/>
+          <span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >* On Watershed Cuts and Thinnings</span>
+          <br/>
+          <span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >J. Cousty,  G. Bertrand, L. Najman, and M. Couprie</span>
+          <br/>
+          
+          <br/>
+          <span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >* A New Fuzzy Connectivity Class. Application to Structural Recognition in Images</span>
+          <br/>
+          <span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >O. Nempont, J. Atif, E. Angelini, and  I. Bloch</span> 
+        </div>
+      </div>
+    </div>
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Lunch Break</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080417T123000"><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Jeu 17 Avr 2008 12:30</span></abbr>
+          <span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080417T143000"><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >14:30</span></abbr>
+        </div>
+      </div>
+    </div>
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Fast Track 2 (5 minutes per poster)</span></div>
+<div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080417T143000"><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Jeu 17 Avr 2008 14:30</span></abbr>
+          <span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080417T153000"><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >15:30</span></abbr>
+        </div>
+      </div>
+	<div class="value">
+  <table>
+<tr><td>         <span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >* Discrete Complex Structure on Surfel Surfaces</span>
+          <br/>
+          <span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >C. Mercat</span> 
+          <br/>
+
+	  <br/>
+	  <span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >* Minimal Simple Pairs in the Cubic Grid</span>
+	  <br/>
+	  <span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >N. Passat, M. Couprie, and G. Bertrand</span> 
+	  <br/>
+
+	  <br/>
+	  <span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >* Determining whether a Simplicial 3-Complex Collapses to a 1-Complex is NP-Complete</span>
+	  <br/>
+	  <span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >R. Malgouyres and A. R. Francés</span> 
+	  <br/>
+
+	  <br/>
+	  <span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >* Statistical Template Matching under Geometric Transformations</span>
+	  <br/>
+	  <span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >A. Sibiryakov</span> 
+	  <br/>
+
+	  <br/>
+	  <span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >* Distance Transformation on Two-Dimensional Irregular Isothetic Grids</span>
+	  <br/>
+	  <span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >A. Vacavant, D. Coeurjolly, and L. Tougne</span> 
+	  <br/>
+
+	  <br/>
+	  <span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >* Self-similar Discrete Rotation Configurations and Interlaced Sturmian Words</span>
+	  <br/>
+	  <span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >B. Nouvel</span> 
+	  <br/>
+</td><td>
+	  <br/>
+	  <span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >* Segmenting Simplified Surface Skeletons</span>
+	  <br/>
+	  <span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >D. Reniers and A. Telea</span> 
+	  <br/>
+
+	  <br/>
+	  <span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >* Approximating hv-Convex Binary Matrices and Images from Discrete Projections</span>
+	  <br/>
+	  <span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >F. Jarray, M.-C. Costa, and C. Picouleau</span> 
+	  <br/>
+
+	  <br/>
+	  <span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >* Directional Structures Detection Based on Morphological Line-Segment and Orientation Functions</span>
+	  <br/>
+	  <span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >I. R. Terol-Villalobos, L. A. Morales-Hernandez, and G. Herrera-Ruiz</span> 
+	  <br/>
+
+	  <br/>
+	  <span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >* Predicting Corresponding Region in a Third View using Discrete Epipolar Lines</span>
+	  <br/>
+	  <span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >H. Natsumi, A. Sugimoto and Y. Kenmochi</span> 
+	  <br/>
+
+	  <br/>
+	  <span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >* A Discrete Modelling of Soil Fragments Transport by Runoff</span>
+	  <br/>
+	  <span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >G. Valette, S. Prévost, L. Lucas, and J. Léonard</span> 
+	  <br/>
+</td></tr></table>
+	</div>
+      </div>
+      
+    </div>
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080417T153000"><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Jeu 17 Avr 2008 15:30</span></abbr>
+          <span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080417T160000"><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >16:00</span></abbr>
+        </div>
+      </div>
+    </div>
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080417T153000"><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Jeu 17 Avr 2008 15:30</span></abbr>
+          <span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080417T180000"><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >18:00</span></abbr>
+        </div>
+      </div>
+      <div>
+        <div class="key"><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Description</span></div>
+        <div class="value">
+       <span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >* Decomposition and Construction of Neighbourhood Operations using Linear Algebra</span> 
+<br /><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >A. Imiya, Y. Kameda, and N. Ohnishi</span>
+<br />
+<br /><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >* Digitally Continuous Multivalued Functions</span> 
+<br /><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >C. Escribano, A. Giraldo, and M. Asunción Sastre Rosa</span>
+<br />
+<br /><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >* Continued Fractions and Digital Lines with Irrational Slopes</span> 
+	  <br /><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >H. Uscka-Wehlou</span>
+	  <br />
+	  <br /><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >* Discrete Complex Structure on Surfel Surfaces</span> 
+	  <br /><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >C. Mercat</span>
+	  <br />
+	  <br /><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >* Minimal Simple Pairs in the Cubic Grid</span> 
+	  <br /><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >N. Passat, M. Couprie, and G. Bertrand</span>
+	  <br />
+	  <br /><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >* Determining whether a Simplicial 3-Complex Collapses to a 1-Complex is NP-Complete</span> 
+<br /><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >R. Malgouyres and A. R. Francés</span>
+	  <br />
+	  <br /><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >* Statistical Template Matching under Geometric Transformations</span> 
+	  <br /><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >A. Sibiryakov</span>
+	  <br />
+	  <br /><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >* Distance Transformation on Two-Dimensional Irregular Isothetic Grids</span>
+	  <br /><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >A. Vacavant, D. Coeurjolly, and L. Tougne</span>
+	  <br />
+<br /><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >* Self-similar Discrete Rotation Configurations and Interlaced Sturmian Words</span> 
+	  <br /><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >B. Nouvel</span>
+	  <br />
+	  <br /><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >* Segmenting Simplified Surface Skeletons</span> 
+	  <br /><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >D. Reniers and A. Telea</span>
+	  <br />
+<br /><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >* Digital Planar Surface Detection using Local Geometric Patterns</span> 
+<br /><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Y. Kenmochi, L. Buzer, A. Sugimoto, and I. Shimizu</span>
+<br />
+<br /><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >* Robust Estimation of Curvature along Digital Contours with Global Optimization</span> 
+<br /><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >B. Kerautret and J.-O. Lachaud</span>
+<br />
+<br /><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >* An Efficient and Quasi-Linear Worst-Case Time Algorithm for Digital Plane Recognition</span> 
+<br /><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >L. Buzer and E. Charrier</span>
+<br />
+<br /><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >* Tangential Cover For Thick Digital Curves</span> 
+<br /><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >A. Faure and F. Feschet</span>
+<br />
+<br /><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >* Binomial Convolutions and Derivatives Estimation from Noisy Discretizations</span> 
+<br /><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >R. Malgouyres, F. Brunet, and S. Fourey</span>
+<br />
+<br /><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >* Approximating hv-Convex Binary Matrices and Images from Discrete Projections</span> 
+<br /><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >F. Jarray, M.-C. Costa, and C. Picouleau</span>
+<br />
+<br /><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >* Directional Structures Detection Based on Morphological Line-Segment and Orientation Functions</span> 
+<br /><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >I. R. Terol-Villalobos, L. A. Morales-Hernandez, and G. Herrera-Ruiz</span>
+<br /> 
+<br /><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >* Predicting Corresponding Region in a Third View using Discrete Epipolar Lines</span> 
+<br /><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >H. Natsumi, A. Sugimoto and Y. Kenmochi</span>
+<br />
+<br /><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >* A Discrete Modelling of Soil Fragments Transport by Runoff</span> 
+	  <br /><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >G. Valette, S. Prévost, L. Lucas, and J. Léonard</span>
+	  <br />
+	  <br /><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >* Adaptive Morphological Filtering using Similarities based on Geodesic Time</span>
+	  <br /><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >J. Grazzini and P. Soille</span>
+	  <br />
+<br /><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >* Book Scanner Dewarping with Weak 3d Measurements and a Simplified Surface 	  Model</span><br />
+ <span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >E. Lilienblum and B. Michaelis</span>
+	  <br />
+	  <br /><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >* 3D Image Topological Structuring with an Oriented Boundary Graph for Split and Merge Segmentation</span> 
+	  <br /><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >F. Baldacci, A. Braquelaire, P.
+	  Desbarats, and J.-P. Domenger</span> 
+        </div>
+      </div>
+    </div>
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Gala Dinner</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080417T183000"><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >Jeu 17 Avr 2008 18:30</span></abbr>
+          <span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080417T223000"><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >22:30</span></abbr>
+        </div>
+      </div>
+      <div>
+        <div class="key"><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Lieu</span></div>
+        <div class="value location"><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >Belleville</span></div>
+      </div>
+    </div>
+
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="fri"></span>
+    <h1> <span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Friday, 18th</span></h1>
+
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >Invited Lecture: Dinesh Manocha</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080418T084500"><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Ven 18 Avr 2008 08:45</span></abbr>
+          <span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080418T094500"><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >09:45</span></abbr>
+        </div>
+      </div>
+      <div>
+        <div class="key"><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >Description</span></div>
+        <div class="value"><b><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Digital Geometry Processing with Topological Guarantees</span></b></div>
+      </div>
+    </div>
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080418T113000"><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >Ven 18 Avr 2008 9:45</span></abbr>
+          <span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080418T114500"><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >10:00</span></abbr>
+        </div>
+      </div>
+    </div>
+<div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >Discrete and Combinatorial Topology</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080418T094500"><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >Ven 18 Avr 2008 10:00</span></abbr>
+          <span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080418T113000"><span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >11:45</span></abbr>
+        </div>
+      </div>
+      <div>
+        <div class="key"><span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >Description</span></div>
+        <div class="value">
+       <span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >* New Characterizations of Simple Points, Minimal Non-Simple Sets
+and P-Simple Points in 2D, 3D and 4D Discrete Spaces</span>
+          <br/>
+          <span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >M. Couprie and G. Bertrand</span>
+          <br/>
+          
+          <br/>
+          <span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >* Cancellation of Critical Points in 3D Morse Complexes</span>
+          <br/>
+          <span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >L. Comic and L.  De Floriani</span>
+          <br/>
+          
+          <br/>
+          <span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >* Characterizing and Detecting Loops in n-Dimensional Discrete Toric Spaces</span>
+          <br/>
+          <span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >J. Chaussard, G. Bertrand, and M. Couprie</span>
+          <br/>
+          
+          <br/>
+          <span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >* Insertion and Expansion Operations for n-Dimensional Generalized Maps</span>
+          <br/>
+          <span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >M. Baba-ali, G. Damiand, X. Skapin, and D. Marcheix</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >Lunch Break</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080418T114500"><span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >Ven 18 Avr 2008 11:45</span></abbr>
+          <span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080418T134500"><span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >13:45</span></abbr>
+        </div>
+      </div>
+    </div>
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >Geometric Transforms</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080418T134500"><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >Ven 18 Avr 2008 13:45</span></abbr>
+          <span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080418T150000"><span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >15:00</span></abbr>
+        </div>
+      </div>
+      <div>
+        <div class="key"><span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >Description</span></div>
+        <div class="value">
+    <span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >* Medial Axis LUT Computation for Chamfer Norms Using H-Polytopes</span>
+          <br/>
+          <span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >N. Normand and P. Évenou</span>
+          <br/>
+          
+          <br/>
+          <span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >* Weighted Neighbourhood Sequences in Non-Standard Three-Dimensional Grids - Metricity and Algorithms</span>
+          <br/>
+          <span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >R. Strand and B. Nagy</span>
+          <br/>
+          
+          <br/>
+          <span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >* Euclidean Eccentricity Transform by Discrete Arc Paving</span>
+          <br/>
+          <span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >A. Ion, W. G. Kropatsch, and E. Andres</span>
+        </div>
+      </div>
+    </div>
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >Discrete Tomography</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080418T150000"><span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >Ven 18 Avr 2008 15:00</span></abbr>
+          <span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080418T161500"><span class="coloringspan" id="282" onmousedown="md(this)" onmouseup="mu(this)" >16:15</span></abbr>
+        </div>
+      </div>
+      <div>
+        <div class="key"><span class="coloringspan" id="283" onmousedown="md(this)" onmouseup="mu(this)" >Description</span></div>
+        <div class="value">
+       <span class="coloringspan" id="284" onmousedown="md(this)" onmouseup="mu(this)" >* Selection of Local Thresholds for Tomogram Segmentation by Projection Distance Minimization</span>
+          <br/>
+          <span class="coloringspan" id="285" onmousedown="md(this)" onmouseup="mu(this)" >K.J. Batenburg and J. Sijbers</span>
+          <br/>
+          
+          <br/>
+          <span class="coloringspan" id="286" onmousedown="md(this)" onmouseup="mu(this)" >* Reconstructing Binary Matrices with Neighborhood Constraints: an NP Hard Problem</span>
+          <br/>
+          <span class="coloringspan" id="287" onmousedown="md(this)" onmouseup="mu(this)" >A. Frosini, C. Picouleau, and S.Rinaldi</span>
+          <br/>
+          
+          <br/>
+          <span class="coloringspan" id="288" onmousedown="md(this)" onmouseup="mu(this)" >* An Exact, Non-Iterative Mojette Inversion Technique utilising Ghosts</span>
+          <br/>
+          <span class="coloringspan" id="289" onmousedown="md(this)" onmouseup="mu(this)" >S. Chandra, I. Svalbe, and J.-P. Guedon</span>  
+        </div>
+      </div>
+    </div>
+    <div class="vevent">
+      <div>
+        <div class="key summarykey"><span class="coloringspan" id="290" onmousedown="md(this)" onmouseup="mu(this)" >Titre</span></div>
+        <div class="value summary"><span class="coloringspan" id="291" onmousedown="md(this)" onmouseup="mu(this)" >Farewell...</span></div>
+      </div>
+      <div>
+        <div class="key"></div>
+        <div class="value">
+          <abbr class="dtstart" title="20080418T161500"><span class="coloringspan" id="292" onmousedown="md(this)" onmouseup="mu(this)" >Ven 18 Avr 2008 16:15</span></abbr>
+          <span class="coloringspan" id="293" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+          <abbr class="dtend" title="20080418T163000"><span class="coloringspan" id="294" onmousedown="md(this)" onmouseup="mu(this)" >16:30</span></abbr>
+        </div>
+      </div>
+    </div>
+
+
+
+</div>
+
+		<div id="bas_global">		</div>
+	<div id="conteneur_menu">
+			<div id="haut_menu"></div>
+			<div id="milieu_menu">
+			<span class="Style4"><span class="coloringspan" id="295" onmousedown="md(this)" onmouseup="mu(this)" >Presentation</span></span><br />
+			<span class="coloringspan" id="296" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="./index.html"><span class="coloringspan" id="297" onmousedown="md(this)" onmouseup="mu(this)" >Main page</span></span><br />
+			<span class="coloringspan" id="298" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="./callforpapers.html"><span class="coloringspan" id="299" onmousedown="md(this)" onmouseup="mu(this)" >Call for papers</span></span><br />
+			<span class="coloringspan" id="300" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="./invitedspeakers.html"><span class="coloringspan" id="301" onmousedown="md(this)" onmouseup="mu(this)" >Invited Speakers</span></span><br />
+			<span class="coloringspan" id="302" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="./committees.html"><span class="coloringspan" id="303" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></span><br />
+			<span class="coloringspan" id="304" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="./program.html"><span class="coloringspan" id="305" onmousedown="md(this)" onmouseup="mu(this)" >Scientific
+      Program</span></span><br />
+			<span class="coloringspan" id="306" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="./proceedings.html"><span class="coloringspan" id="307" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></span><br />
+    <span class="coloringspan" id="308" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="./specialissues.html"><span class="coloringspan" id="309" onmousedown="md(this)" onmouseup="mu(this)" >Special Issues</span></span><br />
+			<span class="Style4"><span class="coloringspan" id="310" onmousedown="md(this)" onmouseup="mu(this)" >Submission</span></span><br />
+			<span class="coloringspan" id="311" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="./guidelines.html"><span class="coloringspan" id="312" onmousedown="md(this)" onmouseup="mu(this)" >Guidelines</span></span><br />
+			<span class="coloringspan" id="313" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="https://liris.cnrs.fr/dgci2008/conftool/"><span class="coloringspan" id="314" onmousedown="md(this)" onmouseup="mu(this)" >Online submission</span></span><br />
+			<span class="coloringspan" id="315" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue"       href="presentations.html"><span class="coloringspan" id="316" onmousedown="md(this)" onmouseup="mu(this)" >Presentations</span></span><br />
+			<span class="Style4"><span class="coloringspan" id="317" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span><br />
+			<span class="coloringspan" id="318" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="./registration.html"><span class="coloringspan" id="319" onmousedown="md(this)" onmouseup="mu(this)" >Information</span></span><br />
+			<span class="coloringspan" id="320" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="https://liris.cnrs.fr/dgci2008/conftool"><span class="coloringspan" id="321" onmousedown="md(this)" onmouseup="mu(this)" >Online registration</span></span><br />
+			<span class="Style4"><span class="coloringspan" id="322" onmousedown="md(this)" onmouseup="mu(this)" >Venue</span></span><br />
+			<span class="coloringspan" id="323" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="./location.html"><span class="coloringspan" id="324" onmousedown="md(this)" onmouseup="mu(this)" >Location</span></span><br/>
+			<span class="coloringspan" id="325" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue"       href="./conference.html"><span class="coloringspan" id="326" onmousedown="md(this)" onmouseup="mu(this)" >Maps</span></span><br/>
+	<span class="coloringspan" id="327" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="./accommodations.html"><span class="coloringspan" id="328" onmousedown="md(this)" onmouseup="mu(this)" >Accommodations</span></span><br/>
+			<span class="coloringspan" id="329" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="./venue_Lyon.html"><span class="coloringspan" id="330" onmousedown="md(this)" onmouseup="mu(this)" >Venue to Lyon</span></span><br />
+			<!--&nbsp;<span onclick="return false" style="text-decoration:underline; color:blue" href="./accomodations.html">Accomodations</span><br />-->
+                        <span class="Style4"><span class="coloringspan" id="331" onmousedown="md(this)" onmouseup="mu(this)" >Other information</span></span><br />
+                        <span class="coloringspan" id="332" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="./sponsors.html"><span class="coloringspan" id="333" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></span><br />
+                        <span class="coloringspan" id="334" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="./previousDGCIs.html"><span class="coloringspan" id="335" onmousedown="md(this)" onmouseup="mu(this)" >Previous DGCIs</span></span><br />
+			<span class="coloringspan" id="336" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+			<span class="coloringspan" id="337" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="./postconference.html"><b><span class="coloringspan" id="338" onmousedown="md(this)" onmouseup="mu(this)" >Post-Conference</span>

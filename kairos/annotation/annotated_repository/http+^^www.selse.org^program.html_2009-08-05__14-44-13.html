@@ -1,0 +1,583 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml"><head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.selse.org^program.html_2009-08-05__14-44-13.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.selse.org^program.html_2009-08-05__14-44-13.yaml created on Wed Aug 05 17:32:23 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+<!--
+Design by Free CSS Templates
+http://www.freecsstemplates.org
+Released for free under a Creative Commons Attribution 2.5 License
+-->
+
+
+      <meta http-equiv="content-type" content="text/html; charset=UTF-8" /><title>SELSE 5 Workshop - Silicon Errors in Logic - System Effects - Program</title>
+      
+      <meta name="keywords" content="" />
+      <meta name="description" content="" />
+      <link href="default.css" rel="stylesheet" type="text/css" /><meta http-equiv="CONTENT-TYPE" content="text/html; charset=utf-8" /><meta name="GENERATOR" content="OpenOffice.org 2.3  (Linux)" /><style type="text/css">
+	<!--
+		@page { size: 8.5in 11in; margin: 0.79in }
+		P { margin-bottom: 0.08in }
+		A:link { color: #0000ff }
+	-->
+	</style></head>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<div id="header">
+   <div id="logo">
+      <span onclick="return false" style="text-decoration:underline; color:blue" href="index.html">
+      <h1><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >SELSE 5</span></h1><br />
+      </span>
+   </div>
+   <div id="menu">
+      <ul>
+         <li class="first"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html" accesskey="1" title=""><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></li>
+         <li><span onclick="return false" style="text-decoration:underline; color:blue" href="program.html" accesskey="2" title=""><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="committee.html" accesskey="4" title=""><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Committee</span></span></li>
+	 <li><span onclick="return false" style="text-decoration:underline; color:blue" href="preconference.html" accesskey="5" title=""><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >preconference</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="local.html" accesskey="6" title=""><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Local Info</span></span></li>
+      </ul>
+   </div>
+</div>
+<div id="splash">
+      <span onclick="return false" style="text-decoration:underline; color:blue" href="index.html">
+      <h2><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >2009 IEEE Workshop on Silicon Errors in Logic - System Effects</span><br /><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >stanford University, march 24th and 25th, 2009</span></h2>
+      </span>
+</div>
+
+<div id="content">
+   <div id="colOne">
+
+
+	
+	
+	
+	
+
+<span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >A</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="SELSE5%20Program.pdf"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >PDF copy</span></span>
+<span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >of this program is available. Links to the most papers and some
+presentations are provided below. SELSE is an informal workshop. To
+encourage widespread participation authors are given the option to not
+have their papers or presentations published on this web site. We thank
+all authors for their participation.</span><br />
+<br />
+<table style="text-align: left; width: 100%; height: 3240px;" border="0" cellpadding="2" cellspacing="2"><tbody><tr><td style="font-weight: bold;"><big></big><br />
+</td><td style="width: 5px;"><br />
+</td><td style="text-align: center;"><font style="font-style: italic;" color="#000000" size="+1"><b><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >SELSE 5</span><br /><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Day 1 - March 24th, 2009</span><br /><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Stanford University</span></b></font></td></tr><tr><td><br />
+</td><td><br />
+</td><td><br />
+</td></tr><tr><td><font color="#000000" size="+1"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >8:00-8:45&nbsp;</span></font></td><td><br />
+</td><td><font color="#000000" size="+1"><b><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Continental Breakfast and Registration</span></b></font></td></tr><tr><td><font color="#000000" size="+1"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >8:45-9:00</span> </font></td><td><br />
+</td><td><font color="#000000" size="+1"><b><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Welcome and Introduction from General Co-Chair and Committee</span> </b></font></td></tr><tr><td style="vertical-align: top;"><font color="#000000" size="+1"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >9:00-10:30</span> <b><br /></b></font></td><td><br />
+</td><td><font color="#000000" size="+1"><b><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Session I: System Vulnerability and Workload Effects</span><br /><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Rakesh Kumar (UIUC)</span><br />
+</b></font></td></tr><tr><td style="vertical-align: top;"><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_9.pdf"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span><br /><br /><br /><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_3.pdf"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Presentations/3_Biswas_V.pdf"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><br /><br /><br /><br /><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_20.pdf"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Presentations/20_Leveugle_V.pdf"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span><br /></span>
+</td><td><br />
+</td><td><font color="#000000" size="+1"><u><font size="+1"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >The Effect of Input Data on Program Vulnerability.</span> </font></u></font><p><font color="#000000" size="+1"><font size="+1"><i><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Vilas Sridharan and David Kaeli.</span> </i></font></font></p><p><font color="#000000" size="+1"><font size="+1"><u><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Quantized AVF: A Means of Capturing Vulnerability Variations over Small Windows of Time.</span></u><br />
+      <i><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Arijit Biswas, Niranjan Soundararajan, Shubhendu Mukherjee and Sudhanva Gurumurthi.</span> </i></font></font></p><p><font color="#000000" size="+1"><font size="+1"><u><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Soft Error Effect and Register Criticality Evaluations: Past, Present and Future.</span></u><br />
+<i><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Régis Leveugle, Laurence Pierre, Paolo Maistri and Renaud Clavel.</span> </i></font></font></p></td></tr><tr><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >10:30-10:45</span></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><b><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></b></font></font></font></td></tr><tr><td style="vertical-align: top;"><font color="#000000" size="+1"><font size="+1"><font size="+1"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >10:45-12:15</span></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><b><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Session II: Applications / Case Studies</span><br /><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Chair : Charles Recchia (Intel)</span><br />
+</b></font></font></font></td></tr><tr><td style="vertical-align: top;"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Paper n/a</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Presentations/25_Skarin_V.pdf"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><br /><br /><br /><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >n/a</span><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_31.pdf"><br /></span><br /><br /><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_14.pdf"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Presentations/14_Chuang_V.pdf"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><br />
+</td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><u><font size="+1"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Evaluation of Low-Cost Detection and Recovery of Soft Errors in an ABS controller.</span> </font></u></font></font></font><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><i><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Skarin and Johan Karlsson</span> </i></font></font></font></font></p><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><u><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >A Case Study of the Soft Errors Observed in I/O Adapters.</span> </u></font></font></font></font></p><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><i><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Anh Dang, Pia Sanda, Ricardo Mata and Subhasish Mitra.</span> </i></font></font></font></font></p><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><u><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Platform Neutron Testing for Single Event Upset (SEU).</span> </u></font></font></font></font></p><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><i><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Tsu-Yau Chuang, Eric Schmidt and Shi-Jie Wen.</span></i></font></font></font></font></p></td></tr><tr><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >12:15-12:45</span></font></font></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><b><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></b></font></font></font></font></font></td></tr><tr><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >12:45-14:00</span></font></font></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><b><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session I</span></b></font></font></font></font></font></td></tr><tr><td style="vertical-align: top;"><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_28.pdf"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span><br /><br /><br /><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_26.pdf"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span><br /><br /><br /><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_27.pdf"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span><br /><br /><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_7.pdf"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span><br /><br /><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_5.pdf"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span><br /><br /><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_17.pdf"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span><br />
+</td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><u><font size="+1"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Adapting to Intra-Die Variations in Transient Fault Susceptibilities.</span><br />
+</font></u><font style="font-style: italic;" size="+1"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Ke</span></font><font style="font-style: italic;" size="+1"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >nneth Zick and John Hayes.</span></font></font></font></font></font></font><br />
+      <p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><u><u><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Testing the Critical Operating Point (COP) Hypothesis using FPGA Emulation of Timing Errors in Overscaled Soft-Processors.</span></u></u><span style="font-style: italic;"><br />
+<span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Sriram Narayanan, Galen Lyle, Rakesh Kumar and Douglas L. Jones.</span></span></font></font></font></font></font></font></p>
+<p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><u><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Thermal Management in Reliably Overclocked Systems</span><u><font color="#000000" size="+1"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >.</span> 
+</font></u></u><font color="#000000" size="+1"><i><br />
+<span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Prem Kumar Ramesh, Viswanathan Subramanian and Arun Somani</span></i><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >.</span> 
+</font></font></font></font></font></font></font></p><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><u><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Analysis of a Multiple Cell Upset Failure Model for Memories.</span><br />
+</u><i><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Sanghyeon Baeg, Pedro Reviriego, Juan Antonio Maestro, ShiJie Wen and Richard Wong.</span></i></font></font></font></font></font></font></font></p><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><u><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Single-Threaded Mode AVF Prediction During Redundant Execution.</span><br />
+</u><i><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Blake C. Sutton and Sudhanva Gurumurthi.</span><br />
+      </i></font></font></font></font></font></font></font></p>
+      <p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><span style="text-decoration: underline;"><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Exploring the Synergy of Emerging Workloads and Silicon Reliability Trends.</span></span><br style="text-decoration: underline;" />
+      <i><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Marc de Kruiff and Karu Sankaralingam.</span><br />
+      </i></font></font></font></font></font></font></font></p>
+</td></tr><tr><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >14:00-14:15</span></font></font></font></font></font></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><b><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></b></font></font></font></font></font></font></font></font></td></tr><tr><td style="vertical-align: top;"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >14:15-16:15</span></font></font></font></font></font></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><b><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Session III: SER Measurement and Modeling</span><br /><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Steve Walstra (Intel)</span><br />
+</b></font></font></font></font></font></font></font></font></td></tr><tr><td style="vertical-align: top;"><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_24.pdf"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Presentations/24_Hong_V.pdf"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><br /><br /><br /><br /><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_29.pdf"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Presentations/29_Dixit_V.pdf"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_29.pdf"><br /></span><br /><br /><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >n/a</span><br /><br /><br /><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_34.pdf"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span><br />
+</td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><u><font size="+1"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Neutron Beam Irradiation Study of Workload Dependence of SER in a Microprocessor</span></font></u><font size="+1"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >.</span><br />
+      <span style="font-style: italic;"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Ted Hong, Sriram Narayanan, Galen Lyle, Rakesh Kumar and Douglas L. Jones.</span><br />
+      <br />
+      </span></font></font></font></font></font></font></font></font></font><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><u><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Trends from Ten Years of Soft Error Experimentation.</span></u><br />
+<i><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Anand Dixit, Raymond Heald and Alan Wood.</span> </i></font></font></font></font></font></font></font></font></font></p><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><u><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Comparison of Alpha-particle and Neutron-induced Combinational and Sequential Logic Error Rates at the 32nm Technology Node.</span></u><br />
+<i><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Balkaran Gill, Norbert Seifert and Victor Zia.</span> </i></font></font></font></font></font></font></font></font></font></p><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><u><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Soft-Error Cross-Section Mapping and Rate Prediction using Accurate Simulation.</span></u><br />
+<i><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Klas Lilja.</span> </i></font></font></font></font></font></font></font></font></font></p></td></tr><tr><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >16:15-16:30</span></font></font></font></font></font></font></font></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><b><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></b></font></font></font></font></font></font></font></font></font></font></td></tr><tr><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >16:30-17:15</span></font></font></font></font></font></font></font></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><b><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Panel: “System Specifications of Soft Error Performance”</span><br />
+      </b></font></font></font></font></font></font></font></font></font></font>
+      <table style="text-align: left; width: 100%;" border="1" cellpadding="2" cellspacing="2">
+        <tbody>
+          <tr>
+            <td style="vertical-align: top; font-weight: bold; width: 124px;"><big><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Moderator:</span><br />
+            </big></td>
+            <td style="vertical-align: top; font-weight: bold; width: 577px;"><big><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Adrian Evans (Cisco)</span><br />
+            </big></td>
+          </tr>
+          <tr>
+            <td style="vertical-align: top; font-weight: bold; width: 124px;"><big><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Panelists:</span><br />
+            </big></td>
+            <td style="vertical-align: top; font-weight: bold; width: 577px;"><big><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Pia Sanda (IBM)</span><br />
+            </big></td>
+          </tr>
+          <tr>
+            <td style="vertical-align: top; font-weight: bold; width: 124px;"><big><br />
+            </big></td>
+            <td style="vertical-align: top; font-weight: bold; width: 577px;"><big><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Allan Silburt (Cisco)</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Presentations/N2_Silburt_V.pdf"><small style="font-weight: normal;"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></small></span><br />
+            </big></td>
+          </tr>
+          <tr>
+            <td style="vertical-align: top; font-weight: bold; width: 124px;"><big><br />
+            </big></td>
+            <td style="vertical-align: top; font-weight: bold; width: 577px;"><big><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Yaakov Kogan (AT&amp;T)</span><br />
+            </big></td>
+          </tr>
+          <tr>
+            <td style="vertical-align: top; font-weight: bold; width: 124px;"><big><br />
+            </big></td>
+            <td style="vertical-align: top; font-weight: bold; width: 577px;"><big><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Sarah Michalak (LANL)</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Presentations/N3_Michalak_V.pdf"><small style="font-weight: normal;"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></small></span><br />
+            </big></td>
+          </tr>
+        </tbody>
+      </table>
+      <font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><b><br />
+      </b></font></font></font></font></font></font></font></font></font></font></td></tr><tr><td style="vertical-align: top;"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >17:15-18:00</span></font></font></font></font></font></font></font></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><b><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Birds of a Feather Sessions</span><br />
+      </b></font></font></font></font></font></font></font></font></font></font>
+      <table style="text-align: left; width: 100%;" border="1" cellpadding="2" cellspacing="2">
+        <tbody>
+          <tr>
+            <td style="vertical-align: top; width: 125px;"><big><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Moderator:</span><br />
+            </big></td>
+            <td style="vertical-align: top; width: 576px;"><big><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Jeff Wilkinson (Medtronic)</span><br />
+            </big></td>
+          </tr>
+        </tbody>
+      </table>
+      <font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><b><br />
+      </b></font></font></font></font></font></font></font></font></font></font><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><small><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Birds
+of a Feather sessions provide small groups the opportunity to gather
+for a short discussion and planning meeting related to a specific
+topic. One session has been planned and the others will be announced by
+lunchtime of day 1.&nbsp; E-mail suggestions to publications@selse.org
+or speak to one of the workshop organizers onsite.</span></small><b><br />
+      </b></font></font></font></font></font></font></font></font></font></font></td></tr><tr><td><br />
+</td><td><br />
+</td><td><big><span style="font-weight: bold; color: black;"><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Session A: Embedded systems derating: How many soft errors lead to system failures in a small system?</span></span><br />
+      <br />
+<span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Studies have been published describing the derating values to use to
+predict the fraction of soft-errors that lead to system errors. Most of
+these studies have concentrated on this question using large scale
+computer systems that are highly optimized for soft-error tolerance.
+Two recent papers on embedded system derating suggest that the values
+are quite different for simpler microprocessor architectures.</span> <br />
+<span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Participants will be asked to consider:</span><br />
+      </big><big><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp; Is there a real difference between these classes of systems?</span></big><br />
+      <big><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp; How should derating be defined for embedded systems?</span></big><br />
+      <big><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp; What projects or avenues of research are likely to be profitable to further investigation of this topic?</span></big><br />
+</td></tr><tr>
+      <td style="vertical-align: top;"><br />
+      </td>
+      <td style="vertical-align: top;"><br />
+      </td>
+      <td style="vertical-align: top;"><big style="font-weight: bold; color: black;"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Session B &amp; C: TBD</span></big><br />
+      </td>
+    </tr>
+<tr><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >18:00-</span></font></font></font></font></font></font></font></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><b><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Dinner and Reception</span></b></font></font></font></font></font></font></font></font></font></font></td></tr><tr><td><br />
+</td><td><br />
+</td><td><br />
+</td></tr><tr><td style="font-weight: bold;"><br />
+</td><td><br />
+</td><td style="text-align: center;"><font style="font-style: italic;" color="#000000" size="+1"><b><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >SELSE 5</span><br /><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Day 2 - March 25th, 2009</span><br /><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Stanford University</span></b></font></td></tr><tr><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >7:45-8:30</span></font></font></font></font></font></font></font></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><b><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Continental Breakfast</span></b></font></font></font></font></font></font></font></font></font></font></td></tr><tr><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >8:30-9:15</span></font></font></font></font></font></font></font></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><b><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Report From Birds of Feather Sessions</span></b></font></font></font></font></font></font></font></font></font></font></td></tr><tr><td style="vertical-align: top;"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >9:15-10:15</span></font></font></font></font></font></font></font></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><b><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Session IV: Mitigation Techniques – Logic</span><br /><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Charles Slayman (Sun)</span></b></font></font></font></font></font></font></font></font></font></font><br /></td></tr><tr><td style="vertical-align: top;"><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_11.pdf"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Presentations/11_Alnajjar_V.pdf"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span><br /></span><br /><br /><br /><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_15.pdf"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Presentations/15_Lee_V.pdf"><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><br />
+</td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><u><font size="+1"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >A Coarse-Grained Dynamically Reconfigurable Architecture Enabling Flexible Reliability.</span> </font></u></font></font></font></font></font></font></font></font></font></font><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><i><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Dawood
+Alnajjar, Younghun Ko, Takashi Imagawa, Masayuki Hiromoto, Yukio
+Mitsuyama, Masanori Hashimoto, Hiroyuki Ochi and Takao Onoye.</span> </i></font></font></font></font></font></font></font></font></font></font></font></p><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><u><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Fault-Tolerant Resynthesis for Dual-Output LUTs.</span> </u></font></font></font></font></font></font></font></font></font></font></font></p><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><i><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Ju-Yueh Lee, Yu Hu, Rupak Majumdar, Lei He and Minming Li.</span> </i></font></font></font></font></font></font></font></font></font></font></font></p></td></tr><tr><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >10:15-10:30</span></font></font></font></font></font></font></font></font></font></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><b><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></b></font></font></font></font></font></font></font></font></font></font></font></font></td></tr><tr><td style="vertical-align: top;"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >10:30-12:00</span></font></font></font></font></font></font></font></font></font></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><b><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Session V: Microprocessors</span><br /><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Jim Tschanz (Intel)</span><br />
+</b></font></font></font></font></font></font></font></font></font></font></font></font></td></tr><tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_8.pdf"><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span><br /><br /><br /><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_22.pdf"><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span><br /><br /><br /><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_13.pdf"><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Presentations/13_Garzaran_V.pdf"><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><br /><br />
+</td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><u><font size="+1"><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >A Low-Overhead Technique to Protect the Issue Control Logic Against Soft Errors.</span> </font></u></font></font></font></font></font></font></font></font></font></font></font></font><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><i><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Javier Carretero, Xavier Vera, Jaume Abella, Pedro Chaparro and Antonio González</span> </i></font></font></font></font></font></font></font></font></font></font></font></font></font></p><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><u><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Voltage Noise: Why It’s Bad, and What To Do About It.</span> </u><i><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Vijay Janapa Reddi, Meeta S. Gupta, Krishna K. Rangan, Glenn Holloway, Gu-Yeon Wei, Michael D. Smith and David Brooks</span> </i></font></font></font></font></font></font></font></font></font></font></font></font></font></p><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><u><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >A Detector for Harmful Errors.</span></u><br />
+<i><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Jing Yu and Maria Garzarán</span> </i></font></font></font></font></font></font></font></font></font></font></font></font></font></p></td></tr><tr><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >12:00-12:45</span></font></font></font></font></font></font></font></font></font></font></font></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><b><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></b></font></font></font></font></font></font></font></font></font></font></font></font></font></font></td></tr><tr><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >12:45-14:00</span></font></font></font></font></font></font></font></font></font></font></font></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><b><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session II</span> </b></font></font></font></font></font></font></font></font></font></font></font></font></font></font></td></tr><tr><td style="vertical-align: top;"><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_2.pdf"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span><br /><br /><br /><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_18.pdf"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span><br /><br /><br /><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_21.pdf"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span><br /><br /><br /><br /><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_33.pdf"><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span><br /></span><br /><br /><br /><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >n/a</span><br /></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><u><font size="+1"><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >NBTI-Aware Dynamic Instruction Scheduling.</span> </font></u></font></font></font></font></font></font></font></font></font></font></font></font></font></font><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><i><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Taniya Siddiqua and Sudhanva Gurumurthi.</span> </i></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></p><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><u><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Implementation and Validation of a Low-Cost Single-Event Latchup Mitigation Scheme.</span> </u><br />
+<span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Michael Nicolaidis, Kholdoun Torki, Federico Natali, Kader Belhaddad and Dan Alexandrescu.</span><br />
+<u><br />
+<span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >A Foundation for the Accurate Prediction of the Soft Error Vulnerability of Scientific Applications</span></u><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >.</span><br />
+<i><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Greg Bronevetsky, Bronis R. de Supinski and Martin Schulz.</span> </i></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></p><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><u><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Soft-error Mitigation at the Architecture-Level Using Berger Codes and Instruction Repetition.</span></u><br />
+<i><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Limbrick, Edward Ossi, Bharat Bhuva and William Robinson.</span> </i></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></p><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><u><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >3D Simulation and Analysis of the Radiation Tolerance of Voltage Scaled Digital Circuits.</span></u><br />
+<i><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Rajesh Garg and Sunil Khatri.</span></i></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></p></td></tr><tr><td style="vertical-align: top;"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >14:00-14:45</span><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Presentations/N1_Puchner_V.pdf"><small><small><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></small></small></span></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><b><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk: Helmet Puchner, Cypress Semiconductor</span><br /><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >“On The Accuracy of Accelerated and Life Soft Error Testing"</span></b></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></td></tr><tr>
+      <td style="vertical-align: top; color: black;"><big><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >14:45-15:00</span><br />
+      </big></td>
+      <td style="vertical-align: top; color: black;"><big><br />
+      </big></td>
+      <td style="vertical-align: top; color: black;"><big><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Break</span><br />
+      </big></td>
+    </tr>
+<tr><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >15:00-16:30</span></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><b><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Session VI: Mitigation Techniques – Arrays and Sequentials</span>  <br />
+<span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Terry Garyet (Freescale)</span><br />
+</b></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></td></tr><tr><td style="vertical-align: top;"><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_32.pdf"><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Presentations/32_Avirneni_V.pdf"><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><br /><br /><br /><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_12.pdf"><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span><br /><br /><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="Papers/selse5_submission_23.pdf"><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Presentations/23_Kim_V.pdf"><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><br />
+</td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><u><font size="+1"><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Soft Error Mitigation Schemes for High Performance and Aggressive Designs.</span> </font></u></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><i><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Naga Durga Prasad Avirneni, Viswanathan Subramanian and Arun Somani.</span> </i></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></p><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><u><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Protecting Prediction Arrays against Faults.</span></u><br />
+<i><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Yiannakis Sazeides, Costas Kourouyiannis, Nikolas Ladas and Veerle Desmet.</span> </i></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></p><p><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><u><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Modeling SRAM Failure Rates to Enable Fast, Dense, Low-Power Caches.</span></u><br />
+<i><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Jangwoo Kim, Mark McCartney, Ken Mai and Babak Falsafi.</span> </i></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></p></td></tr><tr><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >16:30-</span><span style="font-style: italic;"><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >17:00</span></span></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></font></td><td><br />
+</td><td><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font color="#000000" size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><font size="+1"><b><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Closing Discussion</span>

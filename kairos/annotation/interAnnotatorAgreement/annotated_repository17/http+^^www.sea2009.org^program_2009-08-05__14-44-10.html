@@ -1,0 +1,765 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+
+<html lang="en">
+
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/9/annotation/annotated_repository/http+^^www.sea2009.org^program_2009-08-05__14-44-10.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/9/annotation/annotated_repository/http+^^www.sea2009.org^program_2009-08-05__14-44-10.yaml created on Thu Aug 13 13:58:15 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="description" content="8th International Symposium on Experimental Algorithms">
+  <meta name="keywords" content="SEA 2009, 8th International Symposium on Experimental Algorithms">
+  <link href="styles/style.css" rel="stylesheet" type="text/css">
+  <title>SEA 2009 – 8th International Symposium on Experimental Algorithms</title>
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)" background="/images/background.jpg"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<table border="0" align="center" cellpadding="0" cellspacing="1" style="background-color:#000000">
+	<!-- TOP -->
+	<tr>
+		<td width="950" height="5" valign="top" background="/images/top.jpg">
+		</td>
+	</tr>
+	<tr>
+		<td height="136" 
+background="/images/banner.jpg">
+		</td>
+	</tr>
+	<tr>
+		<td width="950" height="5" valign="top" background="/images/top.jpg">
+		</td>
+	</tr>
+	<tr>
+		<td style="background-color:#FFFFFF">
+		<table border="0" align="left" cellpadding="0" cellspacing="0" style="background-color:#FFFFFF">
+			<tr>
+				<td height="10" valign="top" style="background-color:#FFFFFF">
+				</td>
+				<td height="10" valign="top" style="background-color:#FFFFFF">
+				</td>
+			</tr>
+
+			<tr>
+				<td width=180 valign=top>
+					<!-- Left menu -->
+					
+<table with=95% border="0" align="center" cellpadding="0" cellspacing="1" style="background-color:#000000">
+
+	<tr>
+		<td>
+
+			<table border="0" align="center" cellpadding="0" cellspacing="0" style="background-color:#FFFFFF">
+				<div class="menu_left">
+			
+  			<div class="menu_bar"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >SEA 2009</span></div>
+  			<div class="menu_button"><span onclick="return false" style="text-decoration:underline; color:blue" href="index"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></div>
+
+  			<div class="menu_bar"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Organisation</span></div>
+			  <div class="menu_button"><span onclick="return false" style="text-decoration:underline; color:blue" href="committees"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></span></div>
+			  <div class="menu_button"><span onclick="return false" style="text-decoration:underline; color:blue" href="contact"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Contact</span></span></div>
+
+			  <div class="menu_bar"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Calls</span></div>
+			  <div class="menu_button"><span onclick="return false" style="text-decoration:underline; color:blue" href="call_for_papers"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span></div>
+			  <div class="menu_button"><span onclick="return false" style="text-decoration:underline; color:blue" href="dates"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></div>
+			  <div class="menu_button"><span onclick="return false" style="text-decoration:underline; color:blue" href="paper_submission"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Paper Submissions</span></span></div>
+
+			  <div class="menu_bar"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Pre-Arrival</span></div>
+			  <div class="menu_button"><span onclick="return false" style="text-decoration:underline; color:blue" href="registration""><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></font></div>
+			  <div class="menu_button"><span onclick="return false" style="text-decoration:underline; color:blue" href="accommodation"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation</span></span></div>
+
+  			<div class="menu_bar"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Conference</span></div>
+			  <div class="menu_button"><span onclick="return false" style="text-decoration:underline; color:blue" href="acceptedpapers"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers</span></span></div>
+			  <div class="menu_button"><span onclick="return false" style="text-decoration:underline; color:blue" href="program"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span></div>
+			  <div class="menu_button"><span onclick="return false" style="text-decoration:underline; color:blue" href="invitedspeakers"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Invited Speakers</span></span></div>
+			  <div class="menu_button"><span onclick="return false" style="text-decoration:underline; color:blue" href="conferencesite"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Conference Site</span></span></div>
+			  <div class="menu_button"><span onclick="return false" style="text-decoration:underline; color:blue" href="social_events"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Social Events</span></span></div>
+			  <div class="menu_button"><span onclick="return false" style="text-decoration:underline; color:blue" href="sponsorship"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Sponsorship</span></span></div>
+
+			  <div class="menu_bar"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Links</span></div>
+			  <div class="menu_button"><span onclick="return false" style="text-decoration:underline; color:blue" href="conferences"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >WEA/SEA Conferences</span></span></div>
+			  <div class="menu_button"><span onclick="return false" style="text-decoration:underline; color:blue" href="related_events"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Related Events</span></span></div>
+			  <div class="menu_button"><span onclick="return false" style="text-decoration:underline; color:blue" href="pictures"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Pictures and more</span></span></div> 
+
+
+				</div>
+			</table>
+		</td>
+	</tr>
+</table>
+<br>
+<table with=95% border="0" align="center" cellpadding="0" cellspacing="0" style="background-color:#FFFFFF">
+
+	<tr>
+		<td style="background-color:#FFFFFF">
+			<img onmousedown="imd(this)" width=150 src=/images/logo_tu_w150.jpg>
+		</td>
+	</tr>
+</table>
+
+
+
+				</td>
+				<td width=770 valign=top style="background-color:#FFFFFF">
+					<!-- Main cell -->
+
+
+
+
+ 
+
+
+
+<table width=95% border="0" align="center" cellpadding="0" cellspacing="0" style="background-color:#FFFFFF">
+	<tr>
+		<td align="right">
+		<span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Conference > Program</span>
+		</td>
+	</tr>
+	<tr>
+		<td widht=100% height=1 style="background-color:#000000">
+		</td>
+	</tr>
+	<tr>
+		<td width=100%>
+<!-- ############## top ############## -->
+
+	<br>
+    <h3><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></h3>
+	<span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Contributed talks are 20 minutes plus 5 minutes time for questions and answers.</span><br><br><br>
+     <table width=98% align="center" cellpadding="3" cellspacing="1" style="background-color:#000000">
+      <tr><td width=90 style="background-color:#FFFFFF"></td><td align=center style="background-color:#FFFFFF"><b><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, June 3, 2009</span></b></td></tr>
+            <tr><td style="background-color:#e0e0e0"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >14:00 - 20:00</span></td><td style="background-color:#e0e0e0"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span><br>
+      <tr><td style="background-color:#FFFFFF"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >16:30 - 17:30</span></td><td style="background-color:#FFFFFF"><b><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk (</span><i><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Robert Bixby</span></i><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >):</span></b> <span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >A Fresh Look at Mixed-Integer Programming: Designing a code from the ground up</span><br>
+             <span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >(Joint event of</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="http://ls11-www.cs.uni-dortmund.de/people/wong/spp2009/spp2009.jsp"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >SPP 1307</span></span><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >/SEA 2009)</span></td></tr>
+      <tr><td width=90 style="background-color:#e0e0e0"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >17:30 - 19:30</span></td><td style="background-color:#e0e0e0"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Welcome Reception</span><br><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >(Joint event of</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="http://ls11-www.cs.uni-dortmund.de/people/wong/spp2009/spp2009.jsp"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >SPP 1307</span></span><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >/SEA 2009)</span></td></tr>
+    </table>
+<br><br>
+
+
+     <table width=98% align="center" cellpadding="3" cellspacing="1" style="background-color:#000000">
+      <tr><td style="background-color:#FFFFFF"></td><td align=center style="background-color:#FFFFFF"><b><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, June 4, 2009</span></b></td></tr>
+      <tr><td width=90 style="background-color:#e0e0e0"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >08:00 - 12:00</span></td><td style="background-color:#e0e0e0"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Registration (Foyer)</span></td></tr>
+      <tr><td width=90 style="background-color:#FFFFFF"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >09:00 - 09:15</span></td><td style="background-color:#FFFFFF"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Opening</span><br><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Welcome Address (Roland Bracht, Member of the Board, BITKOM German Association for Information Technology, Telecommunications, and New Media, and Chairman of the Board, Alumni of Computer Science Dortmund e.V.)</span></td></tr>
+	  <tr><td width=90 style="background-color:#FFFFFF"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >09:15 - 10:15</span></td><td style="background-color:#FFFFFF"><b><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk (</span><i><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Marc Schoenauer</span></i><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >):</span></b> <span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Experimental Comparisons of Derivative Free Optimization Algorithms</span></td></tr>
+	  <tr><td width=90 style="background-color:#FFFFFF"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >10:15 - 10:30</span></td><td style="background-color:#FFFFFF"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Welcome Address (Uwe Schwiegelshohn, Vice-President, TU Dortmund)</span><br><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Welcome Address (Peter Buchholz, Dean, Department of Computer Science, TU Dortmund)</span> </td></tr>
+  	  <tr><td width=90 style="background-color:#e0e0e0"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >10:30 - 11:00</span></td><td style="background-color:#e0e0e0"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td></tr>
+   	  <tr><td width=90 style="background-color:#FFFFFF"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >11:00 - 12:15</span></td><td style="background-color:#FFFFFF">
+   	  <b><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Session: Optimization</span></b><br>
+   	  <table width=100% align="center" cellpadding="0" cellspacing="5" style="background-color:#FFFFFF">
+   	  	<tr>
+<!--   	  		<td width=90 style="background-color:#FFFFFF">
+   	  		11:00 - 11:25
+   	  		</td>-->
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Fast and Accurate Bounds on Linear Programs</span></i><br>
+	 		 <span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Ernst Althaus and Daniel Dumitriu</span>
+   	  		</td>
+   	  	</tr>
+   	  	<tr>
+<!--   	  		<td width=90 style="background-color:#FFFFFF">
+   	  		11:00 - 11:25
+   	  		</td>-->
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Competitive Buffer Management with Stochastic Packet Arrivals</span></i><br>
+	 		 <span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Kamal Al-Bawani and Alexander Souza</span>
+   	  		</td>
+   	  	</tr>
+   	  	<tr>
+<!--   	  		<td width=90 style="background-color:#FFFFFF">
+   	  		11:00 - 11:25
+   	  		</td>-->
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Speed-Up Techniques for the Selfish Step Algorithm in Network Congestion Games</span></i><br>
+	 		 <span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Matthias Kirschner, Philipp Schengbier, and Tobias Tscheuschner</span>
+   	  		</td>
+   	  	</tr>   	  	   	  	
+   	  </table>
+ 	  
+   	  
+   	  </td></tr>
+   	  <tr><td width=90 style="background-color:#e0e0e0"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >12:15 - 13:45</span></td><td style="background-color:#e0e0e0"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></td></tr>
+  	  <tr><td width=90 style="background-color:#FFFFFF"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >13:45 - 14:45</span></td><td style="background-color:#FFFFFF"><b><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk (</span><i><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Michael A. Bender</span></i><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >):</span></b> <span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >From Streaming B-trees to Tokutek: How a Theoretician Learned to be VP of Engineering</span></td></tr>
+  	  <tr><td width=90 style="background-color:#e0e0e0"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >14:45 - 15:15</span></td><td style="background-color:#e0e0e0"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td></tr>
+   	  <tr><td width=90 style="background-color:#FFFFFF"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >15:15 - 16:30</span></td><td style="background-color:#FFFFFF">
+   	  <b><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Session: Route Planning</span></b>
+   	  <table width=100% align="center" cellpadding="0" cellspacing="5" style="background-color:#FFFFFF">
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Pareto Paths with SHARC</span></i><br>
+	 		 <span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Delling and Dorothea Wagner</span>
+   	  		</td>
+   	  	</tr>
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Scheduling Additional Trains on Dense Corridors</span></i><br>
+	 		 <span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Holger Flier, Thomas Graffagnino, and Marc Nunkesser</span>
+   	  		</td>
+   	  	</tr>
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Batch Dynamic Single-Source Shortest-Path Algorithms: An Experimental Study</span></i><br>
+	 		 <span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Reinhard Bauer and Dorothea Wagner</span>
+   	  		</td>
+   	  	</tr>   	  	   	  	
+   	  </table>   	  
+   	  
+   	  
+   	  </td></tr>
+   	  <tr><td width=90 style="background-color:#e0e0e0"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >16:30 - 16:40</span></td><td style="background-color:#e0e0e0"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></td></tr>
+   	  <tr><td width=90 style="background-color:#FFFFFF"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >16:40 - 17:55</span></td><td style="background-color:#FFFFFF">
+   	  <b><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Session: Graphs I</span></b>
+   	  <table width=100% align="center" cellpadding="0" cellspacing="5" style="background-color:#FFFFFF">
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >A Heuristic for Fair Correlation-Aware Resource Placement</span></i><br>
+	 		 <span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Raouf Boutaba, Martin Karsten, and Maxwell Young</span>
+   	  		</td>
+   	  	</tr>
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Experimental Study of Non-Oblivious Greedy and Randomized Rounding Algorithms for Hypergraph b-Matching</span></i><br>
+	 		 <span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Lasse Kliemann and Anand Srivastav</span>
+   	  		</td>
+   	  	</tr>
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Algorithms and Experiments for Clique Relaxations—Finding Maximum s-Plexes</span></i><br>
+	 		 <span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Hannes Moser, Rolf Niedermeier, and Manuel Sorge</span>
+   	  		</td>
+   	  	</tr>   	  	   	  	
+   	  </table>      	  
+   	  
+   	  
+   	  </td></tr>
+    </table>
+
+<br><br>
+
+     <table width=98% align="center" cellpadding="3" cellspacing="1" style="background-color:#000000">
+      <tr><td style="background-color:#FFFFFF"></td><td align=center style="background-color:#FFFFFF"><b><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Friday, June 5, 2009</span></b></td></tr>
+      <tr><td width=90 style="background-color:#e0e0e0"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >08:30 - 12:00</span></td><td style="background-color:#e0e0e0"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></td></tr>
+      <tr><td width=90 style="background-color:#FFFFFF"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >09:00 - 10:15</span></td><td style="background-color:#FFFFFF">
+      <b><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Session: Graphs II</span></b>
+   	  <table width=100% align="center" cellpadding="0" cellspacing="5" style="background-color:#FFFFFF">
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Fast Algorithm for Graph Isomorphism Testing</span></i><br>
+	 		 <span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Jos&eacute; Luis L&oacute;pe-Presa and Antonio Fern&aacute;ndez Anta</span>
+   	  		</td>
+   	  	</tr>
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Multi-level Algorithms for Modularity Clustering</span></i><br>
+	 		 <span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Andreas Noack and Randolf Rotta</span>
+   	  		</td>
+   	  	</tr>
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Empirical Evaluation of Graph Partitioning Using Spectral Embeddings and Flow</span></i><br>
+	 		 <span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Kevin J. Lang, Michael W. Mahoney, and Lorenzo Orecchia</span>
+   	  		</td>
+   	  	</tr>   	  	   	  	
+   	  </table>        
+      
+      
+      </td></tr>
+      <tr><td width=90 style="background-color:#e0e0e0"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >10:15 - 10:35</span></td><td style="background-color:#e0e0e0"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td></tr>
+      <tr><td width=90 style="background-color:#FFFFFF"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >10:35 - 11:25</span></td><td style="background-color:#FFFFFF">
+      <b><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Session: Memory Hierarchies</span></b>
+   	  <table width=100% align="center" cellpadding="0" cellspacing="5" style="background-color:#FFFFFF">
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >On Computational Models for Flash Memory Devices</span></i><br>
+	 		 <span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Deepak Ajwani, Andreas Beckmann, Riko Jacob, Ulrich Meyer, and Gabriel Moruz</span>
+   	  		</td>
+   	  	</tr>
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >A Heuristic Strong Connectivity Algorithm for Large Graphs</span></i><br>
+	 		 <span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Adan Cosgaya-Lozano and Norbert Zeh</span>
+   	  		</td>
+   	  	</tr>
+  	   	  	
+   	  </table>         
+      
+      </td></tr>
+      <tr><td width=90 style="background-color:#e0e0e0"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >11:25 - 11:30</span></td><td style="background-color:#e0e0e0"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></td></tr>      
+  	  <tr><td width=90 style="background-color:#FFFFFF"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >11:30 - 12:30</span></td><td style="background-color:#FFFFFF"><b><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk (</span><i><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Heinz Bast</span></i><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >):</span></b> <span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Parallelism in Current and Future Processors - Challenges and Support for Designing Optimal Algorithms</span></td></tr>   
+   	  <tr><td width=90 style="background-color:#e0e0e0"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >12:30 - 14:00</span></td><td style="background-color:#e0e0e0"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></td></tr>  	  
+      <tr><td width=90 style="background-color:#FFFFFF"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >14:00 - 15:15</span></td><td style="background-color:#FFFFFF">
+      <b><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Session: Strings and Proteins</span></b>
+   	  <table width=100% align="center" cellpadding="0" cellspacing="5" style="background-color:#FFFFFF">
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >An Application of Self-Organizing Data Structures to Compression</span></i><br>
+	 		 <span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Reza Dorrigiv, Alejandro L&oacute;pez-Ortiz, and J. Ian Munro</span>
+
+   	  		</td>
+   	  	</tr>
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Broadword Computing and Fibonacci Code speed up Compressed Suffix Arrays</span></i><br>
+	 		 <span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Simon Gog</span>
+   	  		</td>
+   	  	</tr>
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >A Design-for-Yield Algorithm to Assess and Improve the Structural and Energetic Robustness of Proteins and Drugs</span></i><br>
+	 		 <span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Giuseppe Nicosia and Giovanni Stracquadanio</span>
+   	  		</td>
+   	  	</tr>   	  	   	  	
+   	  </table>        
+      
+      </td></tr>   	     
+      <tr><td width=90 style="background-color:#e0e0e0"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >15:15 - 15:45</span></td><td style="background-color:#e0e0e0"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td></tr>
+      <tr><td width=90 style="background-color:#FFFFFF"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >16:30 - 19:30</span></td><td style="background-color:#FFFFFF"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Excursion</span></td></tr>                  
+      <tr><td width=90 style="background-color:#FFFFFF"><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >20:00 - 23:00</span></td><td style="background-color:#FFFFFF"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Conference Dinner</span></td></tr>
+    </table>
+
+<br><br>
+
+     <table width=98% align="center" cellpadding="3" cellspacing="1" style="background-color:#000000">
+      <tr><td style="background-color:#FFFFFF"></td><td align=center style="background-color:#FFFFFF"><b><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Saturday, June 6, 2009</span></b></td></tr>
+      <tr><td width=90 style="background-color:#FFFFFF"><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >09:00 - 10:15</span></td><td style="background-color:#FFFFFF">
+      <b><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Session: Sorting / CGAL</span></b>
+   	  <table width=100% align="center" cellpadding="0" cellspacing="5" style="background-color:#FFFFFF">
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Bulk-insertion Sort: Towards Composite Measures of Presortedness</span></i><br>
+	 		 <span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Riku Saikkonen and Eljas Soisalon-Soininen</span>
+
+   	  		</td>
+   	  	</tr>
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >psort, yet another fast stable sorting software</span></i><br>
+	 		 <span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Paolo Bertasi, Marco Bressan, Enoch Peserico</span>
+   	  		</td>
+   	  	</tr>
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Univariate Algebraic Kernel and Application to Arrangements</span></i><br>
+	 		 <span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Sylvain Lazard, Luis Pe&ntilde;aranda, and Elias Tsigaridas</span>
+
+   	  		</td>
+   	  	</tr>   	  	   	  	
+   	  </table>         
+      
+      </td></tr>
+      <tr><td width=90 style="background-color:#e0e0e0"><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >10:15 - 10:45</span></td><td style="background-color:#e0e0e0"><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td></tr>   
+      <tr><td width=90 style="background-color:#FFFFFF"><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >10:45 - 12:00</span></td><td style="background-color:#FFFFFF">
+      <b><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Session: Geometry</span></b>
+   	  <table width=100% align="center" cellpadding="0" cellspacing="5" style="background-color:#FFFFFF">
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Rotated-Box Trees: A Lightweight c-Oriented Bounding-Volume Hierarchy</span></i><br>
+	 		 <span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Mark de Berg and Peter Hachenberger</span>
+
+   	  		</td>
+   	  	</tr>
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Computing Elevation Maxima by Searching the Gauss Sphere</span></i><br>
+	 		 <span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Bei Wang, Herbert Edelsbrunner, and Dmitriy Morozov</span>
+   	  		</td>
+   	  	</tr>
+   	  	<tr>
+   	  		<td style="background-color:#FFFFFF">
+	 		 <i><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Measuring the Similarity of Geometric Graphs</span></i><br>
+	 		 <span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Otfried Cheong, Joachim Gudmundsson, Hyo-Sil Kim, Daria Schymura, and Fabian Stehn</span>
+   	  		</td>
+   	  	</tr>   	  	   	  	
+   	  </table>          
+      
+      </td></tr>         
+      <tr><td width=90 style="background-color:#FFFFFF"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >12:00 - 12:10</span></td><td style="background-color:#FFFFFF"><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Closing</span></td></tr>               
+    </table>
+
+<br><br><br>
+
+<!-- ############## bottom ############## -->
+
+		</td>
+	</tr>
+</table>
+
+
+
+				</td>
+			</tr>
+			<tr>
+				<td height="10" valign="top" style="background-color:#FFFFFF">
+				</td>
+				<td height="10" valign="top" style="background-color:#FFFFFF">
+				</td>
+			</tr>
+		</table>
+		</td>
+	</tr>
+	<tr>
+		<td width="950" height="5" valign="top" background="/images/top.jpg">
+		</td>
+	</tr>
+</table>
+<table width="950" align=center valign=top cellpadding=0 cellscpacing=0 border=0>
+	<tr>
+		<td width=30% valign=top align=left>
+		<font size="1" align=top><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Image: Stadt Dortmund, zielske photographie</span></font>
+		</td>
+		<td width=40% align=center valign=top>
+			<font size="1"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.sea2009.org" target="_blank"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >http://www.sea2009.org</span><a/></font>
+		</td>
+		<td width=30% align=right valign=top>
+			<font size="1"><span onclick="return false" style="text-decoration:underline; color:blue" href=imprint><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Imprint</span>

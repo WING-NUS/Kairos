@@ -1,0 +1,823 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+	"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" >
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^europar2007.irisa.fr^program.php_2009-08-05__14-23-57.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^europar2007.irisa.fr^program.php_2009-08-05__14-23-57.yaml created on Wed Aug 05 17:31:10 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+	<meta http-equiv="content-type" content="text/html; charset=iso-8859-1" />
+	<meta name="author" content="ASAP Team" />
+	<meta name="keywords" content="Euro-Par, euro-par, europar, Euro-Par 2007, euro-par 2007, europar 2007, conference, parallel computing, P2P, Rennes" />
+	<meta name="description" content="Euro-Par 2007 Conference in Rennes" />
+
+
+	<title>Euro-Par 2007 Conference in Rennes</title>
+
+	<script type="text/javascript"></script>
+	
+	<style type="text/css" title="currentStyle">
+		@import "./europar2.css";
+	</style>	
+</head>
+
+
+<body onload="on_load()" onkeyup="on_key_up(event)" id="Euro-Par"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<div id="container">
+       <div id="intro">
+<div id="pageHeader">
+   <h1><span><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Euro-Par 2007</span></span></h1>
+</div>
+
+<div id="Rond"><h3> <span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >a</span></h3></div>
+	<div id="linkList">
+		<div id="linkList2">	
+<div id="lselect">
+<ul>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./index.php" title="Main page" accesskey=""><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./keydates.php" class="c"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Keydates</span></span><br> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="./cfp.php" class="c"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span><br> <span onclick="return false" style="text-decoration:underline; color:blue" href="./cfpworkshops.php" class="c"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Call for Workshops</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./topics.php" title="List of topics" accesskey=""><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Topics</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./program.php" title="Conference program" accesskey=""><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span><span onclick="return false" style="text-decoration:underline; color:blue" href="./social.php" class="c"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Social events</span></span><br><span onclick="return false" style="text-decoration:underline; color:blue" href="./instructions.php" class="c"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Instructions</span></span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./exhibits.php" title="Information about exhibition" accesskey=""><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Exhibition</span></span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./workshops.php" title="" accesskey=""><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://it.i-u.de/schools/altmann/gecon/" class="c" target="_blank"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >GECON</span></span><br>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://xhpc.wu-wien.ac.at/" class="c" target="_blank"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >VHPC</span></span><br>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hppc-workshop.org/" class="c" target="_blank"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >HPPC</span></span><br>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://summit.unicore.org/2007/index.php" class="c" target="_blank"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >UNICORE</span></span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./CoreGRID-symposium.php" title="CoreGRID Symposium" accesskey="" target="_blank"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >CoreGRID Symposium</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./registration.php" title="Registration Form" accesskey=""><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./organization.php" title="Organization comitee" accesskey=""><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Organization</span></span></li>
+<!--<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./accommodation.php" title="Practical informations" accesskey="" class="b">Accommodation</span> </li>-->
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./location.php" title="Localisation information" accesskey=""><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Location</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./Access.php" class="c"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Access</span></span></li>
+</ul>
+</div>
+</div>
+</div>
+
+	<div id="supportingText">
+
+		<div id="explanation1">
+
+<h3><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Preliminary program</span></h3> 
+
+<p align=right><font color=#923131><br><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Full program available</span> <span onclick="return false" style="text-decoration:underline; color:blue" href=./Files/full_program.pdf><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >here</span></span></font></p>
+
+</div>
+<div id="explanation2">
+    <span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Slides of keynote speakers:</span><br><br>
+<p> <i><span onclick="return false" style="text-decoration:underline; color:blue" href='Files/Transaction-Europar.ppt'><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Sommersby: Transactions are back: but are they the same?</span></span></i> <br>
+<g> <span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Rachid Guerraoui</span></g> <span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >- EPFL (Switzerland)</span></p>
+<p> <i><span onclick="return false" style="text-decoration:underline; color:blue" href='Files/Xen-EuroPar07.pps'><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Virtualizing the Data Center with Xen</span></span></i> <br>
+<g> <span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Steve Hand</span></g> <span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >- University of Cambridge (United Kingdom)</span><br>
+<p> <i><span onclick="return false" style="text-decoration:underline; color:blue" href='Files/SBPA-EuroPar.ppt'><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >15mm x 15 mm: the new frontier of parallel computing</span></span></i> <br>
+<g> <span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >André Seznec</span></g> <span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >- IRISA (France)</span></p>
+
+<br>
+<div align=center><img onmousedown="imd(this)" src=Images/program2.jpg
+alt='' ></div> 
+
+ <p class=subtitle_1 align=center ><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday 29th - Invited Talk (10:00 - 11:00)</span></p>
+<p align=right>    <i> <span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Anne-Marie Kermarrec</span></i></p>
+<p> <i><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Sommersby: Transactions are back: but are they the same?</span></i> <br>
+<g> <span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Rachid Guerraoui</span></g> <span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >- EPFL (Switzerland)</span></p>
+
+ <p class=subtitle_1 align=center ><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday 29th - Invited Talk (11:30 - 12:30)</span></p>
+<p align=right>    <i> <span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Anne-Marie Kermarrec</span></i></p>
+<p> <i><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Virtualizing the Data Center with Xen</span></i> <br>
+<g> <span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Steve Hand</span></g> <span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >- University of Cambridge (United Kingdom)</span></p>
+
+ <p class=subtitle_1 align=center ><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday 29th - Technical Session A (14:00 - 16:00)</span></p>
+<p><font color=#923131><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Theory - Topic 12</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Pascal Felber</span></i></p>
+
+<p> <span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >2D Cutting Stock Problem: a New Parallel Algorithm and Bounds</span> <br>
+<i> <span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Coromoto Leon , Gara Miranda , Casiano Rodriguez , Carlos Segura</span> </i></p>
+
+<p> <span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Periodic Load Balancing on the N-Cycle: Analytical and Experimental Evaluation</span> <br>
+<i> <span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Christian Riess , Rolf Wanka</span> </i></p>
+
+<p> <span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Hirschberg's Algorithm on a GCA and its Parallel Hardware Implementation</span> <br>
+<i> <span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Johannes Jendrsczok , Rolf Hoffmann , Joerg Keller</span> </i></p>
+
+<p> <span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Acyclic preference systems in P2P networks</span> <br>
+<i> <span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Anh-Tuan Gai , Dmitri Lebedev , Fabien Mathieu , Fabien de Montgolfier , Julien Reynier , Laurent Viennot</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >High-Performance - Topic 4</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: François Bodin</span></i></p>
+
+<p> <span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Program Behavior Characterization through Advanced Kernel Recognition</span> <br>
+<i> <span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Manuel Arenaz , Juan Touriño , Ramón Doallo</span> </i></p>
+
+<p> <span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Towards Real-Time Compression of Hyperspectral Images Using Virtex-II FPGAs</span> <br>
+<i> <span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Antonio Plaza</span> </i></p>
+
+<p> <span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Optimizing Chip Multiprocessor Work Distribution using Dynamic Compilation</span> <br>
+<i> <span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Jisheng Zhao , Matthew Horsnell , Ian Rogers , Andrew Dinn , Chris Kirkham , Ian Watson</span> </i></p>
+
+<p> <span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Compositional Approach applied to Loop Specialization</span> <br>
+<i> <span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Lamia Djoudi , Jean-Thomas Acquaviva , Denis Barthou</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Distributed Systems - Topic 8</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Achour Mostefaoui</span></i></p>
+
+<p> <span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Accelerate Data Sharing in a Wide-Area Networked File Storage System</span> <br>
+<i> <span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Kun Zhang , Hongliang Yu , Jing Zhao , Weimin Zheng</span> </i></p>
+
+<p> <span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Esodyp+: Prefetching in the Jackal Software DSM</span> <br>
+<i> <span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Michael Klemm , Jean Christophe Beyler , Ronny Lampert , Michael Philippsen , Philippe Clauss</span> </i></p>
+
+<p> <span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Modeling and Validating the Performance of Atomic Broadcast Algorithms in High Latency Networks</span> <br>
+<i> <span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Richard Ekwall , André Schiper</span> </i></p>
+
+<p> <span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >A Joint Data and Computation Scheduling Algorithm for the Grid</span> <br>
+<i> <span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Fanpeng Dong , Selim Akl</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Software Computing - Topic 6</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Ramin Yahyapour</span></i></p>
+
+<p> <span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Evaluation of a Utility Computing Model Based on the Federation of Grid Infrastructures</span> <br>
+<i> <span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Tino Vazquez , Eduardo Huedo , Rubén S. Montero , Ignacio M. Llorente</span> </i></p>
+
+<p> <span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >The Characteristics and Performance of Groups of Jobs in Grids</span> <br>
+<i> <span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Alexandru Iosup , Mathieu Jan , Ozan Sonmez , Dick Epema</span> </i></p>
+
+<p> <span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Vigne: Executing Easily and Efficiently a Wide Range of Distributed Applications in Grids</span> <br>
+<i> <span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Emmanuel Jeanvoine , Christine Morin , Daniel Leprince</span> </i></p>
+
+<p> <span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Are P2P Data-Dissemination Techniques Viable in Today's Data-Intensive Scientific Collaborations?</span> <br>
+<i> <span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Samer Al Kiswany , Matei Ripeanu , Adriana Iamnitchi , Sudharshan Vazhkudai</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Mobility - Topic 14</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Pascale Vicat-Blanc Primet</span></i></p>
+
+<p> <span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Securing Sensor Reports in Wireless Sensor Networks</span> <br>
+<i> <span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Al-Sakib Khan Pathan , Choong Seon Hong</span> </i></p>
+
+<p> <span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >An Algorithm for Dissemination and Retrieval of Information in Wireless Ad Hoc Networks</span> <br>
+<i> <span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Hugo Miranda , Simone Leggio , Luis Rodrigues , Kimmo Raatikainen</span> </i></p>
+
+<p> <span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Surrendering Autonomy: Can Cooperative Mobility Help?</span> <br>
+<i> <span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Ghassen Ben Brahim , Bilal Khan , Ala Al-fuqaha , Mohsen Guizani , Dionysios Kountanis</span> </i></p>
+
+<p class=subtitle_1 align=center ><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday 29th - Technical Session B (16:30 - 18:00)</span></p>
+<p><font color=#923131><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Theory - Topic 10</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Bernard Philippe</span></i></p>
+
+<p> <span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >An efficient parallel particle tracker for advection-diffusion simulations in heterogeneous porous media</span> <br>
+<i> <span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Anthony Beaudoin , Jean-Raynald de Dreuzy , Jocelyne Erhel</span> </i></p>
+
+<p> <span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >A fully scalable parallel algorithm for solving elliptic partial differential equations</span> <br>
+<i> <span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Juan A. Acebron , Renato Spigler</span> </i></p>
+
+<p> <span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Locality Optimized Shared-Memory Implementations of Iterated Runge-Kutta Methods</span> <br>
+<i> <span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Matthias Korch , Thomas Rauber</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >High Performance - Topic 4 - 11</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Harald Kosh</span></i></p>
+
+<p> <span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Starvation-Free Transactional Memory System</span> <br>
+<i> <span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >M M Waliullah , Per Stenstrom</span> </i></p>
+
+<p> <span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >DynaPeer: A Dynamic Peer-to-Peer Based Delivery Scheme for VoD Systems</span> <br>
+<i> <span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Leandro Coelho , Fernando Cores , Xiao Yuan Yang , Ana Ripoll</span> </i></p>
+
+<p> <span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >An Evaluation of Parallelization Concepts for Baseline-Profile compliant H.264/AVC Decoders</span> <br>
+<i> <span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Klaus Schöffmann , Markus Fauster , Oliver Lampl , Laszlo Böszörmenyi</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Distributed Systems - Topic 7</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Fabrice Le Fessant</span></i></p>
+
+<p> <span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Path Query Routing in Unstructured Peer-to-Peer Networks</span> <br>
+<i> <span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Nicolas Bonnel , Gildas Ménier , Pierre-François Marteau</span> </i></p>
+
+<p> <span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Processing Top-k Queries in Distributed Hash Tables</span> <br>
+<i> <span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Reza Akbarinia , Esther Pacitti , Patrick Valduriez</span> </i></p>
+
+<p> <span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >A Structured Overlay for Multi-Dimensional Range Queries</span> <br>
+<i> <span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Thorsten Schuett , Florian Schintke , Alexander Reinefeld</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Software Computing - Topic 2 - 1</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Marios Dikaiakos</span></i></p>
+
+<p> <span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >TAUoverSupermon : Low-Overhead Online Parallel Performance Monitoring</span> <br>
+<i> <span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Aroon Nataraj , Matthew Sottile , Alan D. Morris , Allen Malony , Sameer Shende</span> </i></p>
+
+<p> <span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Practical Differential Profiling</span> <br>
+<i> <span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Martin Schulz , Bronis R. de Supinski</span> </i></p>
+
+<p> <span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Automatic generation of dynamic tuning techniques</span> <br>
+<i> <span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Paola Caymes-Scutari , Anna Morajko , Tomas Margalef , Emilio Luque</span> </i></p>
+<p class=subtitle_1 align=center ><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday 29th (19:00)</span></p>
+<p><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Welcome Cocktail offered by Rennes City Hall</span></p>
+
+
+<p class=subtitle_1 align=center ><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Thursday 30th - Technical Session C (9:00 - 10:30)</span></p>
+<p><font color=#923131><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Theory - Topic 10</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Jocelyne Erhel</span></i></p>
+
+<p> <span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Toward Scalable Matrix Multiply on Multithreaded Architectures</span> <br>
+<i> <span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Bryan Marker , Field G. Van Zee , Kazushige Goto , Gregorio Quintana-Orti , Robertc A. van de Geijn</span> </i></p>
+
+<p> <span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Task Scheduling for Parallel Multifrontal Methods</span> <br>
+<i> <span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Olivier Beaumont , Abdou Guermouche</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Software Computing - Topic 9</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: George Bosilca</span></i></p>
+
+<p> <span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Delayed side-effects ease multi-core programming</span> <br>
+<i> <span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Anton Lokhmotov , Alan Mycroft , Andrew Richards</span> </i></p>
+
+<p> <span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Management in distributed systems: a semi-formal approach</span> <br>
+<i> <span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Marco Aldinucci , Marco Danelutto , Peter Kilpatrick</span> </i></p>
+
+<p> <span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Nested Parallelism in the OMPi OpenMP/C Compiler</span> <br>
+<i> <span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Panagiotis E. Hadjidoukas , Vassilios V. Dimakopoulos</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Distributed Systems - Topic 7</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Dick Epema</span></i></p>
+
+<p> <span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Asynchronous Distributed Power Iteration with Gossip-based Normalization</span> <br>
+<i> <span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Mark Jelasity , Geoffrey Canright , Kenth Engo-Monsen</span> </i></p>
+
+<p> <span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Capitalizing on Free Riders in P2P Networks</span> <br>
+<i> <span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Yuh-Jzer Joung , Terry Hui-Ye Chiu , Shy Min Chen</span> </i></p>
+
+<p> <span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Content based publish/subscribe using distributed R-trees</span> <br>
+<i> <span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Silvia Bianchi , Pascal Felber , Maria Gradinariu</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Software Computing - Topic 6</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Rosa M. Badia</span></i></p>
+
+<p> <span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Increasing Parallelism for Workflows in the Grid</span> <br>
+<i> <span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Jonathan Martí , Jesús Malo , Toni Cortes</span> </i></p>
+
+<p> <span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Persistent Fault-tolerance for Divide-and-Conquer Applications on the Grid</span> <br>
+<i> <span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Gosia Wrzesinska , Ana-Maria Oprescu , Thilo Kielmann , Henri Bal</span> </i></p>
+
+<p> <span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Adaptable distance-based decision-making support in dynamic cross-grid environment</span> <br>
+<i> <span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Julien Gossa</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Software Computing - Topic 1</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Eric Focht</span></i></p>
+
+<p> <span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >A Scheduling Toolkit for Multiprocessor-Task Programming with Dependencies</span> <br>
+<i> <span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Jörg Dümmler , Raphael Kunis , Gudula Rünger</span> </i></p>
+
+<p> <span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Makefile::Parallel Dependency Specification Language</span> <br>
+<i> <span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Alberto Simões , Rúben Fonseca , José João Almeida</span> </i></p>
+
+<p> <span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Building Portable Thread Schedulers for Hierarchical Multiprocessors: the BubbleSched Framework</span> <br>
+<i> <span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Samuel Thibault , Raymond Namyst , Pierre-André Wacrenier</span> </i></p>
+
+<p class=subtitle_1 align=center ><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Thursday 30th - Technical Session D (11:00 - 12:30)</span></p>
+<p><font color=#923131><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Load balancing - Topic 3</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Luc Bougé</span></i></p>
+
+<p> <span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Toward Optimizing Latency under Throughput Constraints for Application Workflows on Clusters</span> <br>
+<i> <span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Nagavijayalakshmi Vydyanathan , Umit Catalyurek , Tahsin Kurc , Ponnuswamy Sadayappan , Joel Saltz</span> </i></p>
+
+<p> <span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Load Balancing on an Interactive Multiplayer Game Server</span> <br>
+<i> <span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Cordeiro , Alfredo Goldman , Dilma da Silva</span> </i></p>
+
+<p> <span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >A parallelisable multi-level banded diffusion scheme for computing balanced partitions with smooth boundaries</span> <br>
+<i> <span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Francois Pellegrini</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Software computing - Topic 1</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Christine Morin</span></i></p>
+
+<p> <span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >A Profiling Tool for Detecting Cache-critical Data Structures</span> <br>
+<i> <span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Jie Tao , Tobias Gaugher , Wolgang Karl</span> </i></p>
+
+<p> <span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >On Using Incremental Profiling for the Performance Analysis of Shared Memory Parallel Applications</span> <br>
+<i> <span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Karl Fuerlinger , Michael Gerndt , Jack Dongarra</span> </i></p>
+
+<p> <span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Fine Tuning Algorithmic Skeletons</span> <br>
+<i> <span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Denis Caromel , Mario Leyton</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Distributed Systems - Topic 5</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Patrick Valduriez</span></i></p>
+
+<p> <span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >A Multi-layer Collaborative Cache for Question Answering</span> <br>
+<i> <span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >David Dominguez-Sal , Josep Lluis Larriba-Pey , Mihai Surdeanu</span> </i></p>
+
+<p> <span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Handling Request Variability for QoS-max Measures</span> <br>
+<i> <span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Pedro Furtado</span> </i></p>
+
+<p> <span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >A Topology-Aware Approach for Distributed Data Reconciliation in P2P Networks</span> <br>
+<i> <span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Manal El Dick , Vidal Martins , Esther Pacitti</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Mobility - Topic 14</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Nuno Preguica</span></i></p>
+
+<p> <span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >A Context-Dependent XML Compression Approach to Enable Business Applications on Mobile Devices</span> <br>
+<i> <span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Yuri Natchetoi , Huaigu Wu , Gilbert Babin</span> </i></p>
+
+<p> <span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >A Distributed, Leaderless Algorithm for Logical Location Discovery in Specknets</span> <br>
+<i> <span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Ryan McNally , D. K. Arvind</span> </i></p>
+
+<p> <span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Analysis of a Kalman Approach for a Pedestrian Positioning System in Indoor Environments</span> <br>
+<i> <span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Edith Pulido Herrera , Ricardo Quirós , Hannes Kaufmann</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >High-Performance - Topic 13</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Thilo Kielmann</span></i></p>
+
+<p> <span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Fast and Efficient Total Exchange on Two Clusters</span> <br>
+<i> <span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Emmanuel Jeannot , Luiz Angelo Steffenel</span> </i></p>
+
+<p> <span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Performance Analysis of an Optical Circuit Switched Network for Peta-Scale Systems</span> <br>
+<i> <span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Kevin J. Barker , Darren Kerbyson</span> </i></p>
+
+<p> <span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Network Fault Tolerance in Open MPI</span> <br>
+<i> <span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Galen M. Shipman , Rich L. Graham , George Bosilca</span> </i></p>
+
+<p class=subtitle_1 align=center ><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >Thursday 30th - Best papers Session (14:00 - 15:45)</span></p>
+<p align=right>    <i> <span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Luc Bougé</span></i></p>
+<p> <span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >Integrated QoS Provision and Congestion Management for Interconnection Networks</span> <br>
+<i> <span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Alejandro Martínez-Vicente , Pedro J. García , Francisco J. Alfaro , José-Luis Sanchez , Jose Flich , Francisco J. Quiles , Jose Duato</span> </i></p>
+
+<p> <span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >Characterizing Result Errors in Internet Desktop Grids</span> <br>
+<i> <span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >Derrick Kondo , Filipe Araujo , Patricio Domingues , Luis Moura Silva , Gilles Fedak , Franck Cappello</span> </i></p>
+
+<p> <span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Automatic structure extraction from MPI applications tracefiles</span> <br>
+<i> <span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Marc Casas , Rosa Badia , Jesus Labarta</span> </i></p>
+
+
+<p class=subtitle_1 align=center ><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Friday 31st - Technical Session E (8:30 - 10:30)</span></p>
+<p><font color=#923131><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Mobility - Topic 14</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Ciaran Bryce</span></i></p>
+
+<p> <span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >Performance of MCS Selection for Collaborative Hybrid-ARQ Protocol</span> <br>
+<i> <span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Hanjin Lee , Dong Wook Kim , Hyunsoo Yoon</span> </i></p>
+
+<p> <span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >New approaches for Relay selection in IEEE 802.16 Mobile Multi-hop Relay Networks</span> <br>
+<i> <span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Deepesh Man Shrestha , Sung-Hee Lee , Sung-Chan Kim , Young-Bae Ko</span> </i></p>
+
+<p> <span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >On the Connectivity of Bluetooth-Based Ad Hoc Networks</span> <br>
+<i> <span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >Pilu Crescenzi , Carlo Nocentini , Andrea Pietracaprina , Geppino Pucci , Carlo Sandri</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Software Computing - Topic 2</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Wolfgang Nagel</span></i></p>
+
+<p> <span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Decision Trees and MPI Collective Algorithm Selection Problem</span> <br>
+<i> <span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >Jelena Pjesivac-Grbovic , George Bosilca , Graham E. Fagg , Thara Angskun , Jack J. Dongarra</span> </i></p>
+
+<p> <span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Profiling of Task-based Applications on Shared Memory Machines: Scalability and Bottlenecks</span> <br>
+<i> <span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >Ralf Hoffmann , Thomas Rauber</span> </i></p>
+
+<p> <span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Search Strategies for Automatic Performance Analysis Tools</span> <br>
+<i> <span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >Michael Gerndt , Edmond Kereku</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Distributed Systems - Topic 8</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Achour Mostefaoui</span></i></p>
+
+<p> <span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >Distributed Computation of All Node Replacements of a Minimum Spanning Tree</span> <br>
+<i> <span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Paola Flocchini , Toni Mesa Enriquez , Linda Pagli , Giuseppe Prencipe , Nicola Santoro</span> </i></p>
+
+<p> <span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >Locating a Black Hole in an Un-oriented Ring Using Tokens: The Case of Scattered Agents</span> <br>
+<i> <span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Stefan Dobrev , Nicolas Santoro , Wei Shi</span> </i></p>
+
+<p> <span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >A Decentralized Solution for Locating Mobile Agents</span> <br>
+<i> <span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Paola Flocchini , Ming Xie</span> </i></p>
+
+<p> <span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >On Detecting Termination in the Crash-Recovery Model</span> <br>
+<i> <span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Felix Freiling , Matthias Majuntke , Neeraj Mittal</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >Software Computing - Topic 9</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Emmanuel Jeannot</span></i></p>
+
+<p> <span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Parallel Simulation of Large-Scale Neuronal Networks on Clusters of Multiprocessor Computers</span> <br>
+<i> <span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >Hans E. Plesser , Jochen M. Eppler , Abigail Morrison , Markus Diesmann , Marc-Oliver Gewaltig</span> </i></p>
+
+<p> <span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >MCSTL: The Multi-Core Standard Template Library</span> <br>
+<i> <span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >Johannes Singler , Peter Sanders , Felix Putze</span> </i></p>
+
+<p> <span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >Library Support for Parallel Sorting in Scientific Computations</span> <br>
+<i> <span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >Holger Dachsel , Michael Hofmann , Gudula Rünger</span> </i></p>
+
+<p> <span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >Domain-Specific Optimization Strategy for Skeleton Programs</span> <br>
+<i> <span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >Kento Emoto , Kiminori Matsuzaki , Zhenjiang Hu , Masato Takeichi</span> </i></p>
+
+<p class=subtitle_1 align=center ><span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >Friday 31st - Technical Session F (11:00 - 12:30)</span></p>
+<p><font color=#923131><span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >Theory - Topic 3</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Thierry Priol</span></i></p>
+
+<p> <span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >A Framework for Scheduling with Online Availability</span> <br>
+<i> <span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >Florian Diedrich , Ulrich M. Schwarz</span> </i></p>
+
+<p> <span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >Scheduling File Transfers for Data-Intensive Jobs on Heterogeneous Clusters</span> <br>
+<i> <span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >Gaurav Khanna , Umit Catalyurek , Tahsin Kurc , Ponnuswamy Sadayappan , Joel Saltz</span> </i></p>
+
+<p> <span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >Cooperation in Multi-Organization Scheduling</span> <br>
+<i> <span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >Fanny Pascual , Krzysztof Rzadca , Denis Trystram</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >Software Computing - Topic 2</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Wolfgang Nagel</span></i></p>
+
+<p> <span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >Experiences Understanding Performance in a Commercial Scale-Out Environment</span> <br>
+<i> <span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >Robert W. Wisniewski , Reza Azimi , Mathieu Desnoyers , Maged M. Michael , Jose Moreira , Doron Shiloach , Livio Soares</span> </i></p>
+
+<p> <span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >Detecting Application Load Imbalance on High End Massively Parallel Systems</span> <br>
+<i> <span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >Luiz DeRose , Bill Homer , Dean Johnson</span> </i></p>
+
+<p> <span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >A First Step Towards Automatically Building Network Representations</span> <br>
+<i> <span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >Lionel Eyraud-Dubois , Arnaud Legrand , Martin Quinson , Frédéric Vivien</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >Distributed Systems - Topic 5</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Esther Pacitti</span></i></p>
+
+<p> <span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >Parallel Nearest Neighbour algorithms for Text Categorization</span> <br>
+<i> <span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >Reynaldo Gil-García , José Manuel Badía-Contelles , Aurora Pons-Porrata</span> </i></p>
+
+<p> <span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Distributed Data Condensation for Nearest Neighbor Classification</span> <br>
+<i> <span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >Fabrizio Angiulli , Gianluigi Folino</span> </i></p>
+
+<p> <span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >A Search Engine Accepting On-Line Updates</span> <br>
+<i> <span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >Mauricio Marin , Carolina Bonacic , Graciela Veronica Gil-Costa , Carlos Gomez</span> </i></p>
+
+<p><font color=#923131><span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >Software Computing - Topic 6</span></font></p>
+<p align=right>    <i> <span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Christian Pérez</span></i></p>
+
+<p> <span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >Negotiation Strategies Considering Opportunity Functions for Grid Scheduling</span> <br>
+<i> <span class="coloringspan" id="282" onmousedown="md(this)" onmouseup="mu(this)" >Jiadao Li , Kwang Mong Sim , Ramin Yahyapour</span> </i></p>
+
+<p> <span class="coloringspan" id="283" onmousedown="md(this)" onmouseup="mu(this)" >SymGrid: a Framework for Symbolic Computation on the Grid</span> <br>
+<i> <span class="coloringspan" id="284" onmousedown="md(this)" onmouseup="mu(this)" >Kevin Hammond , Abdallah Al Zain , Gene Cooperman , Dana Petcu , Phil Trinder</span> </i></p>
+
+<p> <span class="coloringspan" id="285" onmousedown="md(this)" onmouseup="mu(this)" >Grid Resource Ranking using Low-level Performance Measurements</span> <br>
+<i> <span class="coloringspan" id="286" onmousedown="md(this)" onmouseup="mu(this)" >George Tsouloupas , Marios D. Dikaiakos</span> </i></p>
+
+ <p class=subtitle_1 align=center ><span class="coloringspan" id="287" onmousedown="md(this)" onmouseup="mu(this)" >Friday 31st - Invited Talk (14:00 - 15:00)</span></p>
+<p align=right>    <i> <span class="coloringspan" id="288" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Anne-Marie Kermarrec</span></i></p>
+<p> <i><span class="coloringspan" id="289" onmousedown="md(this)" onmouseup="mu(this)" >15mm x 15 mm: the new frontier of parallel computing</span></i> <br>
+<g> <span class="coloringspan" id="290" onmousedown="md(this)" onmouseup="mu(this)" >André Seznec</span></g> <span class="coloringspan" id="291" onmousedown="md(this)" onmouseup="mu(this)" >- IRISA (France)</span></p>
+
+ <p class=subtitle_1 align=center ><span class="coloringspan" id="292" onmousedown="md(this)" onmouseup="mu(this)" >Friday 31st - Closing Remarks (15:00 - 15:30)</span></p>
+
+
+</div>
+
+</div>
+<div id="supportingText">
+<div id="footer">
+<br>
+<table with=100% align=center>
+<tr>
+             <td width=20% align=right>
+
+             <td COLSPAN=3 width=60% align=center>
+<img onmousedown="imd(this)" src=Images/Logos/INRIA_Rennes.gif
+alt='' width="240">              </td>
+             <td width=20% align=center>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:europar2007@irisa.fr"><span class="coloringspan" id="293" onmousedown="md(this)" onmouseup="mu(this)" >europar2007@irisa.fr</span>

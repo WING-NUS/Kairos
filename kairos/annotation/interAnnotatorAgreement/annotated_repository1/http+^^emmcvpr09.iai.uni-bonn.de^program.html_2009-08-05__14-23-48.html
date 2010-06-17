@@ -1,0 +1,721 @@
+<html>
+
+
+
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session1/3/annotation/annotated_repository/http+^^emmcvpr09.iai.uni-bonn.de^program.html_2009-08-05__14-23-48.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session1/3/annotation/annotated_repository/http+^^emmcvpr09.iai.uni-bonn.de^program.html_2009-08-05__14-23-48.yaml created on Thu Aug 13 13:46:14 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+
+<title>EMMCVPR 2009 - Final Programm</title>
+
+<link rel="stylesheet" type="text/css" href="emmcvpr.css">
+
+</head>
+
+
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+
+
+<table class="main">
+
+<tr><td><H1>
+
+ <span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >EMMCVPR 2009 - Final Programm</span>
+
+</h1></td></tr>
+<tr><td><img onmousedown="imd(this)" src="image/empty.png" width="1" height="250"/></td></tr>
+<tr><td>
+<tr><td class=center>
+<span>
+  <H3><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >The conference will be held at the</span>  <span onclick="return false" style="text-decoration:underline; color:blue" href="travel.html"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Universit&auml;tsclub Bonn e.V.</span></span></H3></span></td></tr>
+<table class="program" border="1"  >
+<tr>
+<th>
+</th>
+<th WIDTH=23%><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Monday, August 24</span></th>
+<th WIDTH=23%><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Thuesday, August 25</span></th>
+<th WIDTH=23%><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, August 26</span></th>
+<th WIDTH=23%><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, August 27</span></th>
+</tr>
+<tr>
+<td ><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >9:00&ndash;10:00</span></td>
+<td ></td>    
+<td ><span onclick="return false" style="text-decoration:underline; color:blue" href="#INVGS"class="invited_speaker"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Keynote: Guillermo Sapiro.</span></span></td>
+<td ><span onclick="return false" style="text-decoration:underline; color:blue" href="#INVJW"class="invited_speaker"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Keynote: Joachim
+Weickert.</span></span>
+</td>
+<td ><span onclick="return false" style="text-decoration:underline; color:blue" href="#INVRH"class="invited_speaker"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Keynote: Richard Hartley.</span></span>
+</td>
+</tr>
+<tr>
+<td ><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >10:00&ndash;10:30</span> <br>
+</td>
+<td ></td>
+<td ><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span> <br>
+</td>
+<td ><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span> <br>
+</td>
+<td ><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span><br>
+</td>
+</tr>
+<tr>
+<td ><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >10:30&ndash;11:45</span> <br>
+</td>
+<td ></td>
+<td ><span onclick="return false" style="text-decoration:underline; color:blue" href="#DOMRF" class="topic" ><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Discrete Optimization and Markov Random Fields</span></span>
+</td>
+<td ><span onclick="return false" style="text-decoration:underline; color:blue" href="#PDE" class="topic"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Partial Differential Equations</span></span>
+</td>
+<td ><span onclick="return false" style="text-decoration:underline; color:blue" href="#IID" class="topic"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Inpainting and Image Denoising</span></span>
+</td>
+</tr>
+<tr>
+<td ><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >11:45&ndash;14:00</span><br>
+</td>
+<td ></td>
+<td ><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span> <br>
+</td>
+<td ><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span><br>
+</td>
+<td>
+</td>
+</tr>
+
+<tr>
+<td ><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >14:00&ndash;15:15</span></td>
+<td rowspan="2" class="registration"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span> </td>
+<td ><span onclick="return false" style="text-decoration:underline; color:blue" href="#ST"class="topic"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Segmentation and Tracking</span></span>
+</td>
+
+<td rowspan="2" ><span onclick="return false" style="text-decoration:underline; color:blue" href="#PS" class="poster"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session</span></span></td>
+<td ></td>
+</tr>
+<tr>
+<td> <span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >15:15&ndash;15:45</span> <br>
+</td>
+<td ><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span><br>
+</td>
+<td ></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >15:45&ndash;17:00</span></td>
+<td><span onclick="return false" style="text-decoration:underline; color:blue" href="#CT" class="topic"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Color and Texture</span></span>
+</td>
+<td><span onclick="return false" style="text-decoration:underline; color:blue" href="#SOR" class="topic"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Shape Optimization and
+Registration</span></span>
+</td>
+<td rowspan="2" class="social_event"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Social Event</span> <BR /><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >(15:45&ndash;21:00)</span></td>
+<td ></td>
+</tr>
+
+<tr>
+<td><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >17:00&ndash;18:30</span></td>
+<td class="reception"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Reception</span><br>
+</td>
+<td></td>
+<td ></td>
+</tr>
+</table>
+</td></tr>
+<tr><td><table align=center cellspacing="15" style="color:5D478B">
+<tr class="day">
+
+     <td><B><h3> <span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Monday, August 24</span></h3></b></td>
+		
+</tr>	
+  <tr>
+    <td class="registration"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >14:00 &ndash; 15:45</span> </td>
+    <td class="registration"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span> </td>
+  </tr>
+
+ <tr >
+    <td class="topic_big"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >15:45 &ndash; 17:00</span> </td>
+    <td class="topic_big"><span onclick="return false" style="text-decoration:underline; color:blue" name="CT"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Color and Texture:</span></span></td>
+  </tr>
+  <tr>
+    <td class="topic"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >15:45 &ndash; 16:10</span> </td>
+    <td class="topic"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Color Image Segmentation in a Quaternion Framework.</span><BR /><div class="speaker"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Ozlem Subakan and Baba
+Vemuri.</span></div></td>
+  </tr>
+  <tr>
+    <td class="topic"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >16:10 &ndash; 16:35</span> </td>
+    <td class="topic"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Quaternion-based Color Image Smoothing Using a Spatially Varying Kernel.</span><BR /><div class="speaker"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Ozlem Subakan and Baba
+Vemuri.</span></div></td>
+  </tr>
+  <tr>
+    <td class="topic"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >16:10 &ndash; 16:35</span> </td>
+    <td class="topic"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Locally Parallel Textures Modeling with
+Adapted Hilbert Spaces.</span><BR /><div class="speaker"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Pierre Maurel,Jean-Fran&ccedil;ois Aujol, and Gabriel Peyr&eacute;.</span></div></td>
+
+  </tr>
+  <tr>
+    <td class="reception"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >17:00 &ndash; 18:30</span> </td>
+    <td class="reception"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Reception</span></td>
+  </tr>
+
+  <tr class="day">
+
+     <td><B><h3> <span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Thuesday, August 25</span></h3></b></td>
+
+</tr>
+  <tr>
+    <td class="invited_speaker"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >9:00 &ndash; 10:00</span> </td>
+    <td class="invited_speaker"><span onclick="return false" style="text-decoration:underline; color:blue" name="INVGS"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Keynote: Guillermo Sapiro</span></span></td>
+  </tr>
+
+  <tr>
+    <td class="topic"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >10:00 &ndash; 10:30</span> </td>
+    <td class="break"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span> </td>
+  </tr>
+  <tr>
+<tr>
+    <td class="topic_big"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >10:30 &ndash; 11:45</span> </td>
+    <td class="topic_big"><span onclick="return false" style="text-decoration:underline; color:blue" name="DOMRF"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Discrete Optimization and Markov Random Fields:</span></span></td>
+  </tr>
+
+    <td class="topic"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >10:30 &ndash; 10:55</span> </td>
+    <td class="topic"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Multi-label Moves for MRFs with Truncated Convex Priors.</span><BR/> <div class="speaker"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Olga Veksler.</span></td>
+  </tr>
+  <tr>
+    <td class="topic"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >10:55 &ndash; 11:20</span> </td>
+    <td class="topic"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Detection and Segmentation of Independently Moving Objects from Dense Scene Flow.</span><BR/><div class="speaker"> <span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Andreas Wedel, Daniel Cremers, Uwe Franke, Clemens Rabe, and Annemarie Meissner.</span></div></td>
+  </tr>
+  <tr>
+    <td class="topic"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >11:20 &ndash; 11:45</span> </td>
+    <td class="topic"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Global Minimization for the Multiphase Chan-Vese Model of Image Segmentation.</span><BR /><div class="speaker"> <span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Egil Bae and Xue-Cheng Tai.</span></div></td>
+
+  </tr>
+  <tr>
+    <td class="break"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >11:45 &ndash; 14:00</span> </td>
+    <td class="break"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></td>
+  </tr>
+
+<tr>
+    <td class="topic_big"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >14:00&ndash; 15:15</span> </td>
+    <td class="topic_big"><span onclick="return false" style="text-decoration:underline; color:blue" name="ST"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Segmentation and Tracking:</span></span></td>
+  </tr>
+<tr>
+    <td class="topic"><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >14:00 &ndash; 14:25</span> </td>
+    <td class="topic"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Hierarchical Pairwise Segmentation using Dominant Sets and
+Anisotropic Diffusion Kernels.</span><BR/> <div class="speaker"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Andrea Torsello and Marcello Pelillo.</span></td>
+
+  </tr>
+<tr>
+    <td class="topic"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >14:25 &ndash; 14:50</span> </td>
+    <td class="topic"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Tracking as Segmentation of Spatial-Temporal Volumes by Anisotropic
+Weighted TV.</span><BR/> <div class="speaker"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Markus Unger, Thomas Mauthner, Thomas Pock, and Horst
+Bischof.</span></td>
+
+  </tr>
+<tr>
+    <td class="topic"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >14:50 &ndash; 15:15</span> </td>
+    <td class="topic"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Complementary Optic Flow.</span><BR/><div class="speaker"> <span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Henning Zimmer, Andres Bruhn, Joachim Weickert, Levi
+Valgaerts, Agust&igrave;n Salgado, Bodo Rosenhahn, and Hans-Peter Seidel.</span></div></td>
+
+  </tr>
+ <tr>
+    <td class="break"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >15:15 &ndash; 15:45</span> </td>
+    <td class="break"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span> </td>
+  </tr>
+  <tr>
+<tr>
+
+<tr>
+    <td class="topic_big"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >15:45&ndash;17:00</span> </td>
+    <td class="topic_big"><span onclick="return false" style="text-decoration:underline; color:blue" name="SOR"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Shape Optimization and Registration:</span></span></td>
+  </tr>
+<tr>
+<tr>
+    <td class="topic"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >15:45 &ndash; 16:10</span> </td>
+    <td class="topic"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Integrating the Normal Field of a Surface in the Presence of Occlusions.</span><Br /><div class="speaker"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Jean-Denis Durou, Jean-Fran&ccedil;ois Aujol, and Fr&eacute;d&eacute;ric Courteille.</span></div></td>
+
+  </tr>
+<tr>
+    <td class="topic"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >16:10 &ndash; 16:35</span> </td>
+    <td class="topic"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Intrinsic Second-Order Geometric Optimization for Robust Point Set
+Registration Without Correspondence.</span><BR /><div class="speaker"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Dirk Breitenreicher and Christoph Schn&ouml;rr.</span></div> </td>
+
+  </tr>
+<tr>
+    <td class="topic"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >16:35 &ndash; 17:00</span> </td>
+    <td class="topic"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Geodesics in Shape Space via Variational Time Discretization.</span><BR />
+<div class="speaker"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Leah Bar, Martin Rumpf, Guillermo Sapiro, and Benedikt Wirth.</span></div> </td>
+</tr>
+
+
+ <tr class="day">
+
+     <td><B><h3> <span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, August 26</span></h3></b></td>
+		
+</tr>	
+
+ <tr >
+    <td class="invited_speaker"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >9:00&ndash; 10:00</span> </td>
+    <td class="invited_speaker"><span onclick="return false" style="text-decoration:underline; color:blue" name="INVJW"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Keynote: Joachim Weickert.</span></span></td>
+  </tr>
+
+ <tr>
+    <td class="break"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >10:00&ndash;10:30</span> </td>
+    <td class="break"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td>
+  </tr>
+<tr>
+    <td class="topic_big"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >10:30&ndash;11:45</span></td>
+    <td class="topic_big"><span onclick="return false" style="text-decoration:underline; color:blue" name="PDE"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Partial Differential Equations:</span></span></td>
+  </tr>
+<tr>
+
+<tr>
+    <td class="topic"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >10:30 &ndash; 10:55</span> </td>
+    <td class="topic"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Complex Diffusion on Scalar and Vector Valued Image Graphs.</span><BR />
+<div class="speaker"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Dohyung Seo and Baba Vemuri.</span></div> </td>
+</tr>
+<tr>
+    <td class="topic"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >10:55 &ndash; 11:20</span> </td>
+    <td class="topic"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >A PDE approach to coupled super-resolution with non-parametric motion.</span><BR />
+<div class="speaker"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Mehran Ebrahimi and Anne Martel.</span></div> </td>
+</tr>
+<tr>
+    <td class="topic"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >11:20 &ndash; 11:45</span> </td>
+    <td class="topic"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >On a Decomposition Model for Optical Flow.</span><BR />
+<div class="speaker"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Jochen Abhau, Zakaria Belhachmi, and Otmar Scherzer.</span></div> </td>
+</tr>
+
+</tr>
+  <tr>
+    <td ><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >11:45 &ndash; 14:00</span> </td>
+    <td class="break"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span> </td>
+</tr>
+<tr>
+    <td class="poster"><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >14:00 &ndash; 16:00</span> </td>
+    <td class="poster"><span onclick="return false" style="text-decoration:underline; color:blue" name="PS"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session:</span></span></td>
+</tr>
+<tr>
+<td></td>
+<td>
+<OL class="poster">
+<LI><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Data-Parallel Formulation for Bipartite Graph Matching Computation
+on GPU.</span><BR/><div class=author><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Cristina Vasconcelos and Bodo Rosenhahn.</span>
+</div><LI><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Pose-invariant Face Matching Using MRF Energy Minimization
+Framework.</span><BR/><div class=author><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Shervin Rahimzadeh Arashloo and Josef Kittler.</span>
+</div><LI><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Parallel Hidden Hierarchical Fields for Multi-scale Reconstruction.</span><BR/><div class=author><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Ying Liu and Paul Fieguth.</span>
+</div><LI><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >General search algorithms for energy minimization problems.</span><BR/><div class=author><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Dmitrij Schlesinger.</span>
+</div><LI><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >A Schr&ouml;dinger wave equation approach to the eikonal equation:
+Application to image analysis.</span><BR/><div class=author><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Anand Rangarajan and Karthik Gurumoorthy.</span>
+</div><LI><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Computing the Local Continuity Order of Optical Flow using Fractional
+Variational Method.</span><BR/><div class=author><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Atsushi Imiya.</span>
+</div><LI><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >A local normal-based region term for active contours.</span><BR/><div class=author><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Julien Mille and Laurent Cohen.</span>
+</div><LI><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Parameter estimation for marked point processes. Application to object
+extraction from remote sensing images.</span><BR/><div class=author><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Florent Chatelain, Xavier Descombes, and Josiane Zerubia.</span>
+</div><LI><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Three Dimensional Monocular Human Motion Analysis in End-Eector
+Space.</span><BR/><div class=author><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >S&oslash;ren Hauberg, Jerome Lapuyade, Morten Engell-N&oslash;rreg&aring;rd, Kenny
+Erleben, and Kim Steenstrup Pedersen.</span>
+</div><LI><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Robust Segmentation by Cutting across A Stack of Gamma
+Transformed Images.</span><BR/><div class=author><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Elena Bernardis and Stella Yu.</span>
+</div><LI><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Image Registration under Varying Illumination: Hyper-Demons Algorithm.</span><BR/><div class=author><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Mehran Ebrahimi and Anne Martel.</span>
+</div><LI><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Hierarchical Vibrations: A Structural Decomposition Approach for
+Image Analysis.</span><BR/><div class=author><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Karin Engel and Klaus Toennies.</span>
+</div><LI><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Color Image Restoration using Nonlocal Mumford-Shah regularizers.</span><BR/><div class=author><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Miyoun Jung, Xavier Bresson, Tony Chan, and Luminita Vese.</span>
+</div><LI><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Reconstructing Optical Flow Fields by Motion Inpainting.</span><BR/><div class=author><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Benjamin Berkels, Claudia Kondermann, Christoph Garbe, and
+Martin Rumpf.</span>
+</div><LI><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Global Optimal Multiple Object Detection Using the Fusion of Shape and Color Information.</span><BR/><div class=author><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Marek Schikora.</span>
+</div><LI><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Human Age Estimation by Metric Learning for Regression Problems.</span><BR/><div class=author><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Yangjing Long.</span>
+</div><LI><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Clustering-based construction of Hidden Markov Models for Generative Kernels.</span><BR/><div class=author><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Manuele Bicego, Marco Cristani, Vittorio Murino, Robert Duin,
+and El&#x017C;bieta P&#x0119;kalska.</span>
+</div><LI><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Boundaries as Contours with Optimal Appearance and Area of Support.</span><BR/><div class=author><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Christina Pavlopoulou and Stella Yu.</span>
+
+</OL>
+</td>
+</tr>
+<tr>
+    <td class="social_event"><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >16:00 &ndash; 21:00</span> </td>
+    <td class="social_event"><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Social Event</span><BR />
+</tr>
+
+<tr class="day">
+
+     <td><B><h3> <span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, August 27</span></h3></b></td>
+		
+</tr>
+<tr>
+    <td class="invited_speaker"><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >9:00&ndash; 10:00</span> </td>
+    <td class="invited_speaker"><span onclick="return false" style="text-decoration:underline; color:blue" name="INVRH"><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Keynote: Richard Hartley.</span></span></td>
+</tr>
+<tr>
+    <td class="break"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >10:00&ndash;10:30</span> </td>
+    <td class="break"><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td>
+</tr>
+<tr>
+    <td class="topic_big"><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >10:30&ndash;11:45</span></td>
+    <td class="topic_big"><span onclick="return false" style="text-decoration:underline; color:blue" name="IID"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Inpainting and Image Denoising:</span></span></td>
+  </tr>
+<tr>
+<tr>
+    <td class="topic"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >10:30 &ndash; 10:55</span> </td>
+    <td class="topic"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Exemplar-Based Inpainting of Sparsely Sampled Images.</span><BR />
+<div class="speaker"><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Gabriele Facciolo, Pablo Arias, Vicent Caselles, and Guillermo
+Sapiro.</span></div> </td>
+</tr>
+<tr>
+    <td class="topic"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >10:55 &ndash; 11:20</span> </td>
+    <td class="topic"><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Variational Framework for Non-local Image Inpainting.</span><BR />
+<div class="speaker"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Pablo Arias, Vicent Caselles, and Guillermo Sapiro.</span></div> </td>
+</tr>
+<tr>
+    <td class="topic"><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >11:20 &ndash; 11:45</span> </td>
+    <td class="topic"><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Image Filtering Driven by Level Curves.</span><BR />
+<div class="speaker"><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Ajit Rajwade, Arunava Banerjee and Anand Rangarajan.</span>

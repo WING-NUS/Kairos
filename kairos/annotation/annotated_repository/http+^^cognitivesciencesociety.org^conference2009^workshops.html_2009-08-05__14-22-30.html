@@ -1,0 +1,523 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^cognitivesciencesociety.org^conference2009^workshops.html_2009-08-05__14-22-30.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^cognitivesciencesociety.org^conference2009^workshops.html_2009-08-05__14-22-30.yaml created on Wed Aug 05 17:31:05 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<title>Cognitive Science Society : 
+Workshops : Workshops</title>
+<meta http-equiv="content-type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="styles.css" type="text/css" />
+<link rel="stylesheet" href="theme_style.css" type="text/css" />
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+
+
+<div id="pagewrapper">
+
+<div id="header">
+<div id="header_text">
+	<p id="main_head"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >COGSCI 2009</span></p>
+	<p id="sub_head"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >THE ANNUAL MEETING OF THE COGNITIVE SCIENCE SOCIETY</span></p>
+</div>
+<span onclick="return false" style="text-decoration:underline; color:blue" name="top"></span>
+</div>
+
+
+
+<div id="contentwrapper">
+<div id="content">
+<div id="contentinner">
+<div id="contentinner2">
+<div id="leftmenu">
+<dl><dt><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Main Menu</span></dt>
+<dd><span onclick="return false" style="text-decoration:underline; color:blue" title="Updated on 1st Jun 2009" href="index.html"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Overview</span></span></dd>
+<dd><span onclick="return false" style="text-decoration:underline; color:blue" title="Updated on 27th Jul 2009" href="news.html"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >News</span><img onmousedown="imd(this)" class='updated' src='images/updated.gif'  /></span></dd>
+<dd><span onclick="return false" style="text-decoration:underline; color:blue" title="Updated on 12th Jun 2009" href="submissions.html"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Submissions</span></span></dd>
+<dd><span onclick="return false" style="text-decoration:underline; color:blue" title="Updated on 17th Jul 2009" href="prizes.html"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Prizes</span></span></dd>
+<dd><span onclick="return false" style="text-decoration:underline; color:blue" title="Updated on 20th Jul 2009" href="registration.html"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></dd>
+<dd><span onclick="return false" style="text-decoration:underline; color:blue" title="Updated on 18th Jul 2009" href="travel.html"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Travel Info</span></span></dd>
+<dd><span onclick="return false" style="text-decoration:underline; color:blue" title="Updated on 15th Oct 2008" href="speakers.html"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Speakers</span></span></dd>
+<dd><span onclick="return false" style="text-decoration:underline; color:blue" title="Updated on 27th Jul 2009" href="schedule.html"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Schedule</span><img onmousedown="imd(this)" class='updated' src='images/updated.gif'  /></span></dd>
+<dd><span onclick="return false" style="text-decoration:underline; color:blue" title="Updated on 23rd Jun 2009" href="tutorials.html"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span></dd>
+<dd><span onclick="return false" style="text-decoration:underline; color:blue" title="Updated on 23rd Jun 2009" href="workshops.html"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></dd>
+<dd><span onclick="return false" style="text-decoration:underline; color:blue" title="Updated on 12th May 2009" href="committees.html"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></span></dd>
+<dd><span onclick="return false" style="text-decoration:underline; color:blue" title="Updated on 17th Jul 2009" href="sponsors.html"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></span></dd>
+<dd><span onclick="return false" style="text-decoration:underline; color:blue" title="Updated on 14th Jul 2009" href="exhibitors.html"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Exhibitors</span></span></dd>
+<dd><span onclick="return false" style="text-decoration:underline; color:blue" title="Updated on 12th Jun 2009" href="faq.html"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >FAQ</span></span></dd>
+</dl>
+</div><!-- leftmenu -->
+
+
+<div id="mainwrapper">
+<div id="main">
+
+<h1>
+<span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></h1>
+
+<p>
+
+<span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >The Tutorials and Workshops program at Cognitive Science 2009 allow participants to gain new insights, knowledge, and skills from a broad range of areas in the field of cognitive science.</span></p>
+
+<p>
+<span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Attending any tutorial or workshop session requires conference registration, but there are no additional fees associated with these sessions; participation is included with your conference registration. Below are the titles, duration and locations for each of the sessions offered this year. Click on the session title to view the abstract for that session in a new window (abstracts are in .pdf format).</span>
+</p>
+<h2><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></h2><p>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ai.rug.nl/cogsci09/T1-Busemeyer.pdf"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Quantum Information Processing Theory</span></span><br />
+<span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Jerome R. Busemeyer &amp; Zheng Wang</span><br />
+<span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >(full-day)</span></p>
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ai.rug.nl/cogsci09/T2-Schoner.pdf"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Dynamic Field Theory: Conceptual Foundations and Applications in the Cognitive and Developmental Sciences</span></span><br />
+<span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Gregor Schoner, Christian Faubel, &amp; Vanessa Simmering</span><br />
+<span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >(full-day)</span></p>
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ai.rug.nl/cogsci09/T3-Lane.pdf"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >EPAM/CHREST Tutorial: Fifty Years of Simulating Human Learning</span></span><br />
+<span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Peter C.R. Lane &amp; Fernand Gobet</span><br />
+<span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >(half-day morning)</span></p>
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ai.rug.nl/cogsci09/T4-Forbus.pdf"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >CogSketch Tutorial</span></span><br />
+<span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Kenneth D. Forbus</span><br />
+<span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >(half-day afternoon)</span>
+</p>
+<h2><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></h2>
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ai.rug.nl/cogsci09/W1-Anderson.pdf"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >ACT-R Workshop</span></span><br />
+<span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >John R. Anderson, Daniel Bothell, Christian Lebiere, &amp; Niels A. Taatgen</span><br />
+<span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >(full-day)</span></p>
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ai.rug.nl/cogsci09/W2-Douglass.pdf"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Large-Scale Cognitive Modeling using Model Integrated Computing</span></span><br />
+<span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Scott Douglass, Jonathan Sprinkle, Christopher Bogart, Nick Cassimatis, Andrew Howes, Randolph M. Jones, &amp; Richard Lewis</span><br />
+<span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >(full-day)</span></p>
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ai.rug.nl/cogsci09/W3-Martin.pdf"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >New Developments in the Cognitive Science of Religion</span></span><br />
+<span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Luther H. Martin, Robert N. McCauley, &amp; Armin W. Geertz</span><br />
+<span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >(full-day)</span></p>
+
+<p>
+<strong><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >[CANCELED]</span></strong><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ai.rug.nl/cogsci09/W4-Kljajevic.pdf"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Aspects of the Self in VR: Implications for Design</span></span><strong><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >[CANCELED]</span></strong><br />
+<span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Vanja Kljajević &amp; Kamilla J&oacute;hannsd&oacute;ttir</span></p>
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ai.rug.nl/cogsci09/W5-vanDeemter.pdf"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Production of Referring Expressions: Bridging the gap between computational and empirical approaches to reference</span></span><br />
+<span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Kees van Deemter, Albert Gatt, Roger van Gompel, &amp; Emiel Krahmer</span><br />
+<span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Website:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://pre2009.uvt.nl/"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >http://pre2009.uvt.nl/</span></span><br />
+<span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >(full-day)</span></p>
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ai.rug.nl/cogsci09/W6-Shafto.pdf"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Intuitive Pedagogical Reasoning: An Interdisciplinary Workshop</span></span><br />
+<span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Patrick Shafto &amp; Noah Goodman</span><br />
+<span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >(full-day)</span></p>
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ai.rug.nl/cogsci09/W7-Trianni.pdf"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Swarm Cognition Workshop</span></span><br />
+<span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Vito Trianni &amp; Elio Tuci</span><br />
+<span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Website:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://laral.istc.cnr.it/swarm-cognition"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >http://laral.istc.cnr.it/swarm-cognition</span></span><br />
+<span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >(full-day)</span></p>
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ai.rug.nl/cogsci09/SakasBod.pdf"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Psychocomputational Models of Human Language Acquisition</span></span><br />
+<span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >William Gregory Sakas &amp; Rens Bod</span><br />
+<span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >(full-day)</span></p>
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ai.rug.nl/cogsci09/W9-Feldman.pdf"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Merging professional development and science: Constructing a successful grant proposal</span></span><br />
+<span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Laurie Beth Feldman, Janet van Hell, Judith Kroll, &amp; Suparna Rajaram</span><br />
+<span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >(half-day afternoon)</span></p>
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ai.rug.nl/cogsci09/W10-Peirsman.pdf"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Distributional Semantics beyond Concrete Concepts</span></span><br />
+<span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Yves Peirsman, Yannick Versley, &amp; Tim van de Cruys</span><br />
+<span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Website:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.let.rug.nl/disco2009/"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >http://www.let.rug.nl/disco2009/</span></span><br />
+<span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >(half-day morning)</span></p>
+
+<p>
+<span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >For your reference, we have archived the calls for</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="../uploads/workshopcall.pdf"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >workshops</span></span> <span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >and for</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="../uploads/tutorialcall.pdf"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >tutorials</span></span><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >.</span></p>
+
+
+</div><!-- mainwrapper -->
+</div><!-- main -->
+
+<div class="clear"></div>
+
+
+</div><!-- contentinner2 -->
+</div><!-- contentinner -->
+</div><!-- content -->
+</div><!-- contentwrapper -->
+
+
+
+<div id="footer">
+<div id="crumb">
+
+<ul>
+<li class="home"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cognitivesciencesociety.org/index.html"><img onmousedown="imd(this)" src="images/layout/crumb-home.gif" alt="Home" /></span></li>
+</ul>
+</div><!-- crumb -->
+<div id="back">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="#top"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Back To Top</span></span>
+</div><!-- back -->
+<div class="clear"></div>
+<span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >&copy; 2009 Cognitive Science Society. All Rights Reserved |</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://jigsaw.w3.org/css-validator/check/referer"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >CSS</span></span> <span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >|</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://validator.w3.org/check/referer"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >xHTML</span></span> <span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >|</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.boz.co.uk"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Developed by Boz</span>

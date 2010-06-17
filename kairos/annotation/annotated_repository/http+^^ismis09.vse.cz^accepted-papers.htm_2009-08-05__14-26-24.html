@@ -1,0 +1,1092 @@
+<?xml version="1.0"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+  <head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^ismis09.vse.cz^accepted-papers.htm_2009-08-05__14-26-24.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^ismis09.vse.cz^accepted-papers.htm_2009-08-05__14-26-24.yaml created on Wed Aug 05 17:31:21 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+    <title>
+      Accepted papers
+    </title>
+    
+<base href="http://ismis09.vse.cz/" />
+<meta name="Generator" content="CMS Made Simple - Copyright (C) 2004-6 Ted Kulp. All rights reserved." />
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <link rel="stylesheet" type="text/css" href="http://ismis09.vse.cz/stylesheet.php?templateid=21" />
+
+  <link rel="alternate" type="application/rss+xml" title="RSS 2.0" href="http://ismis09.vse.cz/News/rss/harriet.htm" /></head>
+  <body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span><span onclick="return false" style="text-decoration:underline; color:blue" id="top"></span>
+    <!--container-->
+    <div id="container">
+      <!-- start header -->
+
+      <div id="header">
+<div id="headerTitle">
+<h1><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >ISMIS 2009 Prague</span></h1>
+</div>
+<div id="headerSubtitle">
+<h2><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >18th International Symposium on Methodologies for Intelligent Systems</span></h2>
+<h3><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >September 14 - 17, 2009</span></h3>
+
+</div>
+      </div><!-- end header -->
+      <!-- start mobox -->
+      <div id="mobox">
+        <!-- start navbox -->
+        <div id="navbox">
+<br/>
+            <div id="shadow">
+              <!-- start sidenotes2 -->
+              <div id="sidenotes2">
+                <h4><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Reminder</span></h4>
+              </div><!-- end sidenotes2 -->
+              <!-- start sidenotes -->
+              <div id="sidenotes">
+                <!-- Displaying News Module -->
+<!-- News Categories: 'harriet' -->
+<!-- Start News Display Template -->
+<div class="NewsSummary">
+
+	<div class="NewsSummaryPostdate">
+		<span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >02/05/09</span>
+	</div>
+
+
+	<div class="NewsSummarySummary">
+		<span style="color: #ff0000;"><span style="color: #333333;"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Notifications have been sent &amp; registration page is now open. Camera ready versions of accepted papers are due</span><span style="color: #ff0000;"> <span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >JUNE 15</span><span style="color: #000000;"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >.</span></span></span></span><br /></span>
+	</div>
+
+
+
+
+  
+</div>
+<!-- End News Display Template -->
+              </div><!-- end sidenotes -->
+            </div><!-- end shadow -->
+
+          <!-- start sidebar -->
+          <div id="sidebar">
+            <!-- start nav -->
+            <div id="nav">
+              <div id="menuwrapper">
+<ul id="primary-nav">
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ismis09.vse.cz/"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ismis09.vse.cz/call-for-papers.htm"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Call for papers</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ismis09.vse.cz/call-for-workshops.htm"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Call for workshops</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ismis09.vse.cz/important-dates.htm"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Important dates</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ismis09.vse.cz/organizers.htm"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Organizers and contacts</span></span></li>
+	<li class="menuactive"><span onclick="return false" style="text-decoration:underline; color:blue" class="menuactive" href="http://ismis09.vse.cz/accepted-papers.htm"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Accepted papers</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ismis09.vse.cz/preparing-camera-ready.htm"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Camera Ready Submission</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ismis09.vse.cz/program.htm"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ismis09.vse.cz/registration.htm"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ismis09.vse.cz/list-of-participants.htm"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >List Of Participants</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ismis09.vse.cz/conference-venue.htm"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Conference venue</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ismis09.vse.cz/program-committee.htm"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Program committee</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ismis09.vse.cz/invited.htm"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Invited speakers</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ismis09.vse.cz/workshops.htm"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ismis09.vse.cz/accomodation.htm"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ismis09.vse.cz/about-prague.htm"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >About Prague</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ismis09.vse.cz/social-program.htm"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Social program</span></span>
+			</li>
+	</ul>
+</div>
+
+            </div><!-- end nav -->
+          </div><!-- end sidebar-->
+
+<div align="center"> 
+<img onmousedown="imd(this)" src="uploads/images/blncs.gif" alt="LNAI series" width="114" height="40" /><br/>
+<span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings will be published by Springer in LNAI series</span></div>
+<span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br/>
+
+</div>
+
+<!-- end navbox -->
+        <!-- start box -->
+        <div id="box">
+          <!-- start shadow2 -->
+          <div id="shadow2">
+            <!-- start content3 -->
+            <div id="content3">
+              <!-- start img -->
+              <div id="img">
+                <h2 class="center"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Accepted papers</span></h2>
+              </div><!-- end img -->
+            </div><!-- end content3 -->
+            <!-- start content1 -->
+            <div id="content1">
+              <!-- start img1 -->
+              <div id="img1">
+                <table border="0">
+<tbody>
+<tr>
+<td><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >On Three Classes of Division Queries Involving Ordinal Preferences (Paper ID 1)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Patrick Bosc, Olivier Pivert and Olivier Soufflet</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Theme Extraction from Chinese Web Documents Based on Page Segmentation and Entropy (Paper ID 3)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Deqing Wang, Hui Zhang and Gang Zhou</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Alternative Formulas for Rating Prediction Using Collaborative Filtering (Paper ID 4)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Amar Saric, Mirsad Hadzikadic and David Wilson</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Time-Series Prediction on Data Stream using Incremental Hidden Markov Models (Paper ID 5)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Kei Wakabayashi and Takao Miura</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Intelligent Information Processing  in Semantically Enriched Web (Paper ID 6)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Pavol Navrat, Maria Bielikova, Daniela Chuda and Viera Rozinajova</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Automatic profiling system for ranking candidates answers in Human Resources with Relevance Feedback (Paper ID 7)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Rémy Kessler, Nicolas Béchet, Juan Manuel Torres-Moreno, Mathieu Roche and Marc El-Beze</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >A Sequential Pattern Mining based Guiding System (Paper ID 9)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Chieh-Yuan Tsai, Ching-Chuan Hsiao and Chih-Jung Chen</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >An OWL Ontology for Fuzzy OWL 2 (Paper ID 10)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Fernando Bobillo and Umberto Straccia</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Discovering Structured Event Logs from Unstructured Audit Trails for Workflow Mining (Paper ID 11)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Liqiang Geng, Scott Buffett, Bruce Hamilton, Xin Wang, Larry Korba, Hongyu Liu and Yunli Wang</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >An Argumentative Semantics for Paraconsistent Reasoning in Description Logic (Paper ID 12)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Xiaowang Zhang and Zuoquan Lin</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >GIS-FLSolution: A Spatial Analysis Platform for Static and Transportation Facility Location Allocation  (Paper ID 19)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Wei Gu, Xin Wang and Liqiang Geng</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Frequent Itemset Mining in Multirelational Databases (Paper ID 21)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Aída Jiménez, Fernando Berzal and Juan-Carlos Cubero</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Ensembles of Abstaining Classifiers based on Rule Sets (Paper ID 22)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Jerzy Stefanowski, Jerzy Blaszczynski and Magdalena Zajac</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >A CBR System for Knowing the Relationship between Flexibility and Operations Strategy (Paper ID 23)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Arias-Aranda, Juan Luis Castro, Maria Navarro and Jose Manuel Zurita</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Interval-Valued Fuzzy Formal Concept Analysis (Paper ID 27)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Yassine Djouadi and Henri Prade</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Detecting Emotion in Classical Music from MIDI Files (Paper ID 29)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Jacek Grekow and Zbigniew Raś</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Elicitation of Sugeno integrals :  A version space learning perspective (Paper ID 31)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Henri Prade, Agnes Rico and Mathieu Serrurier</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >On computational creativity, ‘inventing’ theorems (Paper ID 34)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Marta Franova and Yves Kodratoff</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Discovering Relevant Cross-Graph Cliques in Dynamic Networks (Paper ID 35)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Loic Cerf, Tran Bao Nhan Nguyen and Jean-Francois Boulicaut</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Reasoning about Relations with Dependent Types: Application to Context-aware Applications (Paper ID 36)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Richard Dapoigny and Patrick Barlatier</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Mining musical patterns: Identification of transposed motives (Paper ID 37)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Fernando Berzal, Waldo Fajardo, Aída Jiménez and Miguel Molina-Solana</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Medical decision making through fuzzy computational intelligent approaches (Paper ID 39)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Elpiniki Papageorgiou</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Fuzzy Cognitive Map based approach for assessing pulmonary infections (Paper ID 40)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Elpiniki Papageorgiou, Nikolaos Papandrianos and Georgia Karagianni</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >RaJoLink: A Method for Finding Seeds of Future Discoveries in Nowadays Literature (Paper ID 44)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Tanja Urbančič, Ingrid Petrič and Bojan Cestnik</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Modeling Ant Activity by means of Structured HMMs (Paper ID 45)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Guenael Cabanes, Dominique Fresnau, Attilio Giordana and Ugo Galassi</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Fuzzy Clustering for Categorical Spaces: An Application to Semantic Knowledge Bases (Paper ID 46)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Nicola Fanizzi, Claudia d'Amato and Floriana Esposito</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >A Multiple Scanning Strategy for Entropy Based Discretization (Paper ID 47)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Jerzy W. Grzymala-Busse</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Modern Approach for Building of Multi-Agent Systems (Paper ID 48)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Łukasz Chomątek and Aneta Poniszewska-Maranda</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Quasi-classical Model Semantics for Logic Programs--A Paraconsistent Approach (Paper ID 49)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Zhihu Zhang, Zuoquan Lin and Shuang Ren</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Lacking Labels In The Stream: Classifying Evolving Stream Data With Few Labels (Paper ID 50)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Mohammed Masud, Clay Woolam and Latifur Khan</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Topic-based Hard Clustering of Documents using Generative Models (Paper ID 51)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Giovanni Ponti and Andrea Tagarelli</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Analyses of knowledge creation processes based on different types of monitored data (Paper ID 52)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Jan Paralic, Frantisek Babic, Jozef Wagner, Ekaterina Simonenko, Nicolas Spyratos and Tsuyoshi Sugibuchi</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Prime Implicates and Reduced Implicate Tries (Paper ID 53)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Neil Murray and Erik Rosenthal</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Top-k Retrieval for Automated Human Resource Management (Paper ID 54)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Umberto Straccia, Eufemia Tinelli, Tommaso Di Noia, Eugenio Di Sciascio and Simona Colucci</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Discovering Emerging Graph Patterns from Chemicals (Paper ID 56)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Guillaume Poezevara, Bertrand Cuissart and Bruno Crémilleux</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Fast Subgroup Discovery for Continuous Target Concepts (Paper ID 58)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Martin Atzmueller and Florian Lemmerich</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Novelty Detection from Evolving Complex Data Streams with Time Windows (Paper ID 62)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Michelangelo Ceci, Annalisa Appice, Corrado Loglisci, Costantina Caruso, Fabio Fumarola and Donato Malerba</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Application of Meta Sets to Character Recognition (Paper ID 67)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Bartłomiej Starosta</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Relational Sequence Clustering for Aggregating Similar Agents (Paper ID 68)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Grazia Bombini, Nicola Di Mauro, Stefano Ferilli and Floriana Esposito</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >A New Strategy based on GRASP to solve a Macro Mine Planning (Paper ID 69)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Maria-Cristina Riff, Eridan Otto and Xavier Bonnaire</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Efficient MAP Inference for Statistical Relational Models through Hybrid Metaheuristics (Paper ID 70)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Marenglen Biba, Stefano Ferilli and Floriana Esposito</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Networks Consolidation through Soft Computing (Paper ID 71)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Sami Habib</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Combining Time and Space Similarity for Small Size Learning under Concept Drift (Paper ID 72)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Indre Zliobaite</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >A Knowledge-based Framework for Information Extraction from Clinical Practice Guidelines (Paper ID 73)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Corrado Loglisci, Michelangelo Ceci and Donato Malerba</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Food Wholesales Prediction: What is Your Baseline? (Paper ID 74)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Jorn Bakker and Mykola Pechenizkiy</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Boosting a Semantic Search Engine by Named Entities (Paper ID 75)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Annalina Caputo, Pierpaolo Basile and Giovanni Semeraro</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >FutureTrust algorithm in specific factors on mobile agents (Paper ID 79)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Michal Wolski and Mieczyslaw Klopotek</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Visualization trends by RadViz (Paper ID 81)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Lenka Novakova and Olga Stepankova</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Logic for reasoning about components of persuasive actions (Paper ID 82)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Katarzyna Budzynska, Magdalena Kacprzak and Pawel Rembelski</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Enhancing Constraint Models for Planning Problems (Paper ID 84)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Roman Barták and Daniel Toropila</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Similarity and Kernel Matrix Evaluation based on Spatial Autocorrelation Analysis (Paper ID 87)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Vincent Pisetta and Djamel Zighed</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Automatic generation of P2P mappings between sources schemas (Paper ID 88)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Karima Toumani, Hélene Jaudoin and Michel Schneider</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Detecting Temporal Trends of Technical Phrases by using Importance Indices and Linear Regression (Paper ID 89)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Hidenao Abe and Shusaku Tsumoto</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Semi-supervised Text Classification Using RBF Networks (Paper ID 97)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Eric Jiang</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Musical Instruments in Random Forest (Paper ID 98)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Miron Kursa, Witold Rudnicki, Alicja Wieczorkowska, Elzbiera Kubera and Agnieszka Kubik-Komar</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Action Rules Discovery based on Tree Classifiers and Meta-Actions (Paper ID 101)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Zbigniew Ras and Agnieszka Dardzinska</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Statistical Characterization of a Computer Grid (Paper ID 103)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Lovro Ilijasic and Lorenza Saitta</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Action Rules and the GUHA Method - Preliminary Considerations and Results (Paper ID 105)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Jan Rauch and Milan Simunek</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >On Social Networks Reduction (Paper ID 106)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Vaclav Snasel, Zdenek Horak, Jana Kocibova and Ajith Abraham</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >A general framework for revising belief bases using qualitative Je rey's rule (Paper ID 107)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Salem Benferhat, Henri Prade, Didier Dubois and Mary-Anne Williams</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >A hybrid method of indexing multiple-inheritance hierarchies (Paper ID 108)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Jacek Lewandowski and Henryk Rybiński</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Application of Analysis of Variance to Assessment of Influence of Sound Feature Groups on Discrimination Between Musical Instruments (Paper ID 109)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Alicja Wieczorkowska and Agnieszka Kubik-Komar</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >A Distributed Immunization Strategy Based on Autonomy-Oriented Computing (Paper ID 110)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >J Liu, Chao Gao and Ning Zhong</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+<tr>
+<td><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Semantic Analytical Reports: A Framework for Postprocessing Data Mining Results (Paper ID 111)</span></td>
+</tr>
+<tr>
+<td><em><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Tomas Kliegr, Martin Ralbovský, Vojtech Svatek, Jan Nemrava and Jan Zemánek</span></em></td>
+</tr>
+<tr height="5">
+</tr>
+</tbody>
+</table>
+              </div><!-- end img1 -->
+            </div><!-- end content1 -->
+          </div><!-- end shadow2 -->
+          <!-- start shadow3 -->
+          <div id="shadow3">
+            <!-- start content4 -->
+            <div id="content4">
+              <!-- start img2 -->
+              <div id="img2">
+                <h2 class="center"></h2>
+              </div><!-- end img2 -->
+            </div><!-- end content4 -->
+            <!-- start content2 -->
+            <div id="content2">
+              <!-- start img3 -->
+              <div id="img3">
+                
+              </div><!-- send img3 -->
+            </div><!-- end content2 -->
+          </div><!-- end shadow3 -->
+          <!--afil-->
+          <div id="afil">
+            
+          </div><!--end afil-->
+<!-- relational links -->
+       <div id="flat">      
+
+          <div class="left49">
+            <p><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Previous page:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://ismis09.vse.cz/organizers.htm" title="Organizers"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Organizers</span></span> <br />
+            <span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Next page:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://ismis09.vse.cz/preparing-camera-ready.htm" title="Instructions for authors of accepted papers"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Instructions for authors of accepted papers</span></span></p>
+          </div>
+        </div>
+<!-- End relational links -->
+        </div><!-- end box -->
+        <!-- start navbox1 -->
+        <div id="navbox1">
+
+          <!-- start sidebar1 -->
+          <div id="sidebar1">
+            <!-- start shadow4 -->
+            <div id="shadow4">
+              <!-- start sidenotes3 -->
+              <div id="sidenotes3">
+                <h4 class="center"><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></h4>
+              </div><!-- end sidenotes3 -->
+              <!-- start sidenotes1 -->
+              <div id="sidenotes1">
+            <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.vse.cz/index-en.php"><img onmousedown="imd(this)" src=
+            "/images/vselogo.png" alt="University of Economics in Prague" title = "University of Economics in Prague" style="border-width:0;padding-top:10px;padding-left:10px;" /></span>
+<div align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.vse.cz/index-en.php"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >University of Economics, Prague</span></span></div>
+            <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.seznam.cz/"><img onmousedown="imd(this)" src=
+            "/images/seznam.gif" alt="Seznam" title = "Seznam" style="border-width:0;padding-top:10px;padding-left:3px" /></span>
+<div align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.seznam.cz/index-en.php"><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Seznam.cz</span></span></div>
+
+            <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.csob.cz/"><img onmousedown="imd(this)" src=
+            "/images/CSOB_r.png" alt="ČSOB a.s." title = "ČSOB a.s." style="border-width:0;padding-top:10px;padding-left:0px;" /></span>
+<div align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.csob.cz/"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >ČSOB a.s</span></span></div>
+<br/>
+            <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.tovek.cz/"><img onmousedown="imd(this)" src=
+            "/images/tovek.png" alt="Tovek, spol s r.o." title = "Tovek, spol. s r.o." style="border-width:0;padding-top:10px;padding-left:5px;" /></span>
+<div align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.tovek.cz"><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Tovek, spol. s r.o.</span></span></div>
+
+<br/>
+            <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cski.cz"><img onmousedown="imd(this)" src=
+            "/images/cski.png" alt="Czech Society For Cybernetics And Informatics" title = "Czech Society For Cybernetics And Informatics" style="border-width:0;padding-top:10px;padding-left:10px;" /></span>
+<div align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cski.cz"><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Czech Society For Cybernetics And Informatics</span></span></div>
+              </div><!-- end sidenotes1 -->
+
+            </div><!-- end shadow4 -->
+
+          </div><!-- end sidebar1 -->
+
+<!-- end navbox1 -->
+
+<div align="center">
+  <div id="sidebar1">
+            <!-- start shadow4 -->
+            <div id="shadow4">
+              <!-- start sidenotes3 -->
+              <div id="sidenotes3">
+                <h4 class="center"><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Downloads</span></h4>
+              </div><!-- end sidenotes3 -->
+              <!-- start sidenotes1 -->
+              <div id="sidenotes1">
+<br/>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="uploads/ISMIS09_CFP.pdf">
+<img onmousedown="imd(this)" src="uploads/images/cfp.gif" alt="ISMIS 2009 Call for Papers" width="55" height="78" />
+<div align="center"> <b><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >ISMIS'09 CFP</span></b></div>
+</span>
+<span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br/>
+
+                </div>
+
+            </div>
+
+          </div>
+
+
+<br/>
+
+</div>
+        </div><!-- end navbox1 -->
+      </div><!--end mobox-->
+    <!--footer-->
+    <div id="footer">
+      <p><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >© Copyright 2008 -</span> <span onclick="return false" style="text-decoration:underline; color:blue" title="Knowledge Engineering Group" href="http://keg.vse.cz"><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Knowledge Engineering Group</span></span><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.vse.cz/index-en.php"><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >University of Economics</span></span><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >, Prague</span>

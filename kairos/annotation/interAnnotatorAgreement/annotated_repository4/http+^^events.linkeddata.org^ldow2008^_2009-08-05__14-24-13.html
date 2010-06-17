@@ -1,0 +1,763 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session1/5/annotation/annotated_repository/http+^^events.linkeddata.org^ldow2008^_2009-08-05__14-24-13.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session1/5/annotation/annotated_repository/http+^^events.linkeddata.org^ldow2008^_2009-08-05__14-24-13.yaml created on Thu Aug 13 13:47:17 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<title>Linked Data on the Web (LDOW2008) - Workshop at WWW2008, Beijing, China</title>
+<meta http-equiv=Content-Type content="text/html; charset=iso-8859-1">
+<link href="style.css" type="text/css" rel="stylesheet">
+<meta content="Chris Bizer, Tom Heath, Kingsley Idehen, Tim Berners-Lee" name="author">
+<meta content="chris@bizer.de" name="email">
+<meta lang="en" content="Linked Data, Web, Semantic Web, RDF, HTTP, WWW2008, LDOW2008" name="keywords">
+<meta lang="en" content="WWW2008 Workshop about Linked Data on the Web" name="description">
+<style type="text/css">
+<!--
+.Stil1 {font-weight: bold}
+.Stil4 {color: rgb(184,38,25); font-weight: bold; }
+-->
+</style>
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span> 
+<table class="aussen" width="100%"> 
+  <tbody> 
+    <tr> 
+      <td class="nav_outer"> <div> 
+          <table class="navigation" width="100%"> 
+            <tbody> 
+              <tr> 
+                <td><span onclick="return false" style="text-decoration:underline; color:blue" 
+            href="#objectives"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Objectives</span></span></td> 
+              </tr> 
+              <tr> 
+                <td><span onclick="return false" style="text-decoration:underline; color:blue" 
+            href="#topics"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Topics of Interest</span></span></td> 
+              </tr> 
+			 <tr> 
+                <td><span onclick="return false" style="text-decoration:underline; color:blue" 
+            href="#program"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Program</span></span></td> 
+              </tr> 
+              <tr> 
+                <td><span onclick="return false" style="text-decoration:underline; color:blue" 
+            href="#submissions"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Submissions</span></span></td> 
+              </tr> 
+              <tr> 
+                <td><span onclick="return false" style="text-decoration:underline; color:blue" 
+            href="#dates"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></td> 
+              </tr> 
+              <tr> 
+                <td><span onclick="return false" style="text-decoration:underline; color:blue" 
+            href="#oc"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Chairs</span></span></td> 
+              </tr> 
+              <tr> 
+                <td><span onclick="return false" style="text-decoration:underline; color:blue" 
+            href="#pc"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></span></td> 
+              </tr> 
+            </tbody> 
+          </table> 
+        </div></td> 
+      <td width="100%"> <h2><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www2008.org/"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >WWW 2008</span></span> <span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Workshop:</span></h2> 
+        <h1 class="Stil1"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Linked Data on the Web</span> <span style="font-size: 0.7em;"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >(</span><abbr title="Linked Data on the Web"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >LDOW2008</span></abbr><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >)</span></span></h1> 
+        <br> 
+        <h4 id=subtitle><span> <span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >April 22, 2008</span><br> 
+          <span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Beijing, China</span></span></h4> 
+        <!--  --> 
+        <!-- Content goes here --> 
+        <!--  --> 
+        <div>
+	    <h2><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >News</span></h2>
+	    <ul>
+	      <li><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >June 14, 2008: The LDOW2008 Proceedings are now online as</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://sunsite.informatik.rwth-aachen.de/Publications/CEUR-WS/Vol-369/"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >CEUR-WS Vol-369</span></span><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >.</span> </li>
+	      <li><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >April 29, 2008: LDOW2008 is over. The repetition of the workshop for WWW2009 in Madrid is already planned. The next upcoming Linked Data events are</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.linkeddataplanet.com/index.php"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Linked Data Planet</span></span> <span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >(New York City, June 2008), the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://esw.w3.org/topic/SweoIG/TaskForces/CommunityProjects/LinkingOpenData/TenerifeGathering"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >ESWC Linking Open Data Face2Face</span></span> <span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >(Tenerife, June 2008) and a</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://events.linkeddata.org/iswc2008tutorial/"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Linked Data tutorial at ISWC 2008</span></span> <span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >(Karlsruhe, October 2008).</span> </li>
+	      <li><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >April 29, 2008: For information about what happened at the workshop please see:</span></li>
+	      <ul>
+		    <li> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.flickr.com/photos/tags/ldow2008/interesting/"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Photos from LDOW2008</span></span></li>
+		    <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://blogs.zdnet.com/semantic-web/?p=128"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Paul Miller's ZDnet blog post about LDOW2008</span></span><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.dynamicorange.com/blog/archives/internet-technical/ldow2008.html"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Rob Styles' blog post</span></span><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.virtualchaos.co.uk/blog/2008/04/23/www2008-day-2-ldow2008-workshop/"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Nadeem Shabir's blog post</span></span><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.openlinksw.com/dataspace/oerling/weblog/Orri%20Erling%27s%20Blog/1347"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Orri Erling's blog post</span></span></li>
+		    </ul>
+	      <li><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >April 29, 2008: The</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#program" class="Stil1"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span> <span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >from several talks are online. The missing ones will follow.</span> </li>
+	      <li><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Mar 5, 2008:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#program"><strong><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Camera-ready papers</span></strong></span> <span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >are online.</span></li>
+	      <li><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Feb 16, 2008:</span> <span class="Stil1"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >23 of the 38 submission have been accepted</span></span> <span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >for the workshop which makes an acceptance rate of 60%. Thanks a lot to the LDOW program committee for their great and timely work!</span> </li>
+	      <li><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Feb 4, 2008: The LDOW workshop has</span> <strong> <strong><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >received</span> </strong>  <span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >38 submission</span></strong> <span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >covering the complete spectrum from Linked Data publication to Linked Data consumption as well as conceptual topics like identification, 
+  
+
+   disambiguation
+  
+and automated interlinkage.</span> </li>
+	      </ul>
+	    <h2><span onclick="return false" style="text-decoration:underline; color:blue" name="objectives"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Objectives</span></span></h2> 
+          <p><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >The Web is increasingly understood as a global information space consisting not just of linked documents, but also of</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://en.wikipedia.org/wiki/Linked_Data"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Linked Data</span></span><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >. More than just a vision, the Web of Data has been brought into being by the maturing of the Semantic Web technology stack, and by the publication of large datasets according to the principles of Linked Data. During 2007, the size of the Web of Data has grown to several billion RDF triples which are served by a network of interlinked data sources and which cover domains such as geographic information, people, companies, online communities, films, music, books and scientific publications. In addition to publishing and interlinking datasets, there is also ongoing work on Linked Data browsers, Linked Data crawlers, Web of Data search engines and other applications that consume Linked Data from the Web.</span> </P> 
+          <p><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >The goal of this workshop is to provide a forum for the Linked Data community, in which participants can:</span> </p> 
+          <ul> 
+            <li><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >present and discuss approaches to publishing Linked Data on the Web;</span></li> 
+            <li><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >showcase innovative applications that consume Linked Data;</span> </li> 
+            <li><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >shape the agenda and identify upcoming research issues for the next development stage of the Web of Data.</span> </li> 
+          </ul> 
+          <h2><span onclick="return false" style="text-decoration:underline; color:blue" name="program" id="program"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Program</span></span></h2>
+          <p><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Use the links below to view individual papers, or download</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="papers/all.zip" title=""><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >all papers</span></span> <span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >(ZIP file, 7.6MB).</span></p>
+          <table width="800" border="1">
+            <tr>
+              <td width="102"><span class="Stil4"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Time</span></span></td>
+              <td width="556"><span class="Stil4"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span></span></td>
+              <td width="53"><div align="center" class="Stil4"> </div></td>
+              <td width="1"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >8:30-8:50</span></td>
+              <td><span style="font-weight: bold"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/00-bizer-heath-ldow2008-intro.pdf" title="Workshop Summary"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Introduction</span></span> </span> <span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/LDOW2008-Workshop-Intro.pdf"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+              <span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Chris Bizer, Tom Heath, Kingsley Idehen, Tim Berners-Lee</span></td>
+              <td><div align="center"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Intro</span></div></td>
+              <td><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+		<tr>
+              <td colspan="4"><strong><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Session: Populating the Web with Linked Data</span> </strong></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >8:50-9:10</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/01-bojars-passant-weaving-sioc.pdf" title="Weaving SIOC into the Web of Linked Data" style="font-weight: bold"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Weaving SIOC into the Web of Linked Data</span></span> <span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.slideshare.net/CaptSolo/weaving-sioc-into-the-web-of-linked-data"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >)</span><br>
+              <span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Uldis Bojars, Alexandre Passant, Richard Cyganiak and John Breslin</span></td>
+              <td><div align="center"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Talk</span></div></td>
+              <td><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >9:10-9:30</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/02-styles-ayers-semantic-marc.pdf" title="Semantic Marc, MARC21 and The Semantic Web" style="font-weight: bold"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Semantic Marc, MARC21 and The Semantic Web</span></span> <span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/RobStyles_SemanticMarc.pdf"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+              <span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Rob Styles, Danny Ayers and Nadeem Shabir</span></td>
+              <td><div align="center"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Talk</span></div></td>
+              <td><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >9:30-9:50</span></td>
+              <td><p><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/03-haslhofer-schandl-oai2lod-server.pdf" title="The OAI2LOD Server: Exposing OAI-PMH Metadata as Linked Data" style="font-weight: bold"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >The OAI2LOD Server: Exposing OAI-PMH Metadata as Linked Data</span></span> <span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/oai2lod_lod2008.pdf"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >)</span><br>
+              <span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Bernhard Haslhofer and Bernhard Schandl</span></p>              </td>
+              <td><div align="center"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Talk</span></div></td>
+              <td><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >9:50-10:10</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/04-li-zhao-linked-data-generation.pdf" title="A Case Study on Linked Data Generation and Consumption" style="font-weight: bold"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >A Case Study on Linked Data Generation and Consumption</span></span> <span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/JianqiangLi_LDOW2008.pdf"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+              <span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Jianqiang Li and Yu Zhao</span></td>
+              <td><div align="center"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Talk</span></div></td>
+              <td><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >10:10-10:30</span> </td>
+              <td colspan="3"><strong><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Break</span> </strong></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >10:30-10:50</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/05-coetzee-heath-sparqplug.pdf" title="SparqPlug: Generating Linked Data from Legacy HTML, SPARQL and the DOM" style="font-weight: bold"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >SparqPlug: Generating Linked Data from Legacy HTML, SPARQL and the DOM</span></span> <span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/PeterCoetzee_SparqPlug.pdf"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+              <span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Peter Coetzee, Tom Heath and Enrico Motta</span></td>
+              <td><div align="center"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Talk</span></div></td>
+              <td><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >10:50-11:10</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/06-halb-raimond-building-linked-data.pdf" title="Building Linked Data For Both Humans and Machines" style="font-weight: bold"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Building Linked Data For Both Humans and Machines</span></span> <span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/LDOW08HalbRaimondHausenblas.pdf"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+              <span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Wolfgang Halb, Yves Raimond and Michael Hausenblas</span></td>
+              <td><div align="center"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Talk</span></div></td>
+              <td><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >11:10-11:30</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/07-zhao-klyne-provenance-linked-data.pdf" title="Provenance and Linked Data in Biological Data Webs" style="font-weight: bold"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Provenance and Linked Data in Biological Data Webs</span></span> <span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/JunZhao_Provenance_LODW.pdf"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+              <span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Jun Zhao, Graham Klyne and David Shotton</span></td>
+              <td><div align="center"><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Talk</span></div></td>
+              <td><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >11:30-11:50</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/08-miller-styles-open-data-commons.pdf" title="Open Data Commons, a License for Open Data" style="font-weight: bold"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Open Data Commons, a License for Open Data</span></span> <span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/PaulMiller_LinkedDataWorkshop.pdf"><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+              <span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Paul Miller, Rob Styles and Tom Heath</span></td>
+              <td><div align="center"><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Talk</span></div></td>
+              <td><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >11:50-12:00</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/09-zhou-xu-mapping-tool.pdf" title="Browser-based Semantic Mapping Tool for Linked Data in Semantic Web" style="font-weight: bold"><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Browser-based Semantic Mapping Tool for Linked Data in Semantic Web</span></span> <span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/Chunying%20Zhou_LinkedDataMapper.pdf"><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+              <span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Chunying Zhou, Chengli Xu, Huajun Chen and Kingsley Idehen</span></td>
+              <td><div align="center"><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Demo</span></div></td>
+              <td><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >12:00-12:10</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/10-passant-me-owl-same-as.pdf" title=":me owl:sameAs flickr:33669349@N00" style="font-weight: bold"><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >:me owl:sameAs flickr:33669349@N00</span></span> <span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/AlexandrePassant_MeOwlSameAs.pdf"><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+              <span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Alexandre Passant</span></td>
+              <td><div align="center"><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Demo</span></div></td>
+              <td><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >12:10-1:30</span></td>
+              <td colspan="3"><strong><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></strong></td>
+            </tr>
+            <tr>
+              <td colspan="4"><strong><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Session: Consuming Linked Data from the Web</span> </strong></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >1:30-1:50</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/11-berners-lee-hollenbach-tabulator-redux.pdf" title="Tabulator Redux: Browsing and Writing Linked Data" style="font-weight: bold"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Tabulator Redux: Browsing and Writing Linked Data</span></span><br><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Tim Berners-Lee, J. Hollenbach, Kanghao Lu, J. Presbrey, E. Prud&apos;hommeaux and mc schraefel</span></td>
+              <td><div align="center"><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Talk</span></div></td>
+              <td><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >1:50-2:10</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/12-cheng-ge-searching-semantic-web-objects.pdf" title="Searching Semantic Web Objects Based on Class Hierarchies" style="font-weight: bold"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Searching Semantic Web Objects Based on Class Hierarchies</span></span> <span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/GongCheng_SearchingSemanticWebObjectsBasedonClassHierarchies.pdf"><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+              <span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Gong Cheng, Weiyi Ge, Honghan Wu and Yuzhong Qu</span></td>
+              <td><div align="center"><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Talk</span></div></td>
+              <td><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >2:10-2:20</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/13-becker-bizer-dbpedia-mobile.pdf" title="DBpedia Mobile: A Location-Enabled Linked Data Browser" style="font-weight: bold"><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >DBpedia Mobile: A Location-Enabled Linked Data Browser</span></span> <span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/ChristianBecker_DBpediaMobile.pdf"><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+              <span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Christian Becker and Christian Bizer</span></td>
+              <td><div align="center"><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Demo</span></div></td>
+              <td><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >2:20-2:30</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/15-kobilarov-dickinson-humboldt-exploring.pdf" title="Humboldt: Exploring Linked Data" style="font-weight: bold"><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Humboldt: Exploring Linked Data</span></span><br>
+<span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Georgi Kobilarov and Ian Dickinson</span></td>
+              <td><div align="center"><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Demo</span></div></td>
+              <td><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >2:30-2:40</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/14-hastrup-cyganiak-browsing-with-fenfire.pdf" title="Browsing Linked Data with Fenfire" style="font-weight: bold"><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Browsing Linked Data with Fenfire</span></span><br>
+              <span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Tuukka Hastrup, Richard Cyganiak and Uldis Bojars</span></td>
+              <td><div align="center"><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Demo</span></div></td>
+              <td><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >2:40-2:50</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/16-bergman-giasson-zlinks-semantic-framework.pdf" title="zLinks: Semantic Framework for Invoking Contextual Linked Data" style="font-weight: bold"><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >zLinks: Semantic Framework for Invoking Contextual Linked Data</span></span><br><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Mike Bergman and Frederick Giasson</span></td>
+              <td><div align="center"><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Demo</span></div></td>
+              <td><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >2:50-3:10</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/17-peterson-cregan-n2mate-semantic-network.pdf" title="n2Mate: Exploiting social capital to create a standards-rich semantic network" style="font-weight: bold"><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >n2Mate: Exploiting social capital to create a standards-rich semantic network</span></span> <span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/n2Mate-Beijing.pdf"><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+              <span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >David Peterson, Anne Cregan, Rob Atkinson and John Brisbin</span></td>
+              <td><div align="center"><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Talk</span></div></td>
+              <td><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >3:10-3:30</span></td>
+              <td colspan="3"><strong><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></strong></td>
+            </tr>
+            <tr>
+              <td colspan="4"><strong><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Session: Architecture and Conceptual</span></strong></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >3:30-3:50</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/18-raimond-sutton-automatic-interlinking.pdf" title="Automatic Interlinking of Music Datasets on the Semantic Web" style="font-weight: bold"><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Interlinking of Music Datasets on the Semantic Web</span></span> <span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/YvesRaimond_AutomaticInterlinking.pdf"><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+              <span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Yves Raimond, Christopher Sutton and Mark Sandler</span></td>
+              <td><div align="center"><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >Talk</span></div></td>
+              <td><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >3:50-4:10</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/19-jaffri-glaser-uri-disambiguation.pdf" title="URI Disambiguation in the Context of Linked Data" style="font-weight: bold"><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >URI Disambiguation in the Context of Linked Data</span></span> <span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/AfrazJaffri_URIDisambiguationintheContextofLinkedData.pdf"><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+              <span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Afraz Jaffri, Hugh Glaser and Ian Millard</span></td>
+              <td><div align="center"><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Talk</span></div></td>
+              <td><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >4:10-4:30</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/20-idehen-erling-linked-data-spaces.pdf" title="Linked Data Spaces &amp; Data Portability" style="font-weight: bold"><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Linked Data Spaces &amp; Data Portability</span></span> <span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/OpenLink_DataPortabilityandDataSpaces.pdf"><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+              <span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Kingsley Idehen and Orri Erling</span></td>
+              <td><div align="center"><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Talk</span></div></td>
+              <td><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >4:30-4:50</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/21-servant-linking-enterprise-data.pdf" title="Linking Enterprise Data" style="font-weight: bold"><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Linking Enterprise Data</span></span> <span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/Servant-ldow2008-slides.pdf"><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+              <span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Fran&ccedil;ois-Paul Servant</span></td>
+              <td><div align="center"><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Talk</span></div></td>
+              <td><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >4:50-5:10</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/22-passant-laublet-meaning-of-a-tag.pdf" title="Meaning Of A Tag: A collaborative approach to bridge the gap between tagging and Linked Data" style="font-weight: bold"><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >Meaning Of A Tag: A collaborative approach to bridge the gap between tagging and Linked Data</span></span> <span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/AlexandrePassant_MeaningOfaTag.pdf"><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+              <span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >Alexandre Passant and Philippe Laublet</span></td>
+              <td><div align="center"><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Talk</span></div></td>
+              <td><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+			<tr>
+              <td><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >5:10-5:30</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/23-bouquet-stoermer-entity-name-system.pdf" title="An Entity Name System for Linking Semantic Web Data" style="font-weight: bold"><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >An Entity Name System for Linking Semantic Web Data</span></span> <span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/Bouquet_ENS_LDOW2008.pdf"><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+              <span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >Paolo Bouquet, Heiko Stoermer, Daniele Cordioli and Giovanni Tummarello</span></td>
+              <td><div align="center"><span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >Talk</span></div></td>
+              <td><span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+            <tr>
+              <td><span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >5:30-6:00</span></td>
+              <td><strong><span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >Discussion about research and deployment agenda</span> </strong></td>
+			  <td><span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >Discussion</span></td>
+			  <td><span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+          </table>
+          <h2><span onclick="return false" style="text-decoration:underline; color:blue" name="topics"><span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >Topics of Interest</span></span></h2>
+          <p><span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >Topics of interest include, but are not limited to:</span> </P>
+          <ul>
+            <li><span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >publishing large data sources as Linked Data on the Web</span> <br>
+    <span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >(e.g. publishing tools and wrappers, experience from practical projects)</span> </li>
+            <li><span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >interlinking data on the Web</span> <br>
+    <span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >(e.g. linkage heuristics, similarity measures)</span> </li>
+            <li><span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >embedding data into classic Web documents</span> <br>
+    <span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >(e.g. GRDDL, RDFa, microformats)</span> </li>
+            <li><span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >crawling and caching Web data</span> </li>
+            <li><span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >smushing and integrating data from different sources</span> </li>
+            <li><span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >querying distributed data on the Web</span> </li>
+            <li><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >Linked Data browsers</span> </li>
+            <li><span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >Linked Data search engines</span> </li>
+            <li><span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >applications that exploit Linked Data from the Web</span> </li>
+            <li><span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >characterizing and measuring the Web of Data</span> </li>
+            <li><span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >assessing the quality and trustworthiness of Web data</span> </li>
+            <li><span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >licensing issues in publishing Linked Data</span></li>
+          </ul>
+          <h2><span onclick="return false" style="text-decoration:underline; color:blue" name="submissions"><span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >Submissions</span></span></h2>
+          <p><span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >We seek three kinds of submissions:</span></p> 
+          <ul> 
+            <li><span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >Full technical papers - should not exceed ten pages in length.</span> </li> 
+            <li><span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >Short technical papers and position papers - up to 5 pages.</span> </li> 
+            <li><span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >Demo descriptions - 2 page description of the application, ideally accompanied with a link to an online demo.</span> </li> 
+          </ul> 
+          <p><span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >Submissions must be formatted according to the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.acm.org/sigs/publications/proceedings-templates"><span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >ACM SIG Proceedings Templates</span> </span><span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >. Papers will be peer-reviewed by three independent reviewers. Accepted papers will be presented at the workshop and included into the workshop proceedings.</span><br> 
+          </p>
+          <h2><span onclick="return false" style="text-decoration:underline; color:blue" name="dates"><span class="coloringspan" id="282" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></h2> 
+          <dl> 
+            <dt><span class="coloringspan" id="283" onmousedown="md(this)" onmouseup="mu(this)" >Paper submission deadline:</span></dt> 
+            <dd><span class="coloringspan" id="284" onmousedown="md(this)" onmouseup="mu(this)" >January 31, 2008</span> </dd> 
+            <dt><span class="coloringspan" id="285" onmousedown="md(this)" onmouseup="mu(this)" >Notication of acceptance:</span></dt> 
+            <dd> <span class="coloringspan" id="286" onmousedown="md(this)" onmouseup="mu(this)" >February 17, 2008</span></dd> 
+            <dt><span class="coloringspan" id="287" onmousedown="md(this)" onmouseup="mu(this)" >Camera-ready paper submission:</span></dt> 
+            <dd> <span class="coloringspan" id="288" onmousedown="md(this)" onmouseup="mu(this)" >March 1, 2008</span></dd> 
+            <dt><span class="coloringspan" id="289" onmousedown="md(this)" onmouseup="mu(this)" >Workshop date:</span></dt> 
+            <dd> <span class="coloringspan" id="290" onmousedown="md(this)" onmouseup="mu(this)" >April 22, 2008</span></dd> 
+          </dl> 
+          <h2><span onclick="return false" style="text-decoration:underline; color:blue" name="oc"><span class="coloringspan" id="291" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Chairs</span></span></h2> 
+          <ul> 
+            <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.w3.org/People/Berners-Lee/" title="Tim Berners-Lee"><span class="coloringspan" id="292" onmousedown="md(this)" onmouseup="mu(this)" >Tim Berners-Lee</span></span><span class="coloringspan" id="293" onmousedown="md(this)" onmouseup="mu(this)" >, W3C/MIT, USA</span></li> 
+            <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fu-berlin.de/wiwiss/institute/pwo/suhl/mitarbeiter/BizerChristian.html" title="Christian Bizer"><span class="coloringspan" id="294" onmousedown="md(this)" onmouseup="mu(this)" >Christian Bizer</span></span><span class="coloringspan" id="295" onmousedown="md(this)" onmouseup="mu(this)" >, Freie Universit&auml;t Berlin, Germany</span></li> 
+            <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://kmi.open.ac.uk/people/tom/html" title="Tom Heath"><span class="coloringspan" id="296" onmousedown="md(this)" onmouseup="mu(this)" >Tom Heath</span></span><span class="coloringspan" id="297" onmousedown="md(this)" onmouseup="mu(this)" >, Talis Information Ltd, UK</span></li> 
+            <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.openlinksw.com/blog/~kidehen/" title="Kingsley Idehen"><span class="coloringspan" id="298" onmousedown="md(this)" onmouseup="mu(this)" >Kingsley Idehen</span></span><span class="coloringspan" id="299" onmousedown="md(this)" onmouseup="mu(this)" >, OpenLink Software, USA</span></li> 
+          </ul> 
+          <h2><span onclick="return false" style="text-decoration:underline; color:blue" name="pc"><span class="coloringspan" id="300" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></span></h2>
+          <ul> 
+            <li><span class="coloringspan" id="301" onmousedown="md(this)" onmouseup="mu(this)" >Alan Ruttenberg, Science Commons, USA</span></li> 
+            <li><span class="coloringspan" id="302" onmousedown="md(this)" onmouseup="mu(this)" >Andy Seaborne, Hewlett Packard Labs, UK</span></li> 
+            <li><span class="coloringspan" id="303" onmousedown="md(this)" onmouseup="mu(this)" >Bernard Vatant, Mondeca, France</span></li>
+            <li><span class="coloringspan" id="304" onmousedown="md(this)" onmouseup="mu(this)" >Dan Brickley, aSemantics, UK</span></li>
+            <li><span class="coloringspan" id="305" onmousedown="md(this)" onmouseup="mu(this)" >Dan Connolly, World Wide Web Consortium, USA</span></li>
+            <li><span class="coloringspan" id="306" onmousedown="md(this)" onmouseup="mu(this)" >David Peterson, Boab Interactive, Australia</span></li>
+            <li><span class="coloringspan" id="307" onmousedown="md(this)" onmouseup="mu(this)" >Denny Vrandecic, University of Karlsruhe, Germany</span></li>
+            <li><span class="coloringspan" id="308" onmousedown="md(this)" onmouseup="mu(this)" >Eyal Oren, DERI Galway, Ireland</span></li>
+            <li><span class="coloringspan" id="309" onmousedown="md(this)" onmouseup="mu(this)" >Frederick Giasson, Zitgist, Canada</span></li>
+            <li><span class="coloringspan" id="310" onmousedown="md(this)" onmouseup="mu(this)" >Georgi Kobilarov, Hewlett Packard Labs, UK</span></li>
+            <li><span class="coloringspan" id="311" onmousedown="md(this)" onmouseup="mu(this)" >Giovanni Tummarello, DERI Galway, Ireland</span></li>
+            <li> <span class="coloringspan" id="312" onmousedown="md(this)" onmouseup="mu(this)" >Gui-Rong Xue, 
+
+
+ Shanghai Jiao-Tong University, China</span></li>
+            <li><span class="coloringspan" id="313" onmousedown="md(this)" onmouseup="mu(this)" >Harith Alani, University of Southampton, UK</span></li>
+            <li><span class="coloringspan" id="314" onmousedown="md(this)" onmouseup="mu(this)" >Harry Halpin, University of Edinburgh, UK</span></li>
+            <li><span class="coloringspan" id="315" onmousedown="md(this)" onmouseup="mu(this)" >Henry Story, Sun, USA</span></li>
+            <li><span class="coloringspan" id="316" onmousedown="md(this)" onmouseup="mu(this)" >Hugh Glaser, University of Southampton, UK</span></li>
+            <li><span class="coloringspan" id="317" onmousedown="md(this)" onmouseup="mu(this)" >Ian Davis, Talis, UK</span></li>
+            <li><span class="coloringspan" id="318" onmousedown="md(this)" onmouseup="mu(this)" >Ivan Hermann, World Wide Web Consortium, Netherlands</span></li>
+            <li><span class="coloringspan" id="319" onmousedown="md(this)" onmouseup="mu(this)" >Joerg Diederich, L3S, Germany</span></li>
+            <li><span class="coloringspan" id="320" onmousedown="md(this)" onmouseup="mu(this)" >Joanne Luciano, Harvard Medical School, USA</span> </li>
+	    <li><span class="coloringspan" id="321" onmousedown="md(this)" onmouseup="mu(this)" >Jonathan Gray, Open Knowledge Foundation, UK</span></li>
+            <li><span class="coloringspan" id="322" onmousedown="md(this)" onmouseup="mu(this)" >Kavitha Srinivas,  IBM Watson Research Center, USA</span> </li>
+            <li><span class="coloringspan" id="323" onmousedown="md(this)" onmouseup="mu(this)" >Knud M&ouml;ller, DERI Galway, Ireland</span></li>
+            <li><span class="coloringspan" id="324" onmousedown="md(this)" onmouseup="mu(this)" >Leo Sauermann, DFKI, Germany</span></li>
+            <li><span class="coloringspan" id="325" onmousedown="md(this)" onmouseup="mu(this)" >MacKenzie Smith,  MIT Libraries, USA</span> </li>
+            <li><span class="coloringspan" id="326" onmousedown="md(this)" onmouseup="mu(this)" >Mathieu D'Aquin, KMi, The Open University, UK</span></li>
+            <li><span class="coloringspan" id="327" onmousedown="md(this)" onmouseup="mu(this)" >Melanie Courtot, British Columbia Research Center, Canada</span></li>
+            <li><span class="coloringspan" id="328" onmousedown="md(this)" onmouseup="mu(this)" >Michael Hausenblas, Joanneum Research, Austria</span></li>
+            <li><span class="coloringspan" id="329" onmousedown="md(this)" onmouseup="mu(this)" >Mike Bergman, AI3:Adaptive Information, USA</span></li>
+            <li><span class="coloringspan" id="330" onmousedown="md(this)" onmouseup="mu(this)" >Nigel Shadbolt, University of Southampton, UK</span></li>
+            <li><span class="coloringspan" id="331" onmousedown="md(this)" onmouseup="mu(this)" >Orri Erling, OpenLink Software, Netherlands</span></li>
+            <li><span class="coloringspan" id="332" onmousedown="md(this)" onmouseup="mu(this)" >Paul Miller, Talis, UK</span></li>
+            <li><span class="coloringspan" id="333" onmousedown="md(this)" onmouseup="mu(this)" >Peter Murray-Rust, Cambridge University, UK</span></li>
+            <li><span class="coloringspan" id="334" onmousedown="md(this)" onmouseup="mu(this)" >Richard Cyganiak, 
+
+
+ DERI Galway, Ireland</span></li>
+            <li> <span class="coloringspan" id="335" onmousedown="md(this)" onmouseup="mu(this)" >Sudeshna Das, 
+
+
+ Harvard University, USA</span> </li>
+            <li><span class="coloringspan" id="336" onmousedown="md(this)" onmouseup="mu(this)" >S&ouml;ren Auer, University of Leipzig, Germany</span></li>
+            <li><span class="coloringspan" id="337" onmousedown="md(this)" onmouseup="mu(this)" >Steve Harris, Garlik, UK</span></li>
+            <li><span class="coloringspan" id="338" onmousedown="md(this)" onmouseup="mu(this)" >Susie Stephens, Eli Lilly and Company, USA</span> </li>
+            <li><span class="coloringspan" id="339" onmousedown="md(this)" onmouseup="mu(this)" >Yves Raimond, Queen Mary University of London, UK</span> </li>
+          </ul>
+
+          <h2><span onclick="return false" style="text-decoration:underline; color:blue" name="additional"><span class="coloringspan" id="340" onmousedown="md(this)" onmouseup="mu(this)" >Additional Reviewers</span></span></h2>
+          <ul>		
+            <li><span class="coloringspan" id="341" onmousedown="md(this)" onmouseup="mu(this)" >Jens Lehmann, University of Leipzig, Germany</span></li>
+            <li><span class="coloringspan" id="342" onmousedown="md(this)" onmouseup="mu(this)" >Laurian Gridinoc, KMi, The Open University, UK</span></li>
+            <li><span class="coloringspan" id="343" onmousedown="md(this)" onmouseup="mu(this)" >Sebastian Dietzold, University of Leipzig, Germany</span></li>
+          </ul>		
+
+	<h2><span class="coloringspan" id="344" onmousedown="md(this)" onmouseup="mu(this)" >Contact Details</span></h2>
+          <p><span class="coloringspan" id="345" onmousedown="md(this)" onmouseup="mu(this)" >For further information, please send a message to ldow2008 [&aacute;t] events.linkeddata.org</span></p> 
+        </div> 
+        <!--  --> 
+        <!-- End of Content --> 
+        <!--  --></td> 
+    </tr> 
+    <tr> 
+      <td><span class="coloringspan" id="346" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>

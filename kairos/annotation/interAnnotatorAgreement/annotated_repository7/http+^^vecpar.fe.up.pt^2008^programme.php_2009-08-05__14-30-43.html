@@ -1,0 +1,606 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session1/10/annotation/annotated_repository/http+^^vecpar.fe.up.pt^2008^programme.php_2009-08-05__14-30-43.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session1/10/annotation/annotated_repository/http+^^vecpar.fe.up.pt^2008^programme.php_2009-08-05__14-30-43.yaml created on Thu Aug 13 13:51:31 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+   <title>VECPAR'08 :: Programme</title>
+   <meta http-equiv="Content-type" content="text/html; charset=iso-8859-1" />
+   <meta name="author" content="VECPAR'08" />
+   <meta name="description" content="Eighth International Meeting on High Performance Computing for Computational Science" />
+   <meta name="keywords" content="cluster and grid computing, computing in biosciences, concurrent engineering, data processing / Daya mining, large scale simulations in all areas of engineering and science, numerical methods, parallel and distributed computing, problem solving environments, scientific visualization" />
+   <link href="/2008/vecpar2008.css" rel="stylesheet" type="text/css" />
+   <script type="text/javascript" src="/2008/vecpar2008.js"></script>
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<!-- PAGE -->
+<div id="page">
+
+<!-- HEADER -->
+<div id="header">
+ <div id="header1"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >VECPAR'08 &mdash; 8</span><sup><small><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >th</span></small></sup> <span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >International Meeting</span><br />
+                   <span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >High Performance Computing for Computational Science</span></div>
+ <div id="header2"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Toulouse, France, 24-27 June 2008</span></div>
+</div>
+
+<!-- MENU -->
+<div id="sidemenu">
+<ul>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/index.php" title="Home page"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></li>
+<!-- <li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/registration.php" title="Registration Web page">Registration</span></li> -->
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/topics.php" title="Topics of Interest Web page"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Topics of Interest</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/objectives.php" title="Objectives Web page"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Objectives</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/speakers.php" title="Invited Speakers Web page"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Invited Speakers</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/format.php" title="Format of the Meeting Web page"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Format of the Meeting</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/workshops.php" title="Workshops Web page"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/committees.php" title="Committees Web page"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/dates.php" title="Dates to Remember Web page"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Dates</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/papers.php" title="Paper Submission Web page"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Paper Submission</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/site.php" title="Meeting Site Web page"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Meeting Site</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/programme.php" title="Programme Web page"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Programme</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/tutorials.php" title="Tutorials Web page"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/photos.php" title="Photos Web page"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Photos</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/proceedings.php" title="Proceedings Web page"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></span></li>
+</ul>
+</div>
+
+<!-- CONTENT -->
+<div id="content">
+<h1><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Programme</span></h1>
+<p><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Index:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#a25th"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >June 25</span><sup><small><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >th</span></small></sup></span> <span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#a26th"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >June 26</span><sup><small><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >th</span></small></sup></span> <span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#a27th"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >June 27</span><sup><small><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >th</span></small></sup></span>
+</p>
+
+<h2 id="a24th"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >June 24</span><sup><small><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >th</span></small></sup></h2>
+
+<table class="programme" summary="programme24">
+<tr><td class="programmehour" rowspan="1"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >9h00-17h30</span></td><td class="programmesessiontitle"><span onclick="return false" style="text-decoration:underline; color:blue" href="hpdg08_programme.php" title="goto workshop page"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >HPDGrid08 Workshop</span></span></td></tr>
+<tr><td class="programmehour" rowspan="1"></td><td class="programmesessiontitle"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cerfacs.fr/algor/SparseDays2008/" title="goto workshop page"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Workshop at CERFACS</span></span></td></tr>
+<tr><td class="programmehour" rowspan="1"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >9h00</span></td><td class="programmesessiontitle"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></td></tr>
+<tr><td class="programmehour" rowspan="1"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >17h00-19h00</span></td><td class="programmebreaktitle"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Early registration at ENSEEIHT</span></td></tr>
+</table>
+
+<h2 id="a25th"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >June 25</span><sup><small><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >th</span></small></sup></h2>
+
+<table class="programme" summary="programme25">
+
+<tr><td class="programmehour" rowspan="1"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >9h00-9h30</span></td>
+    <td class="programmeauthors" colspan="2"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></td></tr>
+
+<tr><td class="programmebreakhour"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >9h30-10h00</span></td><td class="programmebreaktitle" colspan="2"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td></tr>
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Opening Session</span><br /><span class="chairname"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Michel Daydé</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="1"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >10h00-10h30</span></td>
+    <td class="programmeauthors" colspan="2"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Opening</span></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Invited Speaker I</span>
+<br /><span class="chairname"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Sato Mitsuhisa</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="1"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >10h30-11h30</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/1.php"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >An Overview of High Performance Computing and Challenges for the Future</span></span></td><td class="programmeauthors"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Jack Dongarra</span> <em><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >(University of Tennessee, USA)</span></em></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Session I: Sparse Linear Algebra</span><br /><span class="chairname"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Filomena d&prime;Almeida</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="3"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >11h30-12h30</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/2.php"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Sparse LU Factorizations on Multicore Platforms</span></span></td><td class="programmeauthors"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Xiaoye Sherry Li</span> <em><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >(Lawrence Berkeley National Laboratory)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/3.php"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >A Parallel Matrix Scaling Algorithm</span></span></td><td class="programmeauthors"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Patrick Amestoy</span> <em><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >(ENSEEIHT-IRIT)</span></em><br /><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Iain Duff</span> <em><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >(RAL and CERFACS)</span></em><br /><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Ruiz</span> <em><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >(ENSEEIHT-IRIT)</span></em><br /><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Bora Ucar</span> <em><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >(CERFACS)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/4.php"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >On the I/O Volume in Out-of-Core Multifrontal Methods with a Flexible Allocation Scheme</span></span></td><td class="programmeauthors"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Emmanuel Agullo</span> <em><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >(ENS Lyon / Université de Lyon / LIP)</span></em><br /><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Abdou Guermouche</span> <em><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >(Université de Bordeaux 1 / LABRI)</span></em><br /><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Jean-Yves L&rsquo;Excellent</span> <em><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >(INRIA / Université de Lyon / LIP)</span></em></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Session II: Cluster and Grid Computing (I)</span><br /><span class="chairname"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Peter Kacsuk</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="3"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >11h30-12h30</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/5.php"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >MOPS - A Morphodynamical Prediction System on Cluster Computers</span></span></td><td class="programmeauthors"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Hartmut Kapitza</span> <em><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >(GKSS Research Centre, Institute for Coastal Research)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/6.php"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >The Impact of Virtualization on Grid Parallel Molecular Dynamics Simulations</span></span></td><td class="programmeauthors"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Lino García-Tarrés</span> <em><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >(Fundación Centro Tecnolóxico de Supercomputación de Galicia (CESGA))</span></em><br /><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Elvira Guàrdia</span> <em><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >(Dep. de Física i Enginyeria Nuclear. Univ. Politècnica de Catalunya)</span></em><br /><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Joaquim  Casulleras</span> <em><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >(Dep. de Física i Enginyeria Nuclear. Univ. Politècnica de Catalunya)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/7.php"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Implementing A Parallel NetCDF Interface for Seamless Remote I/O Using Multi-Dimensional Data</span></span></td><td class="programmeauthors"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Yuichi Tsujita</span> <em><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >(School of Engineering, Kinki University)</span></em></td></tr>
+
+<tr><td class="programmebreakhour"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >12h30-14h00</span></td><td class="programmebreaktitle" colspan="2"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Invited Speaker II</span><br /><span class="chairname"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Chair: José Palma</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="1"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >14h00-15h00</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/8.php"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Computational Models of the Human Body for Medical Image Analysis</span></span></td><td class="programmeauthors"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Nicholas Ayache</span> <em><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >(INRIA, France)</span></em></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Session III: Large Scale Simulations (I)</span> <span class="chairname"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Chair: J.Y. L&prime;Excellent</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="3"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >15h00-16h00</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/9.php"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Comparing some Methods and Preconditioners for Hydropower Plant Flow Simulations</span></span></td><td class="programmeauthors"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Wagner Fortes</span> <em><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >(UERJ)</span></em><br /><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Luiz M. Carvalho</span> <em><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >(UERJ)</span></em><br /><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Luc Giraud</span> <em><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >(ENSEEIHT-IRIT)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/10.php"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Scalable Parallel 3d FFTs for Electronic Structure Codes</span></span></td><td class="programmeauthors"><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Andrew  Canning</span>  <em><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >(Lawrence Berkeley National Laboratory)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/11.php"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >High Performance Preconditioning Techniques for the Solution of two-group transient Neutron Diffusion Equation</span></span></td><td class="programmeauthors"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Omar Flores</span> <em><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >(Tuxtepec Institute of Technology)</span></em><br /><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Vicente Vidal</span> <em><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >(Politechnical University of Valencia)</span></em><br /><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >L.A. Drummond</span> <em><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >(Lawrence Berkeley National Laboratory)</span></em><br /><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Gumersindo Verdú</span> <em><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >(Departamento de Química e Ingeniería Nuclear)</span></em></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Session IV: Problem-Solving Environments</span> <br /><span class="chairname"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Daniel Hagimont</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="2"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >15h00-16h00</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/12.php"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >A Grid-Aware Web Interface with Advanced Service Trading for Linear Algebra Calculations</span></span></td>
+<td class="programmeauthors"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Hrachya Astsatryan</span> <em><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >(Institute for Informatics and Automation Problems of the National Academy of Sciences of the Republic of Armenia)</span></em><br /><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Vladimir Sahakyan</span> <em><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >(Institute for Informatics and Automation Problems of the National Academy of Sciences of the Republic of Armenia)</span></em><br /><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Yuri  Shoukouryan</span> <em><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >(Institute for Informatics and Automation Problems of the National Academy of Sciences of the Republic of Armenia)</span></em><br /><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Michel Daydé</span> <em><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >(IRIT/INPT-ENSHEEIT)</span></em><br /><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Aurelie Hurault</span> <em><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >(IRIT-ENSEEIHT)</span></em><br /><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Marc Pantel</span> <em><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >(IRIT-ENSEEIHT)</span></em><br /><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Eddy Caron</span> <em><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >(Laboratoire de l&rsquo;Informatique du Parallélisme de Ecoles Normales Supérieure de Lyon)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/13.php"><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Resource Matching in Non-dedicated Multicluster Environments</span></span></td><td class="programmeauthors"><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Josep Lluis Lerida</span> <em><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >(University of Lleida)</span></em><br /><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Francesc Solsona</span> <em><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >(University of Lleida)</span></em><br /><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Francesc Gine</span> <em><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >(University of Lleida)</span></em><br /><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Porfidio Hernandez</span> <em><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >(Autonomous University of Barcelona)</span></em><br /><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Jose Ramon Garcia</span> <em><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >(Autonomous University of Barcelona)</span></em></td></tr>
+
+<tr><td class="programmebreakhour"><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >16h00-16h30</span></td><td class="programmebreaktitle" colspan="2"><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Invited Speaker III</span> <br /><span class="chairname"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Jack Dongarra</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="1"><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >16h30-17h30</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/14.php"><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >High Performance Computing and the Progress of Weather and Climate Forecasting</span> </span></td><td class="programmeauthors"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Philippe Bougeault</span> <em><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >(European Centre for Medium-Range Weather Forecasts, UK)</span></em></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Session V: Computing in Geosciences and Biosciences</span> <br /><span class="chairname"><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Pierre Ramet</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="3"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >17h30-18h30</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/15.php"><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Simulation of Seismic Wave Propagation in an Asteroid Based Upon an Unstructured MPI Spectral-element Method: Blocking and Non-blocking Communication Strategies</span></span></td><td class="programmeauthors"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Roland  Martin</span> <em><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >(Université de Pau)</span></em><br /><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Dimitri Komatitsch</span> <em><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >(Université de Pau)</span></em><br /><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Céline  Blitz</span> <em><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >(Université de Pau)</span></em><br /><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Nicolas  Legoff</span> <em><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >(Université de Pau)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/16.php"><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Using a Global Parameter for Gaussian Affinity Matrix in Spectral Clustering</span></span></td><td class="programmeauthors"><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Mouysset Sandrine</span> <em><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >(IRIT-ENSEEIHT)</span></em><br /><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Noailles Joseph</span> <em><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >(IRIT-ENSEEIHT)</span></em><br /><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Ruiz Daniel</span> <em><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >(IRIT-ENSEEIHT)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/17.php"><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >A Simulation of Seismic Wave Propagation at High Resolution in the Inner Core of the Earth on 2166 Processors of MareNostrum</span></span></td><td class="programmeauthors"><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Dimitri Komatitsch</span> <em><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >(University of Pau, France)</span></em><br /><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Jesús Labarta</span> <em><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >(Technical University of Catalonia, Spain)</span></em><br /><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >David Michéa</span> <em><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >(INRIA Magique3D, France)</span></em></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Session VI: Parallel and Distributed Computing (I)</span> <br /><span class="chairname"><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Ronan Guivarch</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="3"><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >17h30-18h30</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/18.php"><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Parallelization of Sphere-Decoding Methods</span></span></td><td class="programmeauthors"><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Rafael A.  Trujillo</span> <em><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >(Universidad Politecnica de Valencia, Spain)</span></em><br /><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Antonio M. Vidal</span> <em><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >(Universidad Politecnica de Valencia, Spain)</span></em><br /><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Victor M. Garcia</span> <em><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >(Universidad Politecnica de Valencia, Spain)</span></em><br /><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Alberto  Gonzalez</span> <em><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >(Universidad Politecnica de Valencia, Spain)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/19.php"><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Improving the Performance of a Verified Linear System Solver Using Optimized Libraries and Parallel Computation</span></span></td><td class="programmeauthors"><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Mariana Kolberg</span> <em><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >(PPGCC- Pontificia Universidade Católica do Rio Grande do Sul)</span></em><br /><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Gerd Bohlender</span> <em><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >(Institut für Angewandte und Numerische Mathematik, Universität Karlsruhe)</span></em><br /><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Dalcidio Claudio</span> <em><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >(PPGCC - Pontificia Universidade Católica do Rio Grande do Sul)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/20.php"><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Parallelization of the CFD Code of a CFD-NWP Coupled System for the Simulation of Atmospheric Flows Over Complex Terrain</span></span></td><td class="programmeauthors"><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Fernando Castro</span> <em><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >(CEsA - Centro de Estudos em Engenharia Eólica e Escoamentos Atmosféricos)</span></em><br /><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Castro Santos</span> <em><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >(CEsA - Centro de Estudos em Engenharia Eólica e Escoamentos Atmosféricos)</span></em><br /><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >José Palma</span> <em><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >(CEsA - Centro de Estudos em Engenharia Eólica e Escoamentos Atmosféricos)</span></em></td></tr>
+
+<tr><td class="programmebreakhour"><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >19h00</span></td><td class="programmebreaktitle" colspan="2"><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >Reception at the Town Hall</span></td></tr>
+
+</table>
+
+<h2 id="a26th"><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >June 26</span><sup><small><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >th</span></small></sup></h2>
+
+<table class="programme" summary="programme26">
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Invited Speaker IV</span> <br /><span class="chairname"><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Álvaro Coutinho</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan=""><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >9h00-10h00</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/21.php"><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >The Rise of the Commodity Vectors</span></span></td><td class="programmeauthors"><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >Satoshi Matsuoka</span> <em><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >(Tokyo Institut of Technology, Japan)</span></em></td></tr>
+
+<tr><td class="programmebreakhour"><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >10h00-10h30</span></td><td class="programmebreaktitle" colspan="2"><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Session VII: Numerical Methods</span><br /><span class="chairname"><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Daniel Ruiz</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="6"><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >10h30-12h30</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/22.php"><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Lanczos Algorithm on the Grassmann Manifold</span></span></td><td class="programmeauthors"><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Ana Paula Lopes</span> <em><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >(ISCAP)</span></em><br /><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Ana Julia Viamonte</span> <em><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >(Universidade Portucalense)</span></em><br /><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Antonio Jose Pascoal</span> <em><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >(Universidade Portucalense)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/23.php"><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >An Algorithm-by-Blocks for SuperMatrix Band</span></span></td><td class="programmeauthors"><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Gregorio Quintana-Orti</span> <em><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >(Departamento de Ingenieria y Ciencia de los Computadores, Universidad Jaume I)</span></em><br /><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Enrique S. Quintana-Ortí</span> <em><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >(Departamento de Ingenieria y Ciencia de los Computadores, Universidad Jaume I)</span></em><br /><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Alfredo Remon</span> <em><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >(Departamento de Ingenieria y Ciencia de los Computadores, Universidad Jaume I)</span></em><br /><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Robert A. van de Geijn</span> <em><span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >(Department of Computer Sciences, The University of Texas at Austin)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/24.php"><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Computing the Conditioning of the Components of a Linear Least Squares Solution</span></span></td><td class="programmeauthors"><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >Marc Baboulin</span> <em><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >(University of Coimbra)</span></em><br /><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >Jack Dongarra</span> <em><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >(University of Tennessee)</span></em><br /><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >Serge Gratton</span> <em><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >(CNES)</span></em><br /><span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >Julien Langou</span> <em><span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >(University of Colorado at Denver)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/25.php"><span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >An Efficient and Robust Decentralized Algorithm for Detecting the Global Convergence in Asynchronous Iterative Algorithms</span></span></td><td class="programmeauthors"><span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >Jacques M. Bahi</span> <em><span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >(LIFC, University of Franche-Comté, Belfort, France)</span></em><br /><span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >Sylvain Contassot-Vivier</span> <em><span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >(LORIA, University Henri Poincaré, Nancy, France)</span></em><br /><span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >Raphaël Couturier</span> <em><span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >(LIFC, University of Franche-Comté, Belfort, France)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/26.php"><span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >A Parallel Implementation of the Trace Minimization Eigensolver</span></span></td><td class="programmeauthors"><span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >Eloy Romero</span> <em><span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >(Universidad Politecnica de Valencia)</span></em><br /><span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >Jose E. Roman</span> <em><span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >(Universidad Politecnica de Valencia)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/27.php"><span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >A Load Balance Algorithm Modeled on the Knapsack Problem for Parallel Fuzzy c-Means Cluster Analysis</span></span></td><td class="programmeauthors"><span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >Marta Modenesi</span> <em><span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >(COPPE/Federal University of Rio de Janeiro, Brazil)</span></em><br /><span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >Alexandre Evsukoff</span> <em><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >(COPPE/Federal University of Rio de Janeiro, Brazil)</span></em><br /><span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >Myrian Costa</span> <em><span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >(COPPE/Federal University of Rio de Janeiro)</span></em></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >Session VIII: Cluster and Grid Computing(II)</span><br /><span class="chairname"><span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Taisuke Boku</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="6"><span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >10h30-12h30</span></td>
+     <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/28.php"><span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >Vectorized AES Core for High-throughput Secure Environments</span></span></td><td class="programmeauthors"><span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >Miquel Pericas</span> <em><span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >(Barcelona Supercomputing Center &amp; Technical University of Catalonia)</span></em><br /><span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >Ricardo  Chaves</span> <em><span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >(IST, INESC-ID)</span></em><br /><span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >Georgi N. Gaydadjiev</span> <em><span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >(Technical University of Delft)</span></em><br /><span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >Stamatis  Vassiliadis</span> <em><span class="coloringspan" id="282" onmousedown="md(this)" onmouseup="mu(this)" >(Technical University of Delt)</span></em><br /><span class="coloringspan" id="283" onmousedown="md(this)" onmouseup="mu(this)" >Mateo  Valero</span> <em><span class="coloringspan" id="284" onmousedown="md(this)" onmouseup="mu(this)" >(Technical University of Catalonia &amp; BSC)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/29.php"><span class="coloringspan" id="285" onmousedown="md(this)" onmouseup="mu(this)" >A Matrix Inversion Method with YML/OmniRPC on a Large Scale platform</span></span></td><td class="programmeauthors"><span class="coloringspan" id="286" onmousedown="md(this)" onmouseup="mu(this)" >Maxime Hugues</span> <em><span class="coloringspan" id="287" onmousedown="md(this)" onmouseup="mu(this)" >(LIFL, University of Science and Technology of Lille)</span></em><br /><span class="coloringspan" id="288" onmousedown="md(this)" onmouseup="mu(this)" >Serge G. Petiton</span> <em><span class="coloringspan" id="289" onmousedown="md(this)" onmouseup="mu(this)" >(LIFL, University of Science and Technology of Lille)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/30.php"><span class="coloringspan" id="290" onmousedown="md(this)" onmouseup="mu(this)" >Can We Connect Existing Production Grids into a World Wide Grid?</span></span></td><td class="programmeauthors"><span class="coloringspan" id="291" onmousedown="md(this)" onmouseup="mu(this)" >Peter  Kacsuk</span> <em><span class="coloringspan" id="292" onmousedown="md(this)" onmouseup="mu(this)" >(MTA SZTAKI)</span></em><br /><span class="coloringspan" id="293" onmousedown="md(this)" onmouseup="mu(this)" >Attila Kertesz</span> <em><span class="coloringspan" id="294" onmousedown="md(this)" onmouseup="mu(this)" >(MTA SZTAKI)</span></em><br /><span class="coloringspan" id="295" onmousedown="md(this)" onmouseup="mu(this)" >Tamas Kiss</span> <em><span class="coloringspan" id="296" onmousedown="md(this)" onmouseup="mu(this)" >(Univ. of Westminster)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/31.php"><span class="coloringspan" id="297" onmousedown="md(this)" onmouseup="mu(this)" >A List Scheduling Algorithm for Scheduling Multi-user Jobs on Clusters</span></span></td><td class="programmeauthors"><span class="coloringspan" id="298" onmousedown="md(this)" onmouseup="mu(this)" >Jorge Barbosa</span> <em><span class="coloringspan" id="299" onmousedown="md(this)" onmouseup="mu(this)" >(Universidade do Porto, Faculdade de Engenharia, Departamento de Engenharia Informática)</span></em><br /><span class="coloringspan" id="300" onmousedown="md(this)" onmouseup="mu(this)" >António Monteiro</span> <em><span class="coloringspan" id="301" onmousedown="md(this)" onmouseup="mu(this)" >(FEUP-DEI, Instituto de Engenharia Biomédica)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/32.php"><span class="coloringspan" id="302" onmousedown="md(this)" onmouseup="mu(this)" >Data Locality Aware Strategy for Two-Phase Collective I/O</span></span></td><td class="programmeauthors"><span class="coloringspan" id="303" onmousedown="md(this)" onmouseup="mu(this)" >Rosa Filgueira</span> <em><span class="coloringspan" id="304" onmousedown="md(this)" onmouseup="mu(this)" >(University Carlos III)</span></em><br /><span class="coloringspan" id="305" onmousedown="md(this)" onmouseup="mu(this)" >David Singh</span> <em><span class="coloringspan" id="306" onmousedown="md(this)" onmouseup="mu(this)" >(University Carlos III)</span></em><br /><span class="coloringspan" id="307" onmousedown="md(this)" onmouseup="mu(this)" >Juan Carlos Pichel</span> <em><span class="coloringspan" id="308" onmousedown="md(this)" onmouseup="mu(this)" >(University Carlos III)</span></em><br /><span class="coloringspan" id="309" onmousedown="md(this)" onmouseup="mu(this)" >Florin Isaila</span> <em><span class="coloringspan" id="310" onmousedown="md(this)" onmouseup="mu(this)" >(University Carlos III)</span></em><br /><span class="coloringspan" id="311" onmousedown="md(this)" onmouseup="mu(this)" >Jesus Carretero</span> <em><span class="coloringspan" id="312" onmousedown="md(this)" onmouseup="mu(this)" >(University Carlos III)</span></em></td></tr>
+<!--<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/33.php">Solving Large Sparse Linear Systems on Grid Computers using an Asynchronous Iterative Method as a Preconditioner</span></td><td class="programmeauthors">Tijmen Collignon <em>(Delft University of Technology)</em><br />Martin van Gijzen <em>(Delft University of Technology)</em></td></tr> -->
+
+<tr><td class="programmebreakhour"><span class="coloringspan" id="313" onmousedown="md(this)" onmouseup="mu(this)" >12h30-14h00</span></td><td class="programmebreaktitle" colspan="2"><span class="coloringspan" id="314" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="315" onmousedown="md(this)" onmouseup="mu(this)" >Session IX: Computing for Aerospace and Engineering</span><br /><span class="chairname"><span class="coloringspan" id="316" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Luc Giraud</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="4"><span class="coloringspan" id="317" onmousedown="md(this)" onmouseup="mu(this)" >14h00-15h30</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/34.php"><span class="coloringspan" id="318" onmousedown="md(this)" onmouseup="mu(this)" >Variational Multiscale LES and Hybrid RANS/LES Simulation of Complex Unsteady Flow</span></span></td><td class="programmeauthors"><span class="coloringspan" id="319" onmousedown="md(this)" onmouseup="mu(this)" >Hilde Ouvrard</span> <em><span class="coloringspan" id="320" onmousedown="md(this)" onmouseup="mu(this)" >(Département de Mathématiques, Université Montpellier II)</span></em><br /><span class="coloringspan" id="321" onmousedown="md(this)" onmouseup="mu(this)" >Bruno Koobus</span> <em><span class="coloringspan" id="322" onmousedown="md(this)" onmouseup="mu(this)" >(Département de Mathématiques, Université Montpellier II)</span></em><br /><span class="coloringspan" id="323" onmousedown="md(this)" onmouseup="mu(this)" >Maria-Vittoria Salvetti</span> <em><span class="coloringspan" id="324" onmousedown="md(this)" onmouseup="mu(this)" >(Dipartimento di Ingenioria Aerospaziale, Università di Pisa)</span></em><br /><span class="coloringspan" id="325" onmousedown="md(this)" onmouseup="mu(this)" >Simone Camarri</span> <em><span class="coloringspan" id="326" onmousedown="md(this)" onmouseup="mu(this)" >(Dipartimento di Ingenioria Aerospaziale, Università di Pisa)</span></em><br /><span class="coloringspan" id="327" onmousedown="md(this)" onmouseup="mu(this)" >Alain Dervieux</span> <em><span class="coloringspan" id="328" onmousedown="md(this)" onmouseup="mu(this)" >(INRIA, Sophia-Antipolis)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/35.php"><span class="coloringspan" id="329" onmousedown="md(this)" onmouseup="mu(this)" >Vortex Particle Simulations of Aircraft Wake Instabilities on Massively Parallel Architectures</span></span></td><td class="programmeauthors"><span class="coloringspan" id="330" onmousedown="md(this)" onmouseup="mu(this)" >Philippe Chatelain</span> <em><span class="coloringspan" id="331" onmousedown="md(this)" onmouseup="mu(this)" >(Computational Science and Engineering Laboratory, ETH Zurich)</span></em><br /><span class="coloringspan" id="332" onmousedown="md(this)" onmouseup="mu(this)" >Alessandro Curioni</span> <em><span class="coloringspan" id="333" onmousedown="md(this)" onmouseup="mu(this)" >(Computational Biochemistry and Material Science group, IBM Research Division - Zurich Research Laboratory)</span></em><br /><span class="coloringspan" id="334" onmousedown="md(this)" onmouseup="mu(this)" >Michael Bergdorf</span> <em><span class="coloringspan" id="335" onmousedown="md(this)" onmouseup="mu(this)" >(Computational Science and Engineering Laboratory, ETH Zurich)</span></em><br /><span class="coloringspan" id="336" onmousedown="md(this)" onmouseup="mu(this)" >Diego Rossinelli</span> <em><span class="coloringspan" id="337" onmousedown="md(this)" onmouseup="mu(this)" >(Computational Science and Engineering Laboratory, ETH Zurich)</span></em><br /><span class="coloringspan" id="338" onmousedown="md(this)" onmouseup="mu(this)" >Wanda Andreoni</span> <em><span class="coloringspan" id="339" onmousedown="md(this)" onmouseup="mu(this)" >(Computational Biochemistry and Material Science group, IBM Research Division - Zurich Research Laboratory)</span></em><br /><span class="coloringspan" id="340" onmousedown="md(this)" onmouseup="mu(this)" >Petros Koumoutsakos</span> <em><span class="coloringspan" id="341" onmousedown="md(this)" onmouseup="mu(this)" >(Computational Science and Engineering Laboratory, ETH Zurich)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/36.php"><span class="coloringspan" id="342" onmousedown="md(this)" onmouseup="mu(this)" >On the Implementation of Boundary Element Engineering Codes on the Cell Broadband Engine</span></span></td><td class="programmeauthors"><span class="coloringspan" id="343" onmousedown="md(this)" onmouseup="mu(this)" >Manoel Cunha</span> <em><span class="coloringspan" id="344" onmousedown="md(this)" onmouseup="mu(this)" >(Universidade Federal do Rio de Janeiro)</span></em><br /><span class="coloringspan" id="345" onmousedown="md(this)" onmouseup="mu(this)" >Jose Telles</span> <em><span class="coloringspan" id="346" onmousedown="md(this)" onmouseup="mu(this)" >(Universidade Federal do Rio de Janeiro)</span></em><br /><span class="coloringspan" id="347" onmousedown="md(this)" onmouseup="mu(this)" >Alvaro Coutinho</span> <em><span class="coloringspan" id="348" onmousedown="md(this)" onmouseup="mu(this)" >(Universidade Federal do Rio de Janeiro)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/37.php"><span class="coloringspan" id="349" onmousedown="md(this)" onmouseup="mu(this)" >On Strategies for Predictive Shock-Driven Turbulent Mixing Simulation</span></span></td><td class="programmeauthors"><span class="coloringspan" id="350" onmousedown="md(this)" onmouseup="mu(this)" >Fernando Grinstein</span> <em><span class="coloringspan" id="351" onmousedown="md(this)" onmouseup="mu(this)" >(Los Alamos National Laboratory)</span></em></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="352" onmousedown="md(this)" onmouseup="mu(this)" >Session X: REDIMPS a French-Japonese Project</span><br /><span class="chairname"><span class="coloringspan" id="353" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Aurélie Hurault</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="4"><span class="coloringspan" id="354" onmousedown="md(this)" onmouseup="mu(this)" >14h00-15h30</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/38.php"><span class="coloringspan" id="355" onmousedown="md(this)" onmouseup="mu(this)" >Toward an International Sparse Linear Algebra Expert System by Interconnecting the ITBL Computational Grid with the Grid-TLSE Platform</span></span></td><td class="programmeauthors"><span class="coloringspan" id="356" onmousedown="md(this)" onmouseup="mu(this)" >Noriyuki Kushida</span> <em><span class="coloringspan" id="357" onmousedown="md(this)" onmouseup="mu(this)" >(JAEA)</span></em><br /><span class="coloringspan" id="358" onmousedown="md(this)" onmouseup="mu(this)" >Yoshio Suzuki</span> <em><span class="coloringspan" id="359" onmousedown="md(this)" onmouseup="mu(this)" >(JAEA)</span></em><br /><span class="coloringspan" id="360" onmousedown="md(this)" onmouseup="mu(this)" >Naoya Teshima</span> <em><span class="coloringspan" id="361" onmousedown="md(this)" onmouseup="mu(this)" >(JAEA)</span></em><br /><span class="coloringspan" id="362" onmousedown="md(this)" onmouseup="mu(this)" >Norihiro Nakajim</span> <em><span class="coloringspan" id="363" onmousedown="md(this)" onmouseup="mu(this)" >(JAEA)</span></em><br /><span class="coloringspan" id="364" onmousedown="md(this)" onmouseup="mu(this)" >Yves Caniou</span> <em><span class="coloringspan" id="365" onmousedown="md(this)" onmouseup="mu(this)" >(LIP-ENS)</span></em><br /><span class="coloringspan" id="366" onmousedown="md(this)" onmouseup="mu(this)" >Michel Daydé</span> <em><span class="coloringspan" id="367" onmousedown="md(this)" onmouseup="mu(this)" >(IRIT/INPT-ENSHEEIT)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/39.php"><span class="coloringspan" id="368" onmousedown="md(this)" onmouseup="mu(this)" >Tunable Parallel Experiments in a GridRPC Framework: Application to Linear Solvers</span></span></td><td class="programmeauthors"><span class="coloringspan" id="369" onmousedown="md(this)" onmouseup="mu(this)" >Caniou Yves</span> <em><span class="coloringspan" id="370" onmousedown="md(this)" onmouseup="mu(this)" >(Université Claude Bernard de Lyon, LIP ÉNS-LYON)</span></em><br /><span class="coloringspan" id="371" onmousedown="md(this)" onmouseup="mu(this)" >Gay Jean-Sébastien</span> <em><span class="coloringspan" id="372" onmousedown="md(this)" onmouseup="mu(this)" >(LIP ÉNS-LYON)</span></em><br /><span class="coloringspan" id="373" onmousedown="md(this)" onmouseup="mu(this)" >Ramet Pierre</span> <em><span class="coloringspan" id="374" onmousedown="md(this)" onmouseup="mu(this)" >(LaBRI, Université Bordeaux 1)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/40.php"><span class="coloringspan" id="375" onmousedown="md(this)" onmouseup="mu(this)" >Large-Scale Two-Phase Flow Simulations in Fuel Bundles of Advanced Light Water Reactors</span></span></td><td class="programmeauthors"><span class="coloringspan" id="376" onmousedown="md(this)" onmouseup="mu(this)" >Kazuyuki Takase</span> <em><span class="coloringspan" id="377" onmousedown="md(this)" onmouseup="mu(this)" >(Japan Atomic Energy Agency)</span></em><br /><span class="coloringspan" id="378" onmousedown="md(this)" onmouseup="mu(this)" >Hiroyuki Yoshida</span> <em><span class="coloringspan" id="379" onmousedown="md(this)" onmouseup="mu(this)" >(Japan Atomic Energy Agency)</span></em><br /><span class="coloringspan" id="380" onmousedown="md(this)" onmouseup="mu(this)" >Takeharu Misawa</span> <em><span class="coloringspan" id="381" onmousedown="md(this)" onmouseup="mu(this)" >(Japan Atomic Energy Agency)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/41.php"><span class="coloringspan" id="382" onmousedown="md(this)" onmouseup="mu(this)" >High Performance Computing for Eigenvalue Solver in Density-Matrix Renormalization Group Method: Parallelization of the Hamiltonian Matrix-vector Multiplication</span></span></td><td class="programmeauthors"><span class="coloringspan" id="383" onmousedown="md(this)" onmouseup="mu(this)" >Susumu Yamada</span> <em><span class="coloringspan" id="384" onmousedown="md(this)" onmouseup="mu(this)" >(CCSE, Japan Atomic Energy Agency)</span></em><br /><span class="coloringspan" id="385" onmousedown="md(this)" onmouseup="mu(this)" >Masahiko Okumura</span> <em><span class="coloringspan" id="386" onmousedown="md(this)" onmouseup="mu(this)" >(CCSE, Japan Atomic Energy Agency)</span></em><br /><span class="coloringspan" id="387" onmousedown="md(this)" onmouseup="mu(this)" >Masahiko Machida</span> <em><span class="coloringspan" id="388" onmousedown="md(this)" onmouseup="mu(this)" >(CCSE, Japan Atomic Energy Agency)</span></em></td></tr>
+
+<tr><td class="programmebreakhour"><span class="coloringspan" id="389" onmousedown="md(this)" onmouseup="mu(this)" >15h30-16h00</span></td><td class="programmebreaktitle" colspan="2"><span class="coloringspan" id="390" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="391" onmousedown="md(this)" onmouseup="mu(this)" >Invited Speaker V</span> <br /><span class="chairname"><span class="coloringspan" id="392" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Yuri Shoukourian</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="1"><span class="coloringspan" id="393" onmousedown="md(this)" onmouseup="mu(this)" >16h00-17h00</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/42.php"><span class="coloringspan" id="394" onmousedown="md(this)" onmouseup="mu(this)" >Accomplishments and Challenges in Code Development for Parallel Multimechanics Simulations</span></span></td><td class="programmeauthors"><span class="coloringspan" id="395" onmousedown="md(this)" onmouseup="mu(this)" >Mike Puso</span> <em><span class="coloringspan" id="396" onmousedown="md(this)" onmouseup="mu(this)" >(Lawrence Livermore National Laboratory, USA)</span></em><br /><span class="coloringspan" id="397" onmousedown="md(this)" onmouseup="mu(this)" >Tony Degroot</span> <em><span class="coloringspan" id="398" onmousedown="md(this)" onmouseup="mu(this)" >(Lawrence Livermore National Laboratory, USA)</span></em><br /><span class="coloringspan" id="399" onmousedown="md(this)" onmouseup="mu(this)" >Robert Ferencz</span> <em><span class="coloringspan" id="400" onmousedown="md(this)" onmouseup="mu(this)" >(Lawrence Livermore National Laboratory, USA)</span></em><br /><span class="coloringspan" id="401" onmousedown="md(this)" onmouseup="mu(this)" >Mark Havstad</span> <em><span class="coloringspan" id="402" onmousedown="md(this)" onmouseup="mu(this)" >(Lawrence Livermore National Laboratory, USA)</span></em><br /><span class="coloringspan" id="403" onmousedown="md(this)" onmouseup="mu(this)" >Neil Hodge</span> <em><span class="coloringspan" id="404" onmousedown="md(this)" onmouseup="mu(this)" >(Lawrence Livermore National Laboratory, USA)</span></em><br /><span class="coloringspan" id="405" onmousedown="md(this)" onmouseup="mu(this)" >Jerry Lin</span> <em><span class="coloringspan" id="406" onmousedown="md(this)" onmouseup="mu(this)" >(Lawrence Livermore National Laboratory, USA)</span></em></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="407" onmousedown="md(this)" onmouseup="mu(this)" >Session XI: Linear Algebra</span><br /><span class="chairname"><span class="coloringspan" id="408" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Xiaoye Sherry Li</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="3"><span class="coloringspan" id="409" onmousedown="md(this)" onmouseup="mu(this)" >17h00-18h00</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/43.php"><span class="coloringspan" id="410" onmousedown="md(this)" onmouseup="mu(this)" >Parallel Eigensolvers for a Discretized Radiative Transfer Problem</span></span></td><td class="programmeauthors"><span class="coloringspan" id="411" onmousedown="md(this)" onmouseup="mu(this)" >Paulo Vasconcelos</span> <em><span class="coloringspan" id="412" onmousedown="md(this)" onmouseup="mu(this)" >(Faculdade Economia da Universidade do Porto)</span></em><br /><span class="coloringspan" id="413" onmousedown="md(this)" onmouseup="mu(this)" >Osni Marques</span> <em><span class="coloringspan" id="414" onmousedown="md(this)" onmouseup="mu(this)" >(Lawrence Berkeley National Laboratory)</span></em><br /><span class="coloringspan" id="415" onmousedown="md(this)" onmouseup="mu(this)" >Jose Roman</span> <em><span class="coloringspan" id="416" onmousedown="md(this)" onmouseup="mu(this)" >(Universidad Politecnica de Valencia)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/44.php"><span class="coloringspan" id="417" onmousedown="md(this)" onmouseup="mu(this)" >Design, Tuning and Evaluation of Parallel Multilevel ILU Preconditioners</span></span></td><td class="programmeauthors"><span class="coloringspan" id="418" onmousedown="md(this)" onmouseup="mu(this)" >José I. Aliaga</span> <em><span class="coloringspan" id="419" onmousedown="md(this)" onmouseup="mu(this)" >(University Jaume I)</span></em><br /><span class="coloringspan" id="420" onmousedown="md(this)" onmouseup="mu(this)" >Matthias Bollhôfer</span> <em><span class="coloringspan" id="421" onmousedown="md(this)" onmouseup="mu(this)" >(TU-Braunschweig)</span></em><br /><span class="coloringspan" id="422" onmousedown="md(this)" onmouseup="mu(this)" >Alberto F. Martín</span> <em><span class="coloringspan" id="423" onmousedown="md(this)" onmouseup="mu(this)" >(University Jaume I)</span></em><br /><span class="coloringspan" id="424" onmousedown="md(this)" onmouseup="mu(this)" >Enrique S. Quintana-Ortí</span> <em><span class="coloringspan" id="425" onmousedown="md(this)" onmouseup="mu(this)" >(University Jaume I)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/45.php"><span class="coloringspan" id="426" onmousedown="md(this)" onmouseup="mu(this)" >MUMPS Based Approach to Parallelize the Block Cimmino Algorithm</span></span></td><td class="programmeauthors"><span class="coloringspan" id="427" onmousedown="md(this)" onmouseup="mu(this)" >Carlos Balsa</span> <em><span class="coloringspan" id="428" onmousedown="md(this)" onmouseup="mu(this)" >(Escola Superior de Tecnologia e Gestão de Bragança, Portugal)</span></em><br /><span class="coloringspan" id="429" onmousedown="md(this)" onmouseup="mu(this)" >Ronan Guivarch</span> <em><span class="coloringspan" id="430" onmousedown="md(this)" onmouseup="mu(this)" >(IRIT-ENSEEIHT)</span></em><br /><span class="coloringspan" id="431" onmousedown="md(this)" onmouseup="mu(this)" >João Raimundo</span> <em><span class="coloringspan" id="432" onmousedown="md(this)" onmouseup="mu(this)" >(IRIT-ENSEEIHT)</span></em><br /><span class="coloringspan" id="433" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Ruiz</span> <em><span class="coloringspan" id="434" onmousedown="md(this)" onmouseup="mu(this)" >(IRIT-ENSEEIHT)</span></em></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="435" onmousedown="md(this)" onmouseup="mu(this)" >Session XII: Data Centric</span><br /><span class="chairname"><span class="coloringspan" id="436" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Marta Mattoso</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="3"><span class="coloringspan" id="437" onmousedown="md(this)" onmouseup="mu(this)" >17h00-18h00</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/46.php"><span class="coloringspan" id="438" onmousedown="md(this)" onmouseup="mu(this)" >A Parallel Incremental Learning Algorithm for Neural Networks with Fault Tolerance</span></span></td><td class="programmeauthors"><span class="coloringspan" id="439" onmousedown="md(this)" onmouseup="mu(this)" >Jacques M. Bahi</span> <em><span class="coloringspan" id="440" onmousedown="md(this)" onmouseup="mu(this)" >(LIFC, University of Franche-Comté, Belfort, France)</span></em><br /><span class="coloringspan" id="441" onmousedown="md(this)" onmouseup="mu(this)" >Sylvain Contassot-Vivier</span> <em><span class="coloringspan" id="442" onmousedown="md(this)" onmouseup="mu(this)" >(LORIA, University Henri Poincaré, Nancy, France)</span></em><br /><span class="coloringspan" id="443" onmousedown="md(this)" onmouseup="mu(this)" >Marc Sauget</span> <em><span class="coloringspan" id="444" onmousedown="md(this)" onmouseup="mu(this)" >(LIFC, University of Franche-Comté, Belfort, France)</span></em><br /><span class="coloringspan" id="445" onmousedown="md(this)" onmouseup="mu(this)" >Aurélien Vasseur</span> <em><span class="coloringspan" id="446" onmousedown="md(this)" onmouseup="mu(this)" >(Femto-St, University of Franche-Comté, Montbéliard, France)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/47.php"><span class="coloringspan" id="447" onmousedown="md(this)" onmouseup="mu(this)" >High-performance Query Processing of a Real-world OLAP Database with ParGRES</span></span></td><td class="programmeauthors"><span class="coloringspan" id="448" onmousedown="md(this)" onmouseup="mu(this)" >Melissa Paes</span> <em><span class="coloringspan" id="449" onmousedown="md(this)" onmouseup="mu(this)" >(COPPE/UFRJ; IBGE, Rio de Janeiro, Brazil)</span></em><br /><span class="coloringspan" id="450" onmousedown="md(this)" onmouseup="mu(this)" >Alexandre A.B. Lima</span> <em><span class="coloringspan" id="451" onmousedown="md(this)" onmouseup="mu(this)" >(UNIGRANRIO, Rio de Janeiro, Brazil)</span></em><br /><span class="coloringspan" id="452" onmousedown="md(this)" onmouseup="mu(this)" >Patrick Valduriez</span> <em><span class="coloringspan" id="453" onmousedown="md(this)" onmouseup="mu(this)" >(Atlas Group, INRIA and LINA, University of Nantes, France)</span></em><br /><span class="coloringspan" id="454" onmousedown="md(this)" onmouseup="mu(this)" >Marta Mattoso</span> <em><span class="coloringspan" id="455" onmousedown="md(this)" onmouseup="mu(this)" >(COPPE/UFRJ, Rio de Janeiro, Brazil)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/48.php"><span class="coloringspan" id="456" onmousedown="md(this)" onmouseup="mu(this)" >Improving Search Engines Performance on Multitreading Processors</span></span></td><td class="programmeauthors"><span class="coloringspan" id="457" onmousedown="md(this)" onmouseup="mu(this)" >Carolina Bonacic</span> <em><span class="coloringspan" id="458" onmousedown="md(this)" onmouseup="mu(this)" >(University Complutense of Madrid, Spain)</span></em><br /><span class="coloringspan" id="459" onmousedown="md(this)" onmouseup="mu(this)" >Carlos Garcia</span> <em><span class="coloringspan" id="460" onmousedown="md(this)" onmouseup="mu(this)" >(University Complutense of Madrid, Spain)</span></em><br /><span class="coloringspan" id="461" onmousedown="md(this)" onmouseup="mu(this)" >Mauricio Marin</span> <em><span class="coloringspan" id="462" onmousedown="md(this)" onmouseup="mu(this)" >(Yahoo! Research Santiago, University of Chile )</span></em><br /><span class="coloringspan" id="463" onmousedown="md(this)" onmouseup="mu(this)" >Manuel Prieto</span> <em><span class="coloringspan" id="464" onmousedown="md(this)" onmouseup="mu(this)" >(University Complutense of Madrid, Spain)</span></em><br /><span class="coloringspan" id="465" onmousedown="md(this)" onmouseup="mu(this)" >Francisco Tirado</span> <em><span class="coloringspan" id="466" onmousedown="md(this)" onmouseup="mu(this)" >(University Complutense of Madrid, Spain)</span></em><br /><span class="coloringspan" id="467" onmousedown="md(this)" onmouseup="mu(this)" >Cesar Vicente</span> <em><span class="coloringspan" id="468" onmousedown="md(this)" onmouseup="mu(this)" >(University Complutense of Madrid, Spain)</span></em></td></tr>
+
+<tr><td class="programmebreakhour"></td><td class="programmebreaktitle" colspan="2"><span class="coloringspan" id="469" onmousedown="md(this)" onmouseup="mu(this)" >Banquet Thursday Evening</span></td></tr>
+
+</table>
+
+<h2 id="a27th"><span class="coloringspan" id="470" onmousedown="md(this)" onmouseup="mu(this)" >June 27</span><sup><small><span class="coloringspan" id="471" onmousedown="md(this)" onmouseup="mu(this)" >th</span></small></sup></h2>
+
+<table class="programme" summary="programme27">
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="472" onmousedown="md(this)" onmouseup="mu(this)" >Invited Speaker VI</span> <br /><span class="chairname"><span class="coloringspan" id="473" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Osni Marques</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="1"><span class="coloringspan" id="474" onmousedown="md(this)" onmouseup="mu(this)" >9h00-10h00</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/49.php"><span class="coloringspan" id="475" onmousedown="md(this)" onmouseup="mu(this)" >Large Eddy Simulation of Combustion on Massively Parallel Machines</span></span></td><td class="programmeauthors"><span class="coloringspan" id="476" onmousedown="md(this)" onmouseup="mu(this)" >Gabriel Staffelbach</span> <em><span class="coloringspan" id="477" onmousedown="md(this)" onmouseup="mu(this)" >(CERFACS)</span></em><br /><span class="coloringspan" id="478" onmousedown="md(this)" onmouseup="mu(this)" >Laurent  Gicquel</span> <em><span class="coloringspan" id="479" onmousedown="md(this)" onmouseup="mu(this)" >(CERFACS)</span></em><br /><span class="coloringspan" id="480" onmousedown="md(this)" onmouseup="mu(this)" >Jean Mathieu Senoner</span> <em><span class="coloringspan" id="481" onmousedown="md(this)" onmouseup="mu(this)" >(CERFACS)</span></em><br /><span class="coloringspan" id="482" onmousedown="md(this)" onmouseup="mu(this)" >Thierry Poinsot</span> <em><span class="coloringspan" id="483" onmousedown="md(this)" onmouseup="mu(this)" >(Institut de Mécanique des Fluides de Toulouse)</span></em></td></tr>
+
+<tr><td class="programmebreakhour"><span class="coloringspan" id="484" onmousedown="md(this)" onmouseup="mu(this)" >10h00-10h30</span></td><td class="programmebreaktitle" colspan="2"><span class="coloringspan" id="485" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="486" onmousedown="md(this)" onmouseup="mu(this)" >Session XIII: Imaging and Graphics</span> <br /><span class="chairname"><span class="coloringspan" id="487" onmousedown="md(this)" onmouseup="mu(this)" >Chair: José Roman</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="4"><span class="coloringspan" id="488" onmousedown="md(this)" onmouseup="mu(this)" >10h30-11h30</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/50.php"><span class="coloringspan" id="489" onmousedown="md(this)" onmouseup="mu(this)" >Attaining High Performance in General-Purpose Computations on Current Graphics Processors</span></span></td><td class="programmeauthors"><span class="coloringspan" id="490" onmousedown="md(this)" onmouseup="mu(this)" >Francisco Igual-Peña</span> <em><span class="coloringspan" id="491" onmousedown="md(this)" onmouseup="mu(this)" >(Dept. Ingeniería y Ciencia de los Computadores. Universidad Jaume I (Spain))</span></em><br /><span class="coloringspan" id="492" onmousedown="md(this)" onmouseup="mu(this)" >Rafael Mayo-Gual</span> <em><span class="coloringspan" id="493" onmousedown="md(this)" onmouseup="mu(this)" >(Dept. Ingeniería y Ciencia de los Computadores. Universidad Jaume I (Spain))</span></em><br /><span class="coloringspan" id="494" onmousedown="md(this)" onmouseup="mu(this)" >Enrique S. Quintana-Ortí</span> <em><span class="coloringspan" id="495" onmousedown="md(this)" onmouseup="mu(this)" >(Dept. Ingeniería y Ciencia de los Computadores. Universidad Jaume I (Spain))</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/51.php"><span class="coloringspan" id="496" onmousedown="md(this)" onmouseup="mu(this)" >Optimized Computational Functional Imaging for Arteries</span></span></td><td class="programmeauthors"><span class="coloringspan" id="497" onmousedown="md(this)" onmouseup="mu(this)" >Ramiro Moreno</span> <em><span class="coloringspan" id="498" onmousedown="md(this)" onmouseup="mu(this)" >(I2MR, Inserm U858, CHU de Rangueil, Toulouse)</span></em><br /><span class="coloringspan" id="499" onmousedown="md(this)" onmouseup="mu(this)" >Ming Chau</span> <em><span class="coloringspan" id="500" onmousedown="md(this)" onmouseup="mu(this)" >(ASA, Advanced Solutions Accelerator, Montpellier)</span></em><br /><span class="coloringspan" id="501" onmousedown="md(this)" onmouseup="mu(this)" >Franck  Nicoud</span> <em><span class="coloringspan" id="502" onmousedown="md(this)" onmouseup="mu(this)" >(I3M, Université de Montpellier II)</span></em><br /><span class="coloringspan" id="503" onmousedown="md(this)" onmouseup="mu(this)" >Frédéric Viart</span> <em><span class="coloringspan" id="504" onmousedown="md(this)" onmouseup="mu(this)" >(ASA, Advanced Solutions Accelerator, Montpellier)</span></em><br /><span class="coloringspan" id="505" onmousedown="md(this)" onmouseup="mu(this)" >Hervé Rousseau</span> <em><span class="coloringspan" id="506" onmousedown="md(this)" onmouseup="mu(this)" >(I2MR, UMR 858 INSERM, CHU Rangueil, Toulouse)</span></em><br /><span class="coloringspan" id="507" onmousedown="md(this)" onmouseup="mu(this)" >Shirod Jeetoo</span> <em><span class="coloringspan" id="508" onmousedown="md(this)" onmouseup="mu(this)" >(I2MR, UMR 858 INSERM, CHU Rangueil, Toulouse)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/52.php"><span class="coloringspan" id="509" onmousedown="md(this)" onmouseup="mu(this)" >High Performance Visualization of Human Tumor Growth Software</span></span></td><td class="programmeauthors"><span class="coloringspan" id="510" onmousedown="md(this)" onmouseup="mu(this)" >Norma Alias</span> <em><span class="coloringspan" id="511" onmousedown="md(this)" onmouseup="mu(this)" >(University of Technology Malaysia)</span></em><br /><span class="coloringspan" id="512" onmousedown="md(this)" onmouseup="mu(this)" >Siti Nur Hidayah Khalid</span> <em><span class="coloringspan" id="513" onmousedown="md(this)" onmouseup="mu(this)" >(University of Technology Malaysia)</span></em><br /><span class="coloringspan" id="514" onmousedown="md(this)" onmouseup="mu(this)" >Norfarizan Mohd Said</span> <em><span class="coloringspan" id="515" onmousedown="md(this)" onmouseup="mu(this)" >(University of Technology Malaysia)</span></em><br /><span class="coloringspan" id="516" onmousedown="md(this)" onmouseup="mu(this)" >Dolly, Tien Ching Sin</span> <em><span class="coloringspan" id="517" onmousedown="md(this)" onmouseup="mu(this)" >(University of Technology Malaysia)</span></em><br /><span class="coloringspan" id="518" onmousedown="md(this)" onmouseup="mu(this)" >Tau Ing Phang</span> <em><span class="coloringspan" id="519" onmousedown="md(this)" onmouseup="mu(this)" >(University of Technology Malaysia)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/53.php"><span class="coloringspan" id="520" onmousedown="md(this)" onmouseup="mu(this)" >Memory Locality Exploitation Strategies for FFT on the CUDA Architecture</span></span></td><td class="programmeauthors"><span class="coloringspan" id="521" onmousedown="md(this)" onmouseup="mu(this)" >Eladio Gutierrez</span> <em><span class="coloringspan" id="522" onmousedown="md(this)" onmouseup="mu(this)" >(Department of Computer Architecture; University of Malaga (Spain))</span></em><br /><span class="coloringspan" id="523" onmousedown="md(this)" onmouseup="mu(this)" >Sergio Romero</span> <em><span class="coloringspan" id="524" onmousedown="md(this)" onmouseup="mu(this)" >(Department of Computer Architecture; University of Malaga (Spain))</span></em><br /><span class="coloringspan" id="525" onmousedown="md(this)" onmouseup="mu(this)" >Maria A. Trenas</span> <em><span class="coloringspan" id="526" onmousedown="md(this)" onmouseup="mu(this)" >(Department of Computer Architecture; University of Malaga (Spain))</span></em><br /><span class="coloringspan" id="527" onmousedown="md(this)" onmouseup="mu(this)" >Emilio L. Zapata</span> <em><span class="coloringspan" id="528" onmousedown="md(this)" onmouseup="mu(this)" >(Department of Computer Architecture; University of Malaga (Spain))</span></em></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="529" onmousedown="md(this)" onmouseup="mu(this)" >Session XIV: Large Scale Simulations (II)</span> <br /><span class="chairname"><span class="coloringspan" id="530" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Paulo Vasconcelos</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="3"><span class="coloringspan" id="531" onmousedown="md(this)" onmouseup="mu(this)" >10h30-11h30</span></td>
+    <td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/54.php"><span class="coloringspan" id="532" onmousedown="md(this)" onmouseup="mu(this)" >Simulation of Micro Electro-Mechanical Systems (MEMS) on Grid</span></span></td><td class="programmeauthors"><span class="coloringspan" id="533" onmousedown="md(this)" onmouseup="mu(this)" >Fadi Khalil</span> <em><span class="coloringspan" id="534" onmousedown="md(this)" onmouseup="mu(this)" >(Université de Toulouse, ENSEEIHT, LAAS-CNRS)</span></em><br /><span class="coloringspan" id="535" onmousedown="md(this)" onmouseup="mu(this)" >Bernard Miegemolle</span> <em><span class="coloringspan" id="536" onmousedown="md(this)" onmouseup="mu(this)" >(Université de Toulouse, INSA, LAAS-CNRS)</span></em><br /><span class="coloringspan" id="537" onmousedown="md(this)" onmouseup="mu(this)" >Thierry Monteil</span> <em><span class="coloringspan" id="538" onmousedown="md(this)" onmouseup="mu(this)" >(Université de Toulouse, INSA, LAAS-CNRS)</span></em><br /><span class="coloringspan" id="539" onmousedown="md(this)" onmouseup="mu(this)" >Hervé Aubert</span> <em><span class="coloringspan" id="540" onmousedown="md(this)" onmouseup="mu(this)" >(Université de Toulouse, ENSEEIHT, LAAS-CNRS)</span></em><br /><span class="coloringspan" id="541" onmousedown="md(this)" onmouseup="mu(this)" >Fabio Coccetti</span> <em><span class="coloringspan" id="542" onmousedown="md(this)" onmouseup="mu(this)" >(Université de Toulouse, LAAS-CNRS)</span></em><br /><span class="coloringspan" id="543" onmousedown="md(this)" onmouseup="mu(this)" >Robert  Plana</span> <em><span class="coloringspan" id="544" onmousedown="md(this)" onmouseup="mu(this)" >(Université de Toulouse, UPS, LAAS-CNRS)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/55.php"><span class="coloringspan" id="545" onmousedown="md(this)" onmouseup="mu(this)" >A Grid-based Environment for Multi-parametric PSE Applications: Batch Plant Design Case Study</span></span></td><td class="programmeauthors"><span class="coloringspan" id="546" onmousedown="md(this)" onmouseup="mu(this)" >Antonin Ponsich</span> <em><span class="coloringspan" id="547" onmousedown="md(this)" onmouseup="mu(this)" >(Laboratoire de Génie Chimique, UMR CNRS 5503)</span></em><br /><span class="coloringspan" id="548" onmousedown="md(this)" onmouseup="mu(this)" >Iréa Touche</span> <em><span class="coloringspan" id="549" onmousedown="md(this)" onmouseup="mu(this)" >(Laboratoire de Génie Chimique, UMR CNRS 5503)</span></em><br /><span class="coloringspan" id="550" onmousedown="md(this)" onmouseup="mu(this)" >Catherine Azzaro-Pantel</span> <em><span class="coloringspan" id="551" onmousedown="md(this)" onmouseup="mu(this)" >(Laboratoire de Génie Chimique, UMR CNRS 5503)</span></em><br /><span class="coloringspan" id="552" onmousedown="md(this)" onmouseup="mu(this)" >Serge Domenech</span> <em><span class="coloringspan" id="553" onmousedown="md(this)" onmouseup="mu(this)" >(Laboratoire de Génie Chimique, UMR CNRS 5503)</span></em><br /><span class="coloringspan" id="554" onmousedown="md(this)" onmouseup="mu(this)" >Luc Pibouleau</span> <em><span class="coloringspan" id="555" onmousedown="md(this)" onmouseup="mu(this)" >(Laboratoire de Génie Chimique, UMR CNRS 5503)</span></em><br /><span class="coloringspan" id="556" onmousedown="md(this)" onmouseup="mu(this)" >Michel Daydé</span> <em><span class="coloringspan" id="557" onmousedown="md(this)" onmouseup="mu(this)" >(IRIT/INPT-ENSHEEIT)</span></em></td></tr>
+<tr><td class="programmeauthors"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/56.php"><span class="coloringspan" id="558" onmousedown="md(this)" onmouseup="mu(this)" >Simulation of Unsteady Separated Flows Using Advanced Statistical and Hybrid Turbulence Modelling</span></span></td><td class="programmeauthors"><span class="coloringspan" id="559" onmousedown="md(this)" onmouseup="mu(this)" >Guillaume Martinat</span> <em><span class="coloringspan" id="560" onmousedown="md(this)" onmouseup="mu(this)" >(Institut de Mécanique des Fluides de Toulouse)</span></em><br /><span class="coloringspan" id="561" onmousedown="md(this)" onmouseup="mu(this)" >Yannick Hoarau</span> <em><span class="coloringspan" id="562" onmousedown="md(this)" onmouseup="mu(this)" >(Institut de Mécanique des Fluides et des Solides de Strasbourg)</span></em><br /><span class="coloringspan" id="563" onmousedown="md(this)" onmouseup="mu(this)" >Marianna  Braza</span> <em><span class="coloringspan" id="564" onmousedown="md(this)" onmouseup="mu(this)" >(Institut de Mécanique des Fluides de Toulouse)</span></em><br /><span class="coloringspan" id="565" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Ruiz</span> <em><span class="coloringspan" id="566" onmousedown="md(this)" onmouseup="mu(this)" >(Institut de Recherche en Informatique de Toulouse)</span></em></td></tr>
+
+<tr><td class="programmesessiontitle" colspan="3"><span class="coloringspan" id="567" onmousedown="md(this)" onmouseup="mu(this)" >Closing Session</span> <br /><span class="chairname"><span class="coloringspan" id="568" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Michel Daydé and Osni Marques</span></span></td></tr>
+
+<tr><td class="programmehour" rowspan="1"><span class="coloringspan" id="569" onmousedown="md(this)" onmouseup="mu(this)" >11h30-12h00</span></td>
+    <td class="programmeauthors" colspan="2"><span class="coloringspan" id="570" onmousedown="md(this)" onmouseup="mu(this)" >Best Student Paper Award:</span> <strong><span class="coloringspan" id="571" onmousedown="md(this)" onmouseup="mu(this)" >Melissa Paes</span></strong><span class="coloringspan" id="572" onmousedown="md(this)" onmouseup="mu(this)" >:</span> <br /><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/47.php"><span class="coloringspan" id="573" onmousedown="md(this)" onmouseup="mu(this)" >High-performance Query Processing of a Real-world OLAP Database with ParGRES</span></span></td></tr>
+
+<tr><td class="programmebreakhour"><span class="coloringspan" id="574" onmousedown="md(this)" onmouseup="mu(this)" >12h00-13h30</span></td><td class="programmebreaktitle" colspan="2"><span class="coloringspan" id="575" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></td></tr>
+
+</table>
+
+</div>	<!-- CONTENT -->
+
+<div id="toulouse">
+<span class="coloringspan" id="576" onmousedown="md(this)" onmouseup="mu(this)" >Toulouse | France | 2008 | June | 24&nbsp;&nbsp;25&nbsp;&nbsp;26&nbsp;&nbsp;27</span>

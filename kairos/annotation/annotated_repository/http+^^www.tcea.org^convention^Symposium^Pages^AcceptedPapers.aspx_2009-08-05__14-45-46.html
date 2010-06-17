@@ -1,0 +1,1218 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<HTML xmlns:o="urn:schemas-microsoft-com:office:office" __expr-val-dir="ltr" xmlns:v="urn:schemas-microsoft-com:vml" dir="ltr">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.tcea.org^convention^Symposium^Pages^AcceptedPapers.aspx_2009-08-05__14-45-46.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.tcea.org^convention^Symposium^Pages^AcceptedPapers.aspx_2009-08-05__14-45-46.yaml created on Wed Aug 05 17:32:32 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+<meta name="GENERATOR" content="Microsoft SharePoint" /><meta name="progid" content="SharePoint.WebPartPage.Document" /><meta HTTP-EQUIV="Content-Type" content="text/html; charset=utf-8" /><meta HTTP-EQUIV="Expires" content="0" /><title>
+	
+	Accepted Papers
+</title><script type="text/javascript" language="javascript" src="/_layouts/1033/init.js?rev=3gmiTAfmF220O6rriCjhpA%3D%3D"></script>
+<script type="text/javascript" language="javascript" src="/_layouts/1033/core.js?rev=S5dt4K8TJGVTYU9HrW6enw%3D%3D" defer></script>
+<script type="text/javascript" language="javascript" src="/_layouts/1033/non_ie.js?rev=yfNry4hY0Gwa%2FPDNGrqXVg%3D%3D"></script>
+<script type="text/javascript" language="javascript" src="/_layouts/1033/search.js?rev=yqBjpvg%2Foi3KG5XVf%2FStmA%3D%3D" defer></script>
+<link type="text/xml" rel="alternate" href="/convention/Symposium/_vti_bin/spsdisco.aspx" /><link rel="stylesheet" type="text/css" href="/_layouts/1033/styles/controls.css?rev=EhwiQKSLiI%2F4dGDs6DyUdQ%3D%3D"/>
+<link rel="stylesheet" type="text/css" href="/_layouts/1033/styles/HtmlEditorCustomStyles.css?rev=8SKxtNx33FmoDhbbfB27UA%3D%3D"/>
+<link rel="stylesheet" type="text/css" href="/_layouts/1033/styles/HtmlEditorTableFormats.css?rev=guYGdUBUxQit03E2jhSdvA%3D%3D"/>
+<link rel="stylesheet" type="text/css" href="/_layouts/1033/styles/core.css?rev=5msmprmeONfN6lJ3wtbAlA%3D%3D"/>
+<link rel="stylesheet" type="text/css" href="/Style%20Library/ev1.css"/>
+
+<style type="text/css">
+/**** Overriding styles for branding ~ located in the CSSSTyleLibrary ****/	
+body {
+	border:0px solid black;
+	background-color:#dacfb1;
+}
+</style>
+<script language="JavaScript" type="text/JavaScript">
+      function openWindow(theURL,winName) { //v2.0
+            window.open(theURL,"ISGwebContainer","toolbar=no,status=no,menubar=no");
+      }
+</script>
+
+
+</HEAD>
+<body onload="on_load()" onkeyup="on_key_up(event)" scroll="yes" onLoad="javascript:if (typeof(_spBodyOnLoadWrapper) != 'undefined') _spBodyOnLoadWrapper();"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<form name="aspnetForm" method="post" action="AcceptedPapers.aspx" id="aspnetForm">
+<input type="hidden" name="__SPSCEditMenu" id="__SPSCEditMenu" value="true" />
+<input type="hidden" name="MSOWebPartPage_PostbackSource" id="MSOWebPartPage_PostbackSource" value="" />
+<input type="hidden" name="MSOTlPn_SelectedWpId" id="MSOTlPn_SelectedWpId" value="" />
+<input type="hidden" name="MSOTlPn_View" id="MSOTlPn_View" value="0" />
+<input type="hidden" name="MSOTlPn_ShowSettings" id="MSOTlPn_ShowSettings" value="False" />
+<input type="hidden" name="MSOGallery_SelectedLibrary" id="MSOGallery_SelectedLibrary" value="" />
+<input type="hidden" name="MSOGallery_FilterString" id="MSOGallery_FilterString" value="" />
+<input type="hidden" name="MSOTlPn_Button" id="MSOTlPn_Button" value="none" />
+<input type="hidden" name="__REQUESTDIGEST" id="__REQUESTDIGEST" value="0xE06D1F9C197655810CE4B5C78152CA1A0EF8680F35BE0A0C5128A936C58C85E91FE2E15D43D3AC9DC7007FB96B872A4A202A43E47ECD734E158324F25ECF9C67,05 Aug 2009 06:45:47 -0000" />
+<input type="hidden" name="MSOAuthoringConsole_FormContext" id="MSOAuthoringConsole_FormContext" value="" />
+<input type="hidden" name="MSOAC_EditDuringWorkflow" id="MSOAC_EditDuringWorkflow" value="" />
+<input type="hidden" name="MSOSPWebPartManager_DisplayModeName" id="MSOSPWebPartManager_DisplayModeName" value="Browse" />
+<input type="hidden" name="MSOWebPartPage_Shared" id="MSOWebPartPage_Shared" value="" />
+<input type="hidden" name="MSOLayout_LayoutChanges" id="MSOLayout_LayoutChanges" value="" />
+<input type="hidden" name="MSOLayout_InDesignMode" id="MSOLayout_InDesignMode" value="" />
+<input type="hidden" name="MSOSPWebPartManager_OldDisplayModeName" id="MSOSPWebPartManager_OldDisplayModeName" value="Browse" />
+<input type="hidden" name="MSOSPWebPartManager_StartWebPartEditingName" id="MSOSPWebPartManager_StartWebPartEditingName" value="false" />
+<input type="hidden" name="__VIEWSTATE" id="__VIEWSTATE" value="/wEPDwUBMA9kFgJmD2QWAgIBD2QWBAIBD2QWAgIFD2QWAmYPZBYCAgEPFgIeE1ByZXZpb3VzQ29udHJvbE1vZGULKYgBTWljcm9zb2Z0LlNoYXJlUG9pbnQuV2ViQ29udHJvbHMuU1BDb250cm9sTW9kZSwgTWljcm9zb2Z0LlNoYXJlUG9pbnQsIFZlcnNpb249MTIuMC4wLjAsIEN1bHR1cmU9bmV1dHJhbCwgUHVibGljS2V5VG9rZW49NzFlOWJjZTExMWU5NDI5YwFkAgMPZBYKAgMPZBYCAgEPZBYCZg9kFgICAQ8PZBYCHgVjbGFzcwUYbXMtc2J0YWJsZSBtcy1zYnRhYmxlLWV4ZAIVD2QWAgIED2QWFAIBD2QWAmYPDxYCHgdWaXNpYmxlaGRkAgMPZBYCZg8PFgIfAmhkZAIFD2QWAmYPDxYCHwJoZGQCBw9kFgJmDw8WAh8CaGRkAgkPFgIfAAsrBAFkAgsPZBYCZg8PFgIfAmhkZAIND2QWAmYPDxYCHwJoZGQCDw9kFgJmDw8WAh8CaGRkAhEPZBYCZg8PFgIfAmhkZAITD2QWAmYPDxYCHwJoZGQCNQ9kFgICAQ9kFgJmD2QWAgIDD2QWAgIBDw8WAh8CZ2QWBAIBDw8WAh8CaGQWHAIBDw8WAh8CaGRkAgMPFgIfAmhkAgUPDxYCHwJoZGQCBw8WAh8CaGQCCQ8PFgIfAmhkZAILDw8WAh8CaGRkAg0PDxYCHwJoZGQCDw8PFgQeB0VuYWJsZWRoHwJoZGQCEQ8PFgIfAmhkZAITDw8WBB8DaB8CaGRkAhUPDxYCHwJoZGQCFw8WAh8CaGQCGQ8WAh8CaGQCGw8PFgIfAmdkZAIDDw8WAh8CZ2QWBgIBDw8WAh8CZ2RkAgMPDxYGHhhwZXJzaXN0ZWRFcnJvckFjdGlvblRyZWVkHhtwZXJzaXN0ZWRFcnJvckFjdGlvblRyZWVJZHNkHwJnZGQCBQ8PFgIfAmdkZAI5D2QWAgICDw8WAh8CZxYCHgVzdHlsZQUOZGlzcGxheTpibG9jaztkAkEPFgIfAmgWAmYPZBYEAgIPZBYGAgEPFgIfAmhkAgMPFgIfAmhkAgUPFgIfAmhkAgMPDxYCHglBY2Nlc3NLZXkFAS9kZBgBBUVjdGwwMCRQbGFjZUhvbGRlclRvcE5hdkJhciRQbGFjZUhvbGRlckhvcml6b250YWxOYXYkVG9wTmF2aWdhdGlvbk1lbnUPD2QFD1RDRUFcQ29udmVudGlvbmQ4P97ltyGOR25Axcd2Nc6E3kWOFQ==" />
+
+<script> var MSOWebPartPageFormName = 'aspnetForm';</script>
+<script type="text/javascript">
+//<![CDATA[
+
+                function DoCallBack(filterText)
+                {
+                    WebForm_DoCallback('ctl00$m$TableOfContentsWebPart1',filterText,UpdateFilterCallback,0,CallBackError,true);
+                }
+                function CallBackError(result, clientsideString)
+                {                
+                }
+            //]]>
+</script>
+
+<script src="/WebResource.axd?d=vvo_9ziBlf_7MvoATXjPUw2&amp;t=633821428271804769" type="text/javascript"></script>
+<input type="hidden" name="__EVENTVALIDATION" id="__EVENTVALIDATION" value="/wEWBQLorsnjBwKpn5bCCwKN/6CDBgL5zYOUAgLg8Za2BSaX4oY2Xnik7pPP+7GuzKrSfodU" />
+
+<table cellpadding="0" cellspacing="0" border="0" align="center">
+<tr>
+  <td><div id="topLinks-L2">
+      <ul>
+        <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.tcea.org/_layouts/members/memberdefault2.aspx?continueurl=http://imis.tcea.org/webaccess"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >login</span></span> </li>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/about/Pages/default.aspx"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >contact us</span></span></li>
+        <li><span onclick="return false" style="text-decoration:underline; color:blue" href="/about/Pages/default.aspx"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >about</span></span></li>
+        <li><span onclick="return false" style="text-decoration:underline; color:blue" href="/about/Pages/default.aspx"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >site map</span></span></li>
+      </ul>
+    </div></td>
+</tr>
+<tr>
+  <td><table class="clear" cellpadding="0" cellspacing="0" border="0" align="center">
+    <tr>
+      <td><!--- --- ---  Site Header --- --- --->
+        <div id="tcea-siteHeader" style="background:url('/PublishingImages/chrome/header-bg.gif') no-repeat;">
+<!--- --- ---  Search --- --- --->
+<div id="tcea-search">
+<table cellspacing="0" cellpadding="0"><tr>
+	<td></td><td style="width: 200px">
+	<table TOPLEVEL border="0" cellpadding="0" cellspacing="0" width="100%">
+	<tr>
+		<td valign="top"><div WebPartID="00000000-0000-0000-0000-000000000000" HasPers="true" id="WebPartWPQ1" width="100%" OnlyForMePart="true" allowDelete="false" style="" ><div id="SRSB"> <div>
+			<input name="ctl00$PlaceHolderSearchArea$ctl01$ctl00" type="hidden" id="ctl00_PlaceHolderSearchArea_ctl01_ctl00" value="http://www.tcea.org/convention/Symposium" /><table class="ms-sbtable ms-sbtable-ex" border="0">
+				<tr class="ms-sbrow">
+					<td class="ms-sbscopes ms-sbcell"><select name="ctl00$PlaceHolderSearchArea$ctl01$SBScopesDDL" id="ctl00_PlaceHolderSearchArea_ctl01_SBScopesDDL" title="Search Scope" class="ms-sbscopes">
+						<option value="This Site"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >This Site: Symposium</span></option>
+						<option selected="selected" value=""><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >All of TCEA.org</span></option>
+
+					</select></td><td class="ms-sbcell"><input name="ctl00$PlaceHolderSearchArea$ctl01$S6AE27B38_InputKeywords" type="text" maxlength="200" id="ctl00_PlaceHolderSearchArea_ctl01_S6AE27B38_InputKeywords" accesskey="S" title="Enter search words" class="ms-sbplain" alt="Enter search words" onkeypress="javascript:return S6AE27B38_OSBEK(event);" style="width:170px;" /></td><td class="ms-sbgo ms-sbcell"><span onclick="return false" style="text-decoration:underline; color:blue" id="ctl00_PlaceHolderSearchArea_ctl01_S6AE27B38_go" title="Go Search" href="javascript:S6AE27B38_Submit()"><img onmousedown="imd(this)" title="Go Search" onmouseover="this.src='/_layouts/images/gosearch.gif'" onmouseout="this.src='/_layouts/images/gosearch.gif'" alt="Go Search" src="/_layouts/images/gosearch.gif" border="0" /></span></td><td class="ms-sbcell ms-sblink"><span onclick="return false" style="text-decoration:underline; color:blue" id="ctl00_PlaceHolderSearchArea_ctl01_S6AE27B38_AdvSearchLink" title="Advanced Search" href="/SearchCenter/Advanced.aspx"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Advanced Search</span></span></td><td class="ms-sbLastcell"></td>
+				</tr>
+			</table>
+		</div></div></div></td>
+	</tr>
+</table>
+
+</td></tr></table>
+</div>
+<!-- logo -->
+	<table width="100%" border="0" cellpadding="0" cellspacing="0" style="background:url('/PublishingImages/chrome/header-bg.gif') no-repeat; height: 100px;">
+	<tr>
+	<TD width="2" valign="top"><img onmousedown="imd(this)" src="/PublishingImages/chrome/header-bdr-t-lft.gif" border="0" /></TD>
+	<td background="header-bdr-bg.gif"></td>
+	<TD width="2" valign="top"><img onmousedown="imd(this)" src="/PublishingImages/chrome/header-bdr-t-rght.gif" border="0" /></TD>
+	</tr>
+	  <tr>
+	    <td width="2" align="left" valign="top"></td>
+	    <td width="767">
+		<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.tcea.org/">
+		<img onmousedown="imd(this)" src="/PublishingImages/logos/tcea.gif" border="0" alt="TCEA logo" width="229" height="100" /></span>
+			
+		</td>
+	    <td width="2" align="right" valign="top"></td>
+	  </tr>
+	</table>
+</div>
+        <!--- --- ---  End of Search --- --- --->
+        <!--- main content !!!!!!!!!!!! ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- --->
+        <table width="962" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td class="topNav-bg"><div id="tcea-topHeadContainer">
+              <!-- <img onmousedown="imd(this)" src="http://www.tcea.org/spimages/topnav/round-L.png" width="13" style="display:inline; float:left;"> -->
+              <!--- --- ---  Horizontal Top Navigation Bar --- --- --->
+              <div id="tcea-topHorizontalNavBar">
+                
+					
+					<table id="zz1_TopNavigationMenu" class="ms-topNavContainer" cellpadding="0" cellspacing="0" border="0">
+	<tr>
+		<td onmouseover="Menu_HoverRoot(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" title="Texas Computer Education Association" id="zz1_TopNavigationMenun0"><table class="ms-topnav" cellpadding="0" cellspacing="0" border="0" width="100%">
+			<tr>
+				<td nowrap="nowrap"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topnav" href="/Pages/TCEA.aspx" accesskey="1"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >TCEA</span></span></td>
+			</tr>
+		</table></td><td width="0"></td><td><table border="0" cellpadding="0" cellspacing="0" width="100%">
+			<tr>
+				<td width="0"></td><td onmouseover="Menu_HoverStatic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun1"><table class="ms-topnav" cellpadding="0" cellspacing="0" border="0" width="100%">
+					<tr>
+						<td nowrap="nowrap"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topnav" href="/about/Pages/default.aspx"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >About TCEA</span></span></td><td width="0"><img onmousedown="imd(this)" src="/_layouts/images/menudark.gif" alt="" valign="middle" /></td>
+					</tr>
+				</table></td><td width="0"></td><td width="0"></td><td onmouseover="Menu_HoverStatic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun2"><table class="ms-topnav" cellpadding="0" cellspacing="0" border="0" width="100%">
+					<tr>
+						<td nowrap="nowrap"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topnav" href="/areas/Pages/TCEAAreas.aspx"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Areas</span></span></td><td width="0"><img onmousedown="imd(this)" src="/_layouts/images/menudark.gif" alt="" valign="middle" /></td>
+					</tr>
+				</table></td><td width="0"></td><td width="0"></td><td onmouseover="Menu_HoverStatic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" title="TCEA Convention" id="zz1_TopNavigationMenun3"><table class="ms-topnavselected ms-topnav" cellpadding="0" cellspacing="0" border="0" width="100%">
+					<tr>
+						<td nowrap="nowrap"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topnavselected ms-topnav" href="/convention/Pages/Welcome.aspx"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Convention</span></span></td><td width="0"><img onmousedown="imd(this)" src="/_layouts/images/menudark.gif" alt="" valign="middle" /></td>
+					</tr>
+				</table></td><td width="0"></td><td width="0"></td><td onmouseover="Menu_HoverStatic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun4"><table class="ms-topnav" cellpadding="0" cellspacing="0" border="0" width="100%">
+					<tr>
+						<td nowrap="nowrap"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topnav" href="/EducatorAwards/Pages/default.aspx"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Educator Awards</span></span></td><td width="0"><img onmousedown="imd(this)" src="/_layouts/images/menudark.gif" alt="" valign="middle" /></td>
+					</tr>
+				</table></td><td width="0"></td><td width="0"></td><td onmouseover="Menu_HoverStatic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" title="TCEA student scholarship and professional grant information." id="zz1_TopNavigationMenun5"><table class="ms-topnav" cellpadding="0" cellspacing="0" border="0" width="100%">
+					<tr>
+						<td nowrap="nowrap"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topnav" href="/scholarshipsandgrants/Pages/default.aspx"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Scholarships &amp; Grants</span></span></td><td width="0"><img onmousedown="imd(this)" src="/_layouts/images/menudark.gif" alt="" valign="middle" /></td>
+					</tr>
+				</table></td><td width="0"></td><td width="0"></td><td onmouseover="Menu_HoverStatic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" title="TCEA membership information" id="zz1_TopNavigationMenun6"><table class="ms-topnav" cellpadding="0" cellspacing="0" border="0" width="100%">
+					<tr>
+						<td nowrap="nowrap"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topnav" href="/membership/Pages/default.aspx"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Membership</span></span></td><td width="0"><img onmousedown="imd(this)" src="/_layouts/images/menudark.gif" alt="" valign="middle" /></td>
+					</tr>
+				</table></td><td width="0"></td><td width="0"></td><td onmouseover="Menu_HoverStatic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" title="TCEA publications including TechNotes, TechEdge and advertising information" id="zz1_TopNavigationMenun7"><table class="ms-topnav" cellpadding="0" cellspacing="0" border="0" width="100%">
+					<tr>
+						<td nowrap="nowrap"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topnav" href="/publications/Pages/default.aspx"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Publications</span></span></td><td width="0"><img onmousedown="imd(this)" src="/_layouts/images/menudark.gif" alt="" valign="middle" /></td>
+					</tr>
+				</table></td><td width="0"></td><td width="0"></td><td onmouseover="Menu_HoverStatic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" title="TCEA special interest groups" id="zz1_TopNavigationMenun8"><table class="ms-topnav" cellpadding="0" cellspacing="0" border="0" width="100%">
+					<tr>
+						<td nowrap="nowrap"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topnav" href="/SIGS/Pages/default.aspx"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >SIGs</span></span></td><td width="0"><img onmousedown="imd(this)" src="/_layouts/images/menudark.gif" alt="" valign="middle" /></td>
+					</tr>
+				</table></td><td width="0"></td><td width="0"></td><td onmouseover="Menu_HoverStatic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun9"><table class="ms-topnav" cellpadding="0" cellspacing="0" border="0" width="100%">
+					<tr>
+						<td nowrap="nowrap"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topnav" href="/Training/Pages/default.aspx"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Training</span></span></td><td width="0"><img onmousedown="imd(this)" src="/_layouts/images/menudark.gif" alt="" valign="middle" /></td>
+					</tr>
+				</table></td><td width="0"></td><td width="0"></td><td onmouseover="Menu_HoverStatic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun10"><table class="ms-topnav" cellpadding="0" cellspacing="0" border="0" width="100%">
+					<tr>
+						<td nowrap="nowrap"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topnav" href="/StudentContests/Pages/default.aspx"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Student Contests</span></span></td><td width="0"><img onmousedown="imd(this)" src="/_layouts/images/menudark.gif" alt="" valign="middle" /></td>
+					</tr>
+				</table></td><td width="0"></td>
+			</tr>
+		</table><div id="zz1_TopNavigationMenun1Items" style="display:none;">
+			<table border="0" cellpadding="0" cellspacing="0">
+				<tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun11">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/about/Bylaws/Pages/default.aspx"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Bylaws</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun12">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/about/Pages/Board.aspx"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Board</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun13">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/about/Pages/Contact.aspx"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Contact</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun14">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/about/Pages/Directions.aspx"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Directions</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun15">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/about/facilities/Pages/default.aspx"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Facilities</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun16">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/about/Pages/SiteMap.aspx"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Site Map</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun17">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/about/Pages/Staff.aspx"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Staff</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun18">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/about/Pages/TCEAPrivacyPolicy.aspx"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >TCEA Privacy Policy</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun19">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/about/Pages/TCEAPaymentandCancellationPolicy.aspx"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >TCEA Payment and Cancellation Policy</span></span></td>
+						</tr>
+					</table></td>
+				</tr>
+			</table><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun1ItemsUp" onmouseover="PopOut_Up(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=Oir_TCmPNj74S0xm0wroLFQQrbsc3tjvfBJ0sSSmBBA1&amp;t=633821428271804769" alt="Scroll up" />
+			</div><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun1ItemsDn" onmouseover="PopOut_Down(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=y8RzkDYJIMnz5eUkNLPNPKMPx1qQ5Hy_m5V8vqDpUBc1&amp;t=633821428271804769" alt="Scroll down" />
+			</div>
+		</div><div id="zz1_TopNavigationMenun2Items" style="display:none;">
+			<table border="0" cellpadding="0" cellspacing="0">
+				<tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun20">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area01/Pages/default.aspx"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Area 1</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun21">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area02/Pages/default.aspx"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Area 2</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun22">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area03/Pages/default.aspx"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Area 3</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun23">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area04/Pages/default.aspx"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Area 4</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun24">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area05/Pages/default.aspx"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Area 5</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun25">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area06/Pages/default.aspx"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Area 6</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun26">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area07/Pages/default.aspx"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Area 7</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun27">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area08/Pages/default.aspx"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Area 8</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun28">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area09/Pages/default.aspx"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Area 9</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun29">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area10/Pages/default.aspx"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Area 10</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun30">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area11/Pages/default.aspx"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Area 11</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun31">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area12/Pages/default.aspx"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Area 12</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun32">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area13/Pages/default.aspx"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Area 13</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun33">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area14/Pages/default.aspx"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Area 14</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun34">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area15/Pages/default.aspx"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Area 15</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun35">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area16/Pages/default.aspx"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Area 16</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun36">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area17/Pages/default.aspx"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Area 17</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun37">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area18/Pages/default.aspx"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Area 18</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun38">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area19/Pages/default.aspx"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Area 19</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun39">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/areas/area20/Pages/default.aspx"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Area 20</span></span></td>
+						</tr>
+					</table></td>
+				</tr>
+			</table><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun2ItemsUp" onmouseover="PopOut_Up(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=Oir_TCmPNj74S0xm0wroLFQQrbsc3tjvfBJ0sSSmBBA1&amp;t=633821428271804769" alt="Scroll up" />
+			</div><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun2ItemsDn" onmouseover="PopOut_Down(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=y8RzkDYJIMnz5eUkNLPNPKMPx1qQ5Hy_m5V8vqDpUBc1&amp;t=633821428271804769" alt="Scroll down" />
+			</div>
+		</div><div id="zz1_TopNavigationMenun3Items" style="display:none;">
+			<table border="0" cellpadding="0" cellspacing="0">
+				<tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun40">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/convention/2010/Documents/index.html"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >2010</span></span></td>
+						</tr>
+					</table></td>
+				</tr>
+			</table><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun3ItemsUp" onmouseover="PopOut_Up(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=Oir_TCmPNj74S0xm0wroLFQQrbsc3tjvfBJ0sSSmBBA1&amp;t=633821428271804769" alt="Scroll up" />
+			</div><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun3ItemsDn" onmouseover="PopOut_Down(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=y8RzkDYJIMnz5eUkNLPNPKMPx1qQ5Hy_m5V8vqDpUBc1&amp;t=633821428271804769" alt="Scroll down" />
+			</div>
+		</div><div id="zz1_TopNavigationMenun4Items" style="display:none;">
+			<table border="0" cellpadding="0" cellspacing="0">
+				<tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun41">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/EducatorAwards/Pages/ClassroomTeacher.aspx"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Classroom Teacher of the Year</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun42">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/EducatorAwards/Pages/LibraryMediaSpecialist.aspx"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Library Media Specialist of the Year</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun43">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/EducatorAwards/Pages/InstructionalTechSpecialist.aspx"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Instructional Tech Spec</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun44">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/EducatorAwards/Pages/TechSupportPerson.aspx"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Technical Support Person of the Year</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun45">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/EducatorAwards/Pages/DistrictCampusAdministrator.aspx"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >District or Campus Administrator of the Year</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun46">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/EducatorAwards/Pages/Superintendent.aspx"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Superintendent of the Year</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun47">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/EducatorAwards/Pages/TechnologyAdministrator.aspx"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Technology Administrator of the Year</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun48">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/EducatorAwards/Pages/LifetimeAchievement.aspx"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Lifetime Achievement</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun49">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/EducatorAwards/Pages/NominationProcess.aspx"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Nomination Process</span></span></td>
+						</tr>
+					</table></td>
+				</tr>
+			</table><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun4ItemsUp" onmouseover="PopOut_Up(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=Oir_TCmPNj74S0xm0wroLFQQrbsc3tjvfBJ0sSSmBBA1&amp;t=633821428271804769" alt="Scroll up" />
+			</div><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun4ItemsDn" onmouseover="PopOut_Down(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=y8RzkDYJIMnz5eUkNLPNPKMPx1qQ5Hy_m5V8vqDpUBc1&amp;t=633821428271804769" alt="Scroll down" />
+			</div>
+		</div><div id="zz1_TopNavigationMenun5Items" style="display:none;">
+			<table border="0" cellpadding="0" cellspacing="0">
+				<tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun50">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/scholarshipsandgrants/Pages/ApplicationProcess.aspx"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Application Process</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" title="Richard A. Brown Memorial Scholarship for Students" id="zz1_TopNavigationMenun51">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/scholarshipsandgrants/Pages/StudentScholarships.aspx"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Undergraduate Student Scholarships</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" title="Robert E. Knight Memorial Scholarship for Advanced Degrees" id="zz1_TopNavigationMenun52">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/scholarshipsandgrants/Pages/GraduateScholarship.aspx"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Graduate Scholarship</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun53">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/scholarshipsandgrants/Pages/ProfessionalEducatorGrant.aspx"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Professional Educator Grant</span></span></td>
+						</tr>
+					</table></td>
+				</tr>
+			</table><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun5ItemsUp" onmouseover="PopOut_Up(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=Oir_TCmPNj74S0xm0wroLFQQrbsc3tjvfBJ0sSSmBBA1&amp;t=633821428271804769" alt="Scroll up" />
+			</div><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun5ItemsDn" onmouseover="PopOut_Down(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=y8RzkDYJIMnz5eUkNLPNPKMPx1qQ5Hy_m5V8vqDpUBc1&amp;t=633821428271804769" alt="Scroll down" />
+			</div>
+		</div><div id="zz1_TopNavigationMenun6Items" style="display:none;">
+			<table border="0" cellpadding="0" cellspacing="0">
+				<tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun54">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/membership/Pages/RegularMembership.aspx"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Regular Membership</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun55">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/membership/Pages/studentmembership.aspx"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Student Membership</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun56">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/membership/Pages/BusinessMembership.aspx"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Business Membership</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun57">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/membership/Partnerships/Pages/default.aspx"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Partnerships</span></span></td>
+						</tr>
+					</table></td>
+				</tr>
+			</table><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun6ItemsUp" onmouseover="PopOut_Up(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=Oir_TCmPNj74S0xm0wroLFQQrbsc3tjvfBJ0sSSmBBA1&amp;t=633821428271804769" alt="Scroll up" />
+			</div><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun6ItemsDn" onmouseover="PopOut_Down(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=y8RzkDYJIMnz5eUkNLPNPKMPx1qQ5Hy_m5V8vqDpUBc1&amp;t=633821428271804769" alt="Scroll down" />
+			</div>
+		</div><div id="zz1_TopNavigationMenun7Items" style="display:none;">
+			<table border="0" cellpadding="0" cellspacing="0">
+				<tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun58">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/publications/TechEdge/Pages/Current.aspx"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Tech Edge</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun59">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/publications/TechNotes/Pages/default.aspx"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >TechNotes</span></span></td>
+						</tr>
+					</table></td>
+				</tr>
+			</table><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun7ItemsUp" onmouseover="PopOut_Up(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=Oir_TCmPNj74S0xm0wroLFQQrbsc3tjvfBJ0sSSmBBA1&amp;t=633821428271804769" alt="Scroll up" />
+			</div><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun7ItemsDn" onmouseover="PopOut_Down(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=y8RzkDYJIMnz5eUkNLPNPKMPx1qQ5Hy_m5V8vqDpUBc1&amp;t=633821428271804769" alt="Scroll down" />
+			</div>
+		</div><div id="zz1_TopNavigationMenun8Items" style="display:none;">
+			<table border="0" cellpadding="0" cellspacing="0">
+				<tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun60">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/sigs/TECSIG/Pages/default.aspx"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >TEC SIG</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun61">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/sigs/TACSSIG/Pages/default.aspx"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >TA/CS SIG</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun62">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/sigs/LibSIG/Pages/default.aspx"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >LibSIG</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun63">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/sigs/CampSIG/Pages/default.aspx"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >CampSIG</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun64">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/sigs/SOSSIG/Pages/gotoSOS.aspx"><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >SOS SIG</span></span></td>
+						</tr>
+					</table></td>
+				</tr>
+			</table><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun8ItemsUp" onmouseover="PopOut_Up(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=Oir_TCmPNj74S0xm0wroLFQQrbsc3tjvfBJ0sSSmBBA1&amp;t=633821428271804769" alt="Scroll up" />
+			</div><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun8ItemsDn" onmouseover="PopOut_Down(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=y8RzkDYJIMnz5eUkNLPNPKMPx1qQ5Hy_m5V8vqDpUBc1&amp;t=633821428271804769" alt="Scroll down" />
+			</div>
+		</div><div id="zz1_TopNavigationMenun9Items" style="display:none;">
+			<table border="0" cellpadding="0" cellspacing="0">
+				<tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun65">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/Training/Pages/TrainingPartners.aspx"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Training Partners</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun66">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/about/facilities/Pages/default.aspx"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >TCEA Facilities</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun67">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/Training/TrainingPartners/Thinkfinity/"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Thinkfinity</span></span></td>
+						</tr>
+					</table></td>
+				</tr>
+			</table><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun9ItemsUp" onmouseover="PopOut_Up(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=Oir_TCmPNj74S0xm0wroLFQQrbsc3tjvfBJ0sSSmBBA1&amp;t=633821428271804769" alt="Scroll up" />
+			</div><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun9ItemsDn" onmouseover="PopOut_Down(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=y8RzkDYJIMnz5eUkNLPNPKMPx1qQ5Hy_m5V8vqDpUBc1&amp;t=633821428271804769" alt="Scroll down" />
+			</div>
+		</div><div id="zz1_TopNavigationMenun10Items" style="display:none;">
+			<table border="0" cellpadding="0" cellspacing="0">
+				<tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun68">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/StudentContests/Programming/Pages/default.aspx"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Programming</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun69">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/StudentContests/Robotics/Pages/default.aspx"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Robotics</span></span></td>
+						</tr>
+					</table></td>
+				</tr><tr onmouseover="Menu_HoverDynamic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" id="zz1_TopNavigationMenun70">
+					<td><table class="ms-topNavFlyOuts" cellpadding="0" cellspacing="0" border="0" width="100%">
+						<tr>
+							<td nowrap="nowrap" width="100%"><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-topNavFlyOuts" href="/StudentContests/Technology/Pages/default.aspx"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Technology</span></span></td>
+						</tr>
+					</table></td>
+				</tr>
+			</table><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun10ItemsUp" onmouseover="PopOut_Up(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=Oir_TCmPNj74S0xm0wroLFQQrbsc3tjvfBJ0sSSmBBA1&amp;t=633821428271804769" alt="Scroll up" />
+			</div><div class="ms-topNavFlyOuts" id="zz1_TopNavigationMenun10ItemsDn" onmouseover="PopOut_Down(this)" onmouseout="PopOut_Stop(this)" align="center" style="display:none;">
+				<img onmousedown="imd(this)" src="/WebResource.axd?d=y8RzkDYJIMnz5eUkNLPNPKMPx1qQ5Hy_m5V8vqDpUBc1&amp;t=633821428271804769" alt="Scroll down" />
+			</div>
+		</div></td>
+	</tr>
+</table>
+                    
+                  
+                
+                <!--- 	</asp:ContentPlaceHolder> MIA PLACEHOLDER --->
+              </div>
+              <!-- <img onmousedown="imd(this)" src="http://www.tcea.org/spimages/topnav/round-R.png" width="13"> -->
+            </div>
+            <!--- --- ---  End of Horizontal Top Navigation Bar --- --- --->
+            <!--- --- --- End of Page Header --- --- --->
+          </td>
+        </tr>
+        <tr>
+          <td>
+            
+            
+            <!--- Breadcrumb --->
+            <div id="tcea-breadcrumb">
+               <div class="breadcrumb"> 
+	<span id="ctl00_PlaceHolderTitleBreadcrumb_siteMapPath"><span><span onclick="return false" style="text-decoration:underline; color:blue" title="Texas Computer Education Association" class="ms-sitemapdirectional" href="/Pages/TCEA.aspx"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >TCEA</span></span></span><span> <span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >&gt;</span> </span><span><span onclick="return false" style="text-decoration:underline; color:blue" title="TCEA Convention" class="ms-sitemapdirectional" href="/convention/Pages/Welcome.aspx"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Convention</span></span></span><span> <span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >&gt;</span> </span><span><span onclick="return false" style="text-decoration:underline; color:blue" class="ms-sitemapdirectional" href="/convention/Symposium/Pages/default.aspx"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Symposium</span></span></span><span> <span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >&gt;</span> </span><span class="breadcrumbCurrent"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers</span></span></span> </div> 
+            </div>
+            <!-- Global Breadcrumb THIS IS WHERE THE LOGO APPEARS -->
+            <div id="tcea-globalBreadcrumb" style="display:block;">
+               
+            </div>
+            <!--- Page Title - leave wrapped in table cell in order to show on sub pages and hide on home page -->
+<table width="100%" id="pageTitle">
+	<tr>
+		<td valign=top ID=onetidPageTitle class="ms-pagetitle">
+		  <h2 class="ms-pagetitle">
+			
+		  </h2>
+		</td>
+	</tr>
+</table>
+
+<!--- --- ---  Page Content / Edit Content box --- --- --->
+<div id="tcea-pageContent">
+<PlaceHolder id="ctl00_MSO_ContentDiv">
+<table id="MSO_ContentTable"  border="0" cellspacing="0" cellpadding="0" class="ms-propertysheet">
+	<tr>
+	  	 <td  class="ms-bodyareaframe" valign="top" style="height: 100%">
+		   <span onclick="return false" style="text-decoration:underline; color:blue" name="mainContent"></span>
+			
+		
+
+
+			
+	<table cellpadding="0" cellspacing="0" border="0" width="962" align="center">
+	<tr>
+	<td valign="top" style="padding:0">
+		<table cellpadding="0" cellspacing="0" border="0" width="100%" height="100%">
+	<tr>
+	<td valign="top">
+		
+<table cellpadding="0" cellspacing="0" width="100%">
+<tr>
+<td valign="top">
+<table cellspacing="0" cellpadding="0">
+<tr><td class="hSpacer"><img onmousedown="imd(this)" src="/publishingimages/chrome/hSpacer196.gif" width="220"></td></tr>
+<tr><td id="sideBar" valign="top" style="width: 220px">
+<table width="100%" cellpadding="0" cellspacing="0" border="0">
+	<tr>
+		<td id="MSOZoneCell_WebPartWPQ2" vAlign="top"><table TOPLEVEL border="0" cellpadding="0" cellspacing="0" width="100%">
+			<tr>
+				<td valign="top"><div WebPartID="4baebf01-39a1-4b90-99ca-510a5a229c51" HasPers="false" id="WebPartWPQ2" width="100%" class="ms-WPBody" allowDelete="false" style="" ><table id="tocwp" cellspacing="0px" cellpadding="0px" class="toc-layout-main"><tr><td id="column" width="33%" valign="top"><div class="level-section"><div style="margin-left:4;"><div class="level-header"><span id="header" class="headertitle"><span onclick="return false" style="text-decoration:underline; color:blue" href="/convention/Symposium/Pages/default.aspx"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Symposium</span></span></span></div><div class="level-item-pos level-item level-bullet"><span id="header"><span onclick="return false" style="text-decoration:underline; color:blue" href="/convention/Symposium/Pages/Schedule.aspx"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Schedule</span></span></span></div><div class="level-item-pos level-item level-bullet"><span id="header"><span onclick="return false" style="text-decoration:underline; color:blue" href="/convention/Symposium/Pages/PaperSubmissions.aspx"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Paper Submissions</span></span></span></div><div class="level-item-pos level-item level-bullet"><span id="header"><span onclick="return false" style="text-decoration:underline; color:blue" href="/convention/Symposium/Pages/AcceptedPapers.aspx"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers</span></span></span></div><div class="level-item-pos level-item level-bullet"><span id="header"><span onclick="return false" style="text-decoration:underline; color:blue" href="/convention/Symposium/Pages/EventChairs.aspx"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Event Chairs</span></span></span></div><div class="level-item-pos level-item level-bullet"><span id="header"><span onclick="return false" style="text-decoration:underline; color:blue" href="/convention/Symposium/Pages/Registration.aspx"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></span></div><div class="level-item-pos level-item level-bullet"><span id="header"><span onclick="return false" style="text-decoration:underline; color:blue" href="/convention/Symposium/Pages/Contact.aspx"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Contact</span></span></span></div><div class="level-item-pos level-item level-bullet"><span id="header"><span onclick="return false" style="text-decoration:underline; color:blue" href="/convention/Symposium/Archive/Pages/default.aspx"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Archive</span></span></span></div></div></div></td ></tr></table></div></td>
+			</tr>
+		</table></td>
+	</tr>
+</table>
+
+
+</td>
+<td style="padding:0; width:1px;"><img onmousedown="imd(this)" src="/publishingimages/chrome/1x600.gif"></td>
+</tr></table>
+</td>
+<td valign="top">
+<table>
+<tr><td colspan="2"><img onmousedown="imd(this)" src="/publishingimages/chrome/hSpacer766.gif" width="700"></td></tr>
+<tr>
+<td name="_invisibleIfEmpty" valign="top"> 
+<table id="middleContent" cellspacing="0" cellpadding="15" style="width: 100%"><tr><td>	
+	
+	<div id="ctl00_PlaceHolderMain_content__ControlWrapper_RichHtmlField" style="display:inline"><h1><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers from TCEA Symposium 2008</span></h1>
+<ul>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a01.aspx"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Value Added Online Professional Development: Enhancing State Professional Development Initiatives to Target State Professional Development Needs</span> </span><br><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Gypsy Abbott, Richard Littleton, Lynne Meeks, Nancy Hill and Kathy Chandler</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a02.aspx"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Blogs, Wikis and Online Competencies: An Action Research Look at Methods, Preferences, and Presentation</span><br></span><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Lynn Akin, Janet Hilbun, Diane Neal and Hyuk-Jin Lee</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a03.aspx"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Am I on Your Playlist? Explorations into the Impact of Podcasting on Academic Performance</span><br></span><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Laura F. Bright and Gary B. Wilcox</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a04.aspx"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Using PulpMotion Videos as Instructional Anchors for Pre-Service Teachers Learning about Early Childhood Special Education</span><br></span><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Denise N. J. Chapman</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a05.aspx"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >The Complexities of Long Term Data Storage in Space Exploration</span><br></span><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >William C. Figg</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a06.aspx"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Curriculum Development: Which Software Application Skills Do Employers Want?</span><br></span><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Susan Evans Jennings and S. Ann Wilson</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a07.aspx"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Information Technology: Certifications versus Academic Settings</span><br></span><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Hilmi A. Lahoud</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a08.aspx"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >An Overview of Password Security</span></span><br><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Hilmi A. Lahoud</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a09.aspx"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >How Public Television Stations and State Department of Education Collaborate to Provide Online Professional Development Opportunities for K-12 Educators</span><br></span><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Lynne Meeks, Richard Littleton and Nancy Hill</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a10.aspx"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >A Qualitative Exploration of Student Experiences in Online Learning in the Pacific Rim</span><br></span><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Michael P. Menchaca and Ellen S. Hoffman</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a11.aspx"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Animated Pedagogical Agents: A Review of Literature and Direction for Future Research</span><br></span><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Michelle Morris and Sanghoon Park</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a12.aspx"><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Raising Student Information Technology Self-Efficacy with Authentic Assessments</span><br></span><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Richard J. Pierce</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a13.aspx"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >An Exploratory Study of Social Work Students’ Opinions on Clickers and Class Participation</span><br></span><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Andrew S. Quinn</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a14.aspx"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Bringing Management Concepts to Life in the Classroom: The Benefits and Challenges of Using Video in Business Education</span><br></span><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Patrick L. Schultz and Andrew S. Quinn</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a15.aspx"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Preliminary Study: The Impact of Learning Environments upon Students’ Evaluations of the Instructor</span><br></span><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Marion S. Smith, Richard A. Smith and Caroline M. Crawford</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a16.aspx"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Synchronous Computer-Mediated Communication (CMC) and Gender—A Study of Microsoft Windows Messenger (MSN)</span><br></span><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Hsiaoping Wu</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a17.aspx"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Applying New Technologies Bridging the Gap: Wiki in Blended Learning</span><br></span><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Dorothy Carole Yaw and Anne Marie Conley</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a18.aspx"><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Combining Streaming Video and Student Performance Data in the Classroom</span><br></span><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Jessica Yusaitis and Barb Storandt</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" title="" href="/convention/Symposium/Archive/2008/Pages/08a19.aspx"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >A Case Study of Using Virtual/Online Labs in Online Wireless Networking Technology Classes</span><br></span><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Qi Zhu and Yun Wan</span></li></ul></div> 
+	<br>
+	   
+</td></tr>
+<tr><td style="height: 5px">
+	<img onmousedown="imd(this)" src="/publishingimages/chrome/hSpacer766.gif" width="500" height="1"></td></tr>
+</table></td>
+<td id="miscContent" name="_invisibleIfEmpty" valign="top" align="center"> 
+	
+	    
+		 
+</td></tr>
+</table>
+
+</td></tr>
+						</table>
+					</td>
+				</tr>
+		</table>								
+
+		 </td>
+	  </tr>
+	  <tr><td>
+		<img onmousedown="imd(this)" src="/publishingimages/chrome/bdr-bottom.jpg"></td></tr>
+	</table>
+</PlaceHolder>
+</div>
+<!--- --- ---  End of Page Content --- --- --->
+<!--- Footer --- --- --- --- --- --- --- --- --->
+<table id="tcea-contacts" cellpadding="0" cellspacing="0" width="100%">
+		<tr><td class="foot-l" valign="top"><p><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >TCEA</span>
+<br>
+<span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >PO Box 141759</span><br>
+<span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Austin, TX 78714</span></p>
+			<p class="location">
+			<span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Phone: 1-800-282-8232</span> <br>
+			<span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Fax: 1-512-476-8574</span><br>
+			<span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Email:
+			tceaoffice@tcea.org</span></p>
+			</td>
+<td class="foot-r" valign="top">
+<p class="links"><span onclick="return false" style="text-decoration:underline; color:blue" href="/membership"><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Membership</span> </span><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/educatorawards"><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Educator Awards</span></span> <span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/Convention">
+<span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Convention</span></span><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/Training"><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Training</span></span><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.tceacontests.org/"><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Student Events</span></span><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/SIGs"><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >SIGs</span></span><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/Publications"><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Publications</span></span><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/Areas"><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Areas</span></span><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/ScholarshipsandGrants"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Scholarships and Grants</span></span></p>
+<p><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >The Texas Computer Education Association is the largest state organization devoted to the use of technology in education.</span> 
+<br>
+<span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Founded in 1980, the organization has been very active throughout Texas supporting instructional technology.</span> 
+<br>
+<span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Click</span> 
+		<span onclick="return false" style="text-decoration:underline; color:blue" href="/about"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >here</span></span> <span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >to find out more.</span></p>
+<p><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Forgot your login or password?</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.tcea.org/_layouts/members/memberdefault2.aspx?continueurl=http://imis.tcea.org/webaccess"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Click here</span></span></p>
+		<p><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Copyright ©2002-2008 TCEA. All rights reserved.</span><br>
+<span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >TCEA Privacy Policy -</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/about/Pages/TCEAPrivacyPolicy.aspx"><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Click here</span></span></p></td></tr>
+	  <tr><td colspan="2">
+		<img onmousedown="imd(this)" src="/publishingimages/chrome/962x1.png"></td></tr>
+</table>
+<!--- Quick Links --- --- --- --- --- --- --- --->
+<div id="quickLinks">
+</div>
+<!--- tcea contacts --- --- --- --- --- --- --->
+<!--- EDIT CONTROLS --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --->
+
+<!--- --- ---  End of Top Toolbar --- --- --->
+
+
+
+
+
+
+<input type="text" name="__spDummyText1" style="display:none;" size=1/>
+<input type="text" name="__spDummyText2" style="display:none;" size=1/>
+</td>
+</tr></table>
+</td>
+</tr>
+</table>
+</td></tr></table>
+
+
+
+
+
+<!--- --- ---  Hidden Placeholders --- --- --->
+
+<img onmousedown="imd(this)" SRC="/_layouts/images/blank.gif" width=138 height=1 alt="">
+<!--- --- --- Page Header --- --- --->
+
+
+<!-- Mini Console - supplementary buttons for Site Map -->
+
+
+
+<!--- --- ---  Top Toolbar --- --- --->
+
+	<span id="TurnOnAccessibility">
+		<span onclick="return false" style="text-decoration:underline; color:blue" href="#" class="ms-skip" onclick="SetIsAccessibilityFeatureEnabled(true);UpdateAccessibilityUI();return false;">
+		<span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Turn on more accessible mode</span></span>
+	</span>	
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="javascript:;" onclick="javascript:this.href='#mainContent';" class="ms-skip" AccessKey="J">
+	<span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Skip to main content</span></span>
+	<span id="TurnOffAccessibility">
+		<span onclick="return false" style="text-decoration:underline; color:blue" href="#" class="ms-acclink" onclick="SetIsAccessibilityFeatureEnabled(false);UpdateAccessibilityUI();return false;">
+		<span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Turn off more accessible mode</span></span>
+	</span>
+
+
+<!--- --- ---  End of Hidden Placeholders --- --- --->
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+	<td>
+<!--- --- --- Edit Consoles --- --- --->
+
+	
+
+
+
+
+	<tr><td colspan="4" id="mpdmconsole" class="ms-consolemptablerow">
+<!-- Console -->
+<span id="ctl00_SPNavigation_ctl01_publishingContext1"></span>
+
+<!-- Console -->
+</td></tr>
+
+<!--- --- --- End of Edit Consoles --- --- --->
+</td>
+</tr>
+<tr>
+	<td>
+<!-- Variations, Welcome Menu, My Site, My Links, Help -->
+	<div id="welcomeMove">
+	
+
+	
+	
+	
+<span onclick="return false" style="text-decoration:underline; color:blue" id="ctl00_IdWelcome_ExplicitLogin" href="http://www.tcea.org/convention/Symposium/_layouts/Authenticate.aspx?Source=%2Fconvention%2FSymposium%2FPages%2FAcceptedPapers%2Easpx" style="display:block;"><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Sign In</span>

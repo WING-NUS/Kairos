@@ -1,0 +1,754 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+"http://www.w3.org/TR/html4/loose.dtd">
+
+<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.usenix.org^events^sysml08^tech^_2009-08-05__14-46-11.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.usenix.org^events^sysml08^tech^_2009-08-05__14-46-11.yaml created on Wed Aug 05 17:32:34 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1">
+<title> SysML08 Technical Sessions
+</title>
+
+<style type="text/css">
+<!--
+@import url(/style.css);
+@import url(/events/conf.css);
+@import url(../sysml08.css);
+-->
+</style>
+
+</head>
+
+
+<body onload="on_load()" onkeyup="on_key_up(event)" id="tech" bgcolor="#ffffff"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<center>
+<!--Table 1-->
+<table style="background:url(../art/back_border.gif);" width=750 border=0 cellpadding=0 cellspacing=0> 
+	<tr>
+	<!--banner-->
+		<td colspan="2">
+		<img onmousedown="imd(this)" src="../art/sysml08_banner.jpg" width=750 height=120 alt="SysML08 Banner">
+		</td>
+	<!--end banner-->
+	</tr>
+	
+	<tr>
+		<td bgcolor="#f1df96" colspan="2" valign="bottom">
+		<img onmousedown="imd(this)" src="/graphics/dot_clear.gif" alt="" height="4" width="1"><br>
+		<!-- insert topmenu -->	
+		<ul id="topbar" class="nav">
+<!--<li id="topbar-01"></li> -->
+
+<li id="topbar-02"><span onclick="return false" style="text-decoration:underline; color:blue" href="/"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >USENIX Home</span></span></li>
+
+<li id="topbar-03"><span onclick="return false" style="text-decoration:underline; color:blue" href="/events/"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Conferences</span></span></li>
+
+<li id="topbar-04"><span onclick="return false" style="text-decoration:underline; color:blue" href="/publications/library/proceedings/"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Publications</span></span></li>
+
+<li id="topbar-05"><span onclick="return false" style="text-decoration:underline; color:blue" href="/membership/"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Membership</span></span></li>
+
+  </ul>
+		</td>
+	</tr>
+
+<!--begin spacer-->
+	<tr>
+		<td colspan="2">
+		<img onmousedown="imd(this)" src="../art/longbar.gif" width=750 height="6" alt="">
+		</td>
+	</tr>
+<!--end spacer-->
+
+	<tr>
+		<td width="150" valign="top">
+
+		<!--begin left menu-->
+		<ul id="left-navlist" class="nav">
+		<!-- insert menu -->
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/events/sysml08/" id="nav-home"><b><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >SysML08</span></b></span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/events/sysml08/registration/"  id="nav-reg"><b><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></b></span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/events/sysml08/organizers.html"  id="nav-org"><b><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Organizers</span></b></span></li>
+
+<!--<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/events/sysml08/invitation.html"  ID="nav-invite"><b>Invitation</b></span></li>-->
+
+<!--<li><span id="bar"><img onmousedown="imd(this)" src="/events/sysml08/art/left_bar.gif" width="150" height="2" border="0" alt=""></span></li>-->
+
+<!--<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/events/sysml08/ataglance.html" ID="nav-glance"><b>At a Glance</b></span></li>-->
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/events/sysml08/tech/" id="nav-tech"><b><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Sessions</span></b></span></li>
+
+<!--<li><span id="bar"><img onmousedown="imd(this)" src="/events/sysml08/art/left_bar.gif" width="150" height="2" border="0" alt=""></span></li>-->
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/events/sysml08/hotel.html" id="nav-hotel"><b><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Hotel/Travel</span></b></span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/events/sysml08/questions.html" id="nav-questions"><b><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Questions?</span></b></span></li>
+
+<!--<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/events/sysml08/promote.html" ID="nav-promote"><b> Help Promote!</b></span></li>-->
+
+<!--<li><span id="bar"><img onmousedown="imd(this)" src="/events/sysml08/art/left_bar.gif" width="150" height="2" border="0" alt=""></span></li>-->
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/events/bytopic/sysml.html" ID="nav-past"><b><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Past Proceedings</span></b></span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/events/sysml08/cfp/" id="nav-cfp"><b><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></b></span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.usenix.org/events/sysml08/instrux/" id="nav-authors"><b><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Authors</span></b></span></li>
+
+<!--<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/events/sysml08/instrux/ITs" ID="nav-speakers"><b>Speakers</b></span></li>-->
+
+<li><span id="bar"><img onmousedown="imd(this)" src="/events/sysml08/art/left_bottom.gif" alt="" width="150" height="20"></span></li>
+
+</ul>
+
+
+		<!--end left menu--></ul>
+		<br>	
+
+<!--start sidebar images-->
+
+			<table width="90%" border="0" cellpadding="0" cellspacing="0">
+				<tr>
+					<td class="center">
+					<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.usenix.org/events/osdi08">
+					<img onmousedown="imd(this)" src="/events/osdi08/art/osdi08_button.jpg" border="0" width="125" height="125" alt="OSDI '08"></span><br>
+					<img onmousedown="imd(this)" src="/graphics/dot_clear.gif" width="2" height="7" alt="">
+					</td>
+				</tr>
+			</table>
+		</td>
+
+		<td width="590" valign="top" align="left">
+
+
+<!--TABLE 2-->
+<!--begin main table-->
+
+<table width="100%" cellpadding="4" border="0">
+<tr>
+<td valign="top">
+<!--REGISTER NOW BUTTON-->
+<p class="subhead">
+<!--<span onclick="return false" style="text-decoration:underline; color:blue" href="https://db.usenix.org/cgi-bin/Conference/sysml08/reg.cgi">
+<img onmousedown="imd(this)" src="../art/register_now.gif" border="0" width="95" height="16" alt="Register Now!" align="LEFT"></span>&nbsp;&nbsp;--><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >TECHNICAL SESSIONS</span>
+</p>
+
+<p class="mb0">
+<span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Session papers are available to workshop registrants immediately and to everyone beginning December 11, 2008.</span>
+</p>
+
+</td>
+</tr>
+
+<!-- START OF PAGE CONTENTS -->
+
+<!--START THURSDAY-->
+<tr>
+		<td>
+		<b><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, December 11, 2008</span></b><br>
+		</td>
+	</tr>
+	
+	<tr>
+		<td class="time"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >8:30 a.m.&ndash;9:00 a.m.&emsp;Continental Breakfast</span></td>
+	</tr>
+	
+	<tr>
+		<td><img onmousedown="imd(this)" src="../art/dot_clear.gif" alt="" height="3" width="1"></td>
+	</tr>
+
+
+	<tr>
+		<td class="time"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >9:00 a.m.&ndash;9:10 a.m.</span> </td>
+	</tr>
+	
+	<tr>
+		<td><p class="session"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Opening Remarks</span></p>
+		<p class="fullpaper"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Program Co-Chairs: Armando Fox,</span> <i><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >University of California, Berkeley;</span></i>  <span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Sumit Basu,</span> <i><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Microsoft Research</span></i></td>
+	</tr>
+	
+	<tr>
+		<td class="time"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >9:10 a.m.&ndash;10:00 a.m.</span></td>
+	</tr>
+	
+	<tr>
+		<td>
+		<p class="session"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span></p>
+		<p class="fullpaper"><b><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Patterns (and Anti-Patterns) for Developing Machine Learning Systems</span></b><br>
+		<span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Gordon Rios,</span> <i><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Chief Technology Officer, Zvents, Inc.</span></i></p>
+		
+		<p><span onclick="return false" style="text-decoration:underline; color:blue" href="rios_talk.pdf"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >View the presentation slides</span></span></p>
+		
+		<p class="fullpaper"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Design patterns are a staple in the software engineering field and
+have helped developers capture and reuse successful approaches to common problems. As the field of machine learning continues to mature, it may be helpful to discuss some of the implementation patterns that
+can lead to successful deployments. We'll also touch on some anti-patterns, a much more controversial topic, where a seemingly obvious approach can lead to less successful outcomes. Rather than a manifesto or final word, my intent is to provide a starting point for the conversation.</span></p>
+		<p class="fullpaper"><b><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Bio:</span></b> <span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Gordon Rios is a proven leader
+in search and search-related technologies. Over the past 10 years he has focused his efforts on devising machine learning systems for Web search, document classification, and text mining. At Inktomi he
+developed the scoring engine for a user click-based ranking application that was deployed at HotBot and Snap; was a major contributor to the Directory Engine product, which classified millions of Web documents into over 10,000 categories; and was a founding member of Inktomi's Web Search Relevance Group. Moving to Proofpoint, an enterprise messaging company, he led the development of the award-winning MLX&trade; technology used in their industry-leading anti-spam product. Most recently, Gordon worked at Yahoo! on the International Relevance team, where he worked on all aspects of search engine relevance and developed production code running in all major international markets. Gordon holds an MBA in Finance and a Master's
+Degree in Engineering and Computer Science from the University of California, Berkeley.</span></p>
+
+		</td>	
+	</tr>
+	
+	<tr>
+		<td class="time"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >10:00 a.m.&ndash;10:30 a.m.&emsp;Break</span></td>
+	</tr>
+	
+	<tr>
+		<td><img onmousedown="imd(this)" src="../art/dot_clear.gif" alt="" height="3" width="1"></td>
+	</tr>
+	
+	<tr>
+		<td class="time"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >10:30 a.m.&ndash;noon</span></td>
+	</tr>
+	
+	<tr>
+		<td>
+		<p class="session"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Oral Session 1</span></p>
+		<p class="fullpaper">
+		<b><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Finding Similar Failures Using Callstack Similarity</span></b><br>
+		<span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Kevin Bartz,</span> <i><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Harvard University;</span></i> <span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Jack W. Stokes and John C. Platt,</span> <i> <span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Microsoft Research, Redmond;</span></i> <span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Ryan Kivett, David Grant, Silviu Calinoiu and Gretchen Loihle,</span> <i><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Microsoft Corporation, Redmond</span></i>
+		</p>
+		<p class="paperfiles">
+		<span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Paper in</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="full_papers/bartz/bartz_html/"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >HTML</span></span> <span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="full_papers/bartz/bartz.pdf"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >PDF</span></span>
+		</p>
+		
+		<p class="fullpaper">
+		<b><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Empirical Comparison of Techniques for Automated Failure Diagnosis</span></b><br>
+		<span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Songyun Duan and Shivnath Babu,</span> <i><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Duke University</span></i>
+		</p>
+		<p class="paperfiles">
+		<span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Paper in</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="full_papers/duan/duan_html/"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >HTML</span></span> <span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="full_papers/duan/duan.pdf"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >PDF</span></span>
+		</p>
+		
+		<p class="fullpaper">
+		<b><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >HiLighter: Automatically Building Robust Signatures of Performance Behavior for Small- and Large-Scale Systems</span></b><br>
+		<span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Peter Bod&iacute;k,</span> <i><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >University of California, Berkeley;</span></i> <span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Moises Goldszmidt,</span> <i><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Microsoft Research, Silicon Valley;</span></i> <span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Armando Fox,</span> <i><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >University of California, Berkeley</span></i>
+		</p>
+		<p class="paperfiles">
+		<span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Paper in</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="full_papers/bodik/bodik_html/"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >HTML</span></span> <span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="full_papers/bodik/bodik.pdf"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >PDF</span></span>
+		</p>
+		</td>	
+	</tr>
+	
+	<tr>
+		<td class="time"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Noon&ndash;1:00 p.m.&emsp;Workshop Luncheon</span></td>
+	</tr>
+	
+	<tr>
+		<td><img onmousedown="imd(this)" src="../art/dot_clear.gif" alt="" height="3" width="1"></td>
+	</tr>
+	
+	<tr>
+		<td class="time"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >1:00 p.m.&ndash;2:00 p.m.</span></td>
+	</tr>
+
+	<tr>
+		<td>
+		<p class="session"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Oral Session 2</span></p>
+		<p class="fullpaper">
+		<b><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Mining Console Logs for Large-Scale System Problem Detection</span></b><br>
+		<span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Wei Xu,</span> <i><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >University of California, Berkeley;</span></i> <span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Ling Huang,</span> <i><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Intel 
+		Research Berkeley;</span></i> <span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Armando Fox, David Patterson, and Michael Jordan,</span> <i><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >University of California, Berkeley</span></i>
+		</p>
+		<p class="paperfiles">
+		<span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Paper in</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="full_papers/xu/xu_html/"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >HTML</span></span> <span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="full_papers/xu/xu.pdf"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >PDF</span></span>
+		</p>
+		
+		<p class="fullpaper">
+		<b><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >An Internet Protocol Address Clustering Algorithm</span></b><br>
+		<span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Robert Beverly and Karen Sollins,</span> <i><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >MIT CSAIL</span></i>
+		</p>
+		<p class="paperfiles">
+		<span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Paper in</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="full_papers/beverly/beverly_html/"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >HTML</span></span> <span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="full_papers/beverly/beverly.pdf"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >PDF</span></span>
+		</p>
+		</td>
+	</tr>
+	
+	<tr>
+		<td class="time"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >2:00 p.m.&ndash;3:30 p.m.</span></td>
+	</tr>
+	
+	<tr>
+		<td>
+		<p class="session"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session (with refreshments)</span></p>
+		<p class="fullpaper">
+		<b><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Reinforcement Learning for Optimizing Flash Memory Cache Management</span></b><br>
+		<span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Byung Kon Kang, Kee-Eung Kim, Wook Jung, and Jin-Soo Kim,</span> <i><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >KAIST</span></i>
+		</p>
+		<p class="paperfiles">
+		<span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="posters.html#kang"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Abstract</span></span>
+		</p>
+		
+		<p class="fullpaper">
+		<b><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Predictive System Health Monitoring for Large-Scale Hosting Infrastructures</span></b><br>
+		<span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Xiaohui Gu,</span> <i><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >North Carolina State University;</span></i> <span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Haixun Wang,</span> <i><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >IBM T.J. Watson Research</span></i>
+		</p>
+		<p class="paperfiles">
+		<span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="posters.html#gu"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Abstract</span></span>
+		</p>
+		
+		<p class="fullpaper">
+		<b><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Ganesha: Black-Box Fault Diagnosis for MapReduce Systems</span></b><br>
+		<span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Xinghao Pan, Jiaqi Tan, Soila Kavulya, Rajeev Gandhi, and Priya Narasimhan,</span> <i><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Carnegie Mellon University</span></i>
+		</p>	
+		<p class="paperfiles">
+		<span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="posters.html#pan"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Abstract</span></span>
+		</p>
+		
+		<p class="fullpaper">
+		<b><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Using Machine Learning to Auto-tune a Stencil Code on a Multicore Architecture</span></b><br>
+		<span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Archana Ganapathi, Kaushik Datta, Armando Fox, and David Patterson,</span> <i><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >University of California, Berkeley</span></i>
+		</p>
+		<p class="paperfiles">
+		<span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="posters.html#ganapathi"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Abstract</span></span>
+		</p>
+		
+		<!-- 
+		<p class="fullpaper">
+		<b>Detection of Boot-Sequence Termination Events</b><br>
+		Dan Pelleg, Naama Parush, Muli Ben-Yehuda, and Paula Ta-Shma, <i>IBM</i>
+		</p>
+		<p class="paperfiles">
+		<span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="posters.html#pelleg">Abstract</span>
+		</p>
+ 		-->
+		
+		<p class="fullpaper">
+		<b><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Generalization of Machine Learning Based Encrypted Traffic Identification: A Comparison of Two Classifiers</span></b><br>
+		<span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Riyad Alshammari and Nur Zincir-Heywood,</span> <i><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Dalhousie University</span></i>
+		</p>
+		<p class="paperfiles">
+		<span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="posters.html#alshammari"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Abstract</span></span>
+		</p>
+		
+		<p class="fullpaper">
+		<b><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Kudzu: A Self-Balancing P2P File Transfer System</span></b><br>
+		<span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Sean Barker, Marius Catalin Iordan, and Jeannie Albrecht,</span> <i><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Williams College;</span></i> <span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Barath Raghavan,</span> <i><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >University of California, San Diego</span></i>
+		</p>
+		<p class="paperfiles">
+		<span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="posters.html#barker"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Abstract</span></span>
+		</p>
+		</td>
+	</tr>
+
+	<tr>
+		<td class="time"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >3:30 p.m.&ndash;4:30 p.m.</span></td>
+	</tr>
+	
+	<tr>
+		<td><p class="session"><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Oral Session 3</span></p>
+		<p class="fullpaper">
+		<b><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Probabilistic Inference in Queueing Networks</span></b><br>
+		<span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Charles Sutton and Michael I. Jordan,</span> <i><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >University of California, Berkeley</span></i>
+		</p>
+		<p class="paperfiles">
+		<span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Paper in</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="full_papers/sutton/sutton_html/"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >HTML</span></span> <span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="full_papers/sutton/sutton.pdf"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >PDF</span></span>
+		</p>
+		
+		<p class="fullpaper">
+		<b><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >From Optimization to Regret Minimization and Back Again</span></b><br>
+		<span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Ioannis Avramopoulos, Jennifer Rexford, and Robert Schapire,</span> <i><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Deutsche Telekom Laboratories and Princeton University</span></i>
+		</p>
+		<p class="paperfiles">
+		<span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Paper in</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="full_papers/avramopoulos/avramopoulos_html/"><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >HTML</span></span> <span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="paperfiles" href="full_papers/avramopoulos/avramopoulos.pdf"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >PDF</span></span>
+		</p>
+		</td>
+	</tr>
+	
+	<tr>
+		<td class="time"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >4:30 p.m.&ndash;5:00 p.m.</span></td>
+	</tr>
+	
+	<tr>
+		<td>
+		<p class="session"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Wrap-up and Discussion</span></p>
+		</td>
+	</tr>
+
+
+	<tr>
+		<td><img onmousedown="imd(this)" src="/graphics/dot_clear.gif" alt="" height="1" width="1"></td>
+	</tr>
+	
+
+
+</table>
+<!-- END OF PAGE CONTENTS -->
+
+
+</td>
+</tr>
+
+<tr>
+<td colspan="2">
+<!--begin footer-->
+<img onmousedown="imd(this)" src="../art/footer.gif" alt="footer">
+<!--end footer-->
+</td>
+</tr>
+</table>
+<!--end TABLE 1-->
+
+<table width="750">
+<tr>
+<td align="left" valign="top">
+
+<img onmousedown="imd(this)" src="../art/questmark.gif" width=12 height=16 alt="?" hspace=2 align="left">
+<span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Need help?</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/about/contacts.html"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Use our Contacts page.</span></span>
+
+<br clear="left">
+<img onmousedown="imd(this)" src="../art/dot_clear.gif" width=1 height=5 alt=""><br>
+<!-- EDIT THE DATE AND YOUR LOGIN NAME BELOW -->
+<i><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Last changed: 17 Dec. 2008 ch</span>

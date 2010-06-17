@@ -1,0 +1,954 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.umiacs.umd.edu^conferences^stoc2009^program.shtml_2009-08-05__14-45-58.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.umiacs.umd.edu^conferences^stoc2009^program.shtml_2009-08-05__14-45-58.yaml created on Wed Aug 05 17:32:33 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>STOC 2009 - 41st ACM Symposium on Theory of Computing</title>
+  <link rel="shortcut icon" href="Images/umd-icon.ico"/>
+  <link rel="stylesheet" type="text/css" href="CSS/textstyles.css"/>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<div>
+
+<table width="100%" border="0" cellspacing="0" cellpadding="0">
+
+<tr>
+  <td>
+	<!-- Title -->
+	<table border="0" cellpadding="3" style="border-collapse: collapse" width="100%" cellspacing="0">
+	<tr>
+	  <td colspan="2" align="center" valign="top">
+		<table class="titlebar" border="0" cellpadding="0" cellspacing="0" style="border-collapse: collapse" width="100%">
+		<tr>
+		  <td valign="top">
+			<table border="0" cellspacing="0" style="border-collapse: collapse" width="100%">
+			<tr> 
+			  <td><img onmousedown="imd(this)" src="Images/STOC-41-Title-DC.jpg" alt="STOC 2009" title="STOC 2009"/></td>
+			</tr>
+			</table>
+		  </td>
+		</tr>
+		</table>
+	  </td>
+	</tr>
+	
+	<!-- Navigation -->
+	<tr>
+	  <td style="width: 1%; height: 350px" align="center" valign="top">
+		<div> 
+		<table border="0" cellpadding="0" cellspacing="0">
+		<tr>
+		  <td valign="top" style="white-space: nowrap">
+			<div class="sidebar">
+			<div class="sideHead"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >General Information</span></div>
+			  <div class="sideL1"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.shtml" title="Home"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></div>
+			  <div class="sideL1"><span onclick="return false" style="text-decoration:underline; color:blue" href="cfp.shtml" title="Call for Papers"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span></div>
+			  <div class="sideL1"><span onclick="return false" style="text-decoration:underline; color:blue" href="dates.shtml" title="Dates"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Dates</span></span></div>
+			  <div class="sideL1"><span onclick="return false" style="text-decoration:underline; color:blue" href="events.shtml" title="Special Events"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Special Events</span></span></div>
+			<div class="sideHead"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Conference Program</span></div>
+			  <div class="sideL1"><span onclick="return false" style="text-decoration:underline; color:blue" href="accepted.shtml" title="Accepted Papers"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers</span></span></div>
+			  <div class="sideL1Active"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></div>
+			<div class="sideHead"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Attending</span></div>
+			  <div class="sideL1"><span onclick="return false" style="text-decoration:underline; color:blue" href="registration.shtml" title="Registration"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></div>
+			  <div class="sideL1"><span onclick="return false" style="text-decoration:underline; color:blue" href="hotels.shtml" title="Lodging and Hotels"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Lodging and Hotels</span></span></div>
+			  <div class="sideL1"><span onclick="return false" style="text-decoration:underline; color:blue" href="local-info.shtml" title="Local Information"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Local Information</span></span></div>
+			  <div class="sideL1"><span onclick="return false" style="text-decoration:underline; color:blue" href="travel.shtml" title="Travel"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Travel</span></span></div>
+			  <div class="sideL1"><span onclick="return false" style="text-decoration:underline; color:blue" href="travel-support.shtml" title="Travel Support"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Travel Support</span></span></div>
+			<div class="sideHead"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >More Information</span></div>
+			  <div class="sideL1"><span onclick="return false" style="text-decoration:underline; color:blue" href="sponsors.shtml" title="Supporters"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Supporters</span></span></div>
+			  <div class="sideL1"><span onclick="return false" style="text-decoration:underline; color:blue" href="contact.shtml" title="Contact"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Contact</span></span></div>
+			</div>
+		  </td>
+		</tr>
+		</table>
+		</div>
+	
+	  </td>
+	
+	  <td class="mainBody">
+		<table border="0" cellpadding="2" cellspacing="0" style="border-collapse: collapse" width="700px">
+		<tr> 
+		  <td style="width: 100%" class="LargerTextBlack" align="left">
+<!-- ========= Common header ends here and text starts ==============  -->
+
+<p><b style="color:red"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Update!</span></b> <span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >The</span> <b><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Business Meeting</span></b> <span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >on Sunday has been delayed (to provide more time for dinner). It will be from</span> <b><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >8:30-10:00pm</span></b><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >.</span><br/><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+
+<p><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Here is a</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="stoc-program.pdf"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >printable version</span></span> <span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >of this program.</span></p>
+
+<hr/>
+
+<h3><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Conference Information</span></h3>
+
+<p><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >All events will take place in the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://bethesda.hyatt.com/hyatt/hotels/" target="_blank"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Hyatt Regency Bethesda</span></span><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >. The meeting rooms are located on the Ballroom Level of the Hotel (two levels below the main lobby). Coffee breaks and the continental breakfasts will be served in the</span> <b><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Ballroom Foyer</span></b><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >, on the Ballroom Level. The Cartier/Tiffany rooms will be used as a breakout area.</span></p>
+
+<h4><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Registration Desk</span></h4>
+<p><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >The registration desk will be in the</span> <b><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Haverford Foyer</span></b><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >, two levels below the main lobby. It will be open Saturday from 6:00pm-8:00pm and Sun-Tue from 7:30am-6:00pm.</span></p>
+
+<h4><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Internet Access</span></h4>
+<p><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Wireless internet access will be available in the Cartier/Tiffany room, the Ballroom Foyer, and the Crystal Ballroom (all on the Ballroom Level). Information on accessing the wireless will be available at the registration desk.</span></p>
+
+<h4><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Lunches</span></h4>
+<p><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Due to space limitations, lunches will be split between two rooms. Attendees may go to either room.</span></p>
+<ul>
+	<li><b><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Concours Terrace</span></b><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >, located one level above the main lobby in the center of the main atrium of the Hotel.</span></li>
+	<li><b><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Diplomat/Ambassador rooms</span></b><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >, located on the Conference Level, one level above the ballroom.</span></li>
+</ul>
+
+<hr/>
+
+<h3><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Conference Program</span></h3>
+
+<!-- ================================================================ -->
+<p/>
+<table class="schedtab" width="800">
+	<col style="width:15%"/>
+	<col style="width:85%"/>
+	<tr>
+		<th class="schedtab" style="background:#DDFFDD" colspan="2">
+			<span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+			Saturday, May 30</span></th>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >9:15am-5:45pm</span></td>
+		<th class="schedtab" style="background:#EEEEDD"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >&mdash; Les Valiant 60th Birthday Celebration &mdash;</span><br/>
+			<span class="NormalText"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >(Embassy/Chesapeake Suites)</span></span></th>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >6:00pm-8:00pm</span></td>
+		<th class="schedtab" style="background:#EEEEDD"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >&mdash; Registration and Welcome Reception &mdash;</span><br/>
+			<span class="NormalText"> <span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >(Registration: Haverford Foyer) &nbsp; (Reception: Concours Terrace)</span></span></th>
+	</tr>
+</table>
+
+<!-- ================================================================ -->
+<p/>
+<table class="schedtab" width="800">
+	<col style="width:12%"/>
+	<col style="width:44%"/>
+	<col style="width:44%"/>
+	<tr>
+		<th class="schedtab" style="background:#DDFFDD" colspan="3">
+			<span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+			Sunday, May 31</span></th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab" style="background:#EEEEDD"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >7:30-8:30</span></td>
+		<th class="schedtab" colspan="2"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >&mdash; Registration and Continental Breakfast &mdash;</span> <span class="NormalText"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >(Ballroom Foyer)</span></span></th> 
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<th class="schedtab" style="background:#F9F9F2"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></th>
+		<th class="schedtab" style="background:#DDDDFF"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Codes</span> <br/><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Rocco Servedio</span><br/><span class="NormalText"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >(Haverford/Baccarat)</span></span></th>
+		<th class="schedtab" style="background:#DDDDFF"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Complexity I</span> <br/><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Chris Umans</span><br/><span class="NormalText"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >(Waterford/Lalique)</span></span></th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >8:30-8:50</span></td>
+		<td class="schedtab"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Message Passing Algorithms and Improved LP Decoding</span>
+			<br/><i><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >S. Arora, C. Daskalakis and D. Steurer</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Exact Learning of Random DNF Formulas Under the Uniform Distribution</span>
+			<br/><i><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Linda Sellie</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >8:55-9:15</span></td>
+		<td class="schedtab"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >List Decoding Tensor Products and Interleaved codes</span>
+			<br/><i><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >P. Gopalan, V. Guruswami and P. Raghavendra</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Polynomial-time Theory of Matrix Groups</span>
+			<br/><i><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >L. Babai, R. M. Beals and &Aacute;. Seress</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >9:20-9:40</span></td>
+		<td class="schedtab"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Artin Automorphisms, Cyclotomic Function Fields, and Folded List-decodable Codes</span>
+			<br/><i><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Venkatesan Guruswami</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Affine Dispersers from Subspace Polynomials</span>
+			<br/><i><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Eli Ben-Sasson and Swastik Kopparty</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >9:45-10:05</span></td>
+		<td class="schedtab"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >A Deterministic Reduction for the Gap Minimum Distance Problem</span>
+			<br/><i><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Qi Cheng and Daqing Wan</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >On Oblivious PTAS for Nash Equilibrium</span>
+			<br/><i><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >C. Daskalakis and C. H. Papadimitriou</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >10:10-10:30</span></td>
+		<td class="schedtab"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >(Empty)</span></td>
+		<td class="schedtab"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >The Extended BG-Simulation and the Characterization of t-Resiliency</span>
+			<br/><i><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Eli Gafni</span></i></td>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab" style="background:#EEEEDD"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >10:30-11:00</span></td>
+		<th class="schedtab" colspan="2"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >&mdash; Coffee break &mdash;</span> </th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<th class="schedtab" style="background:#F9F9F2"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></th>
+		<th class="schedtab" style="background:#DDDDFF"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Algorithms and Data Structures</span><br/><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Ravi Kumar</span><br/><span class="NormalText"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >(Haverford/Baccarat)</span></span></th>
+		<th class="schedtab" style="background:#DDDDFF"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Property Testing</span><br/><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Anup Rao</span><br/><span class="NormalText"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >(Waterford/Lalique)</span></span></th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >11:00-11:20</span></td>
+		<td class="schedtab"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >An Efficient Algorithm for Partial Order Production</span>
+			<br/><i><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >J. Cardinal, S. Fiorini, G. Joret, R. M. Jungers and J. Ian Munro</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Direct Product Testing: Improved and Derandomized</span>
+			<br/><i><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >R. Impagliazzo, V. Kabanets and A. Wigderson</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >11:25-11:45</span></td>
+		<td class="schedtab"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >A Nearly Optimal Oracle for Avoiding Failed Vertices and Edges</span>
+			<br/><i><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Aaron Bernstein and David Karger</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >On Proximity Oblivious Testing</span>
+			<br/><i><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Oded Goldreich and Dana Ron</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >11:50-12:10</span></td>
+		<td class="schedtab"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Distributed (&Delta;+1)-Coloring in Linear (in &Delta;) Time</span>
+			<br/><i><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Leonid Barenboim and Michael Elkin</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Testing Juntas Nearly Optimally</span>
+			<br/><i><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Eric Blais</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >12:15-12:35</span></td>
+		<td class="schedtab"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Near-Perfect Load Balancing by Randomized Rounding</span>
+			<br/><i><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Tobias Friedrich and Thomas Sauerwald</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Green's Conjecture and Testing Linear-Invariant Properties</span>
+			<br/><i><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Asaf Shapira</span></i></td>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab" style="background:#EEEEDD"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >12:40-2:10</span></td>
+		<th class="schedtab" colspan="2"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >&mdash; Lunch &mdash;</span> <br/><span class="NormalText"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >(Concours Terrace and Diplomat/Ambassador)</span></span> </th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >2:10-3:20</span></td>
+		<th class="schedtab" style="background:#DDDDFF" colspan="2">
+			<span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Athena Lecture</span>
+			<br/><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Shafi Goldwasser</span>
+			<br/><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Cryptography without (hardly any) Secrets?</span>
+			<br/> <span class="NormalText"> <span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Cynthia Dwork &mdash; (Haverford/Baccarat)</span> </span>
+		</th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab" style="background:#EEEEDD"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >3:20-3:50</span></td>
+		<th class="schedtab" colspan="2"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >&mdash; Coffee break &mdash;</span> </th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<th class="schedtab" style="background:#F9F9F2"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></th>
+		<th class="schedtab" style="background:#DDDDFF"><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Crypto I</span><br/><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Shafi Goldwasser</span><br/><span class="NormalText"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >(Haverford/Baccarat)</span></span></th>
+		<th class="schedtab" style="background:#DDDDFF"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Approximation Algorithms I</span><br/><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Nikhil Bansal</span><br/><span class="NormalText"><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >(Waterford/Lalique)</span></span></th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >3:50-4:10</span></td>
+		<td class="schedtab"><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Fully Homomorphic Encryption Using Ideal Lattices</span>
+			<br/><i><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Craig Gentry</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Approximating Edit Distance in Near-Linear Time</span>
+			<br/><i><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Alexandr Andoni and Krzysztof Onak</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >4:15-4:35</span></td>
+		<td class="schedtab"><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >A Unified Framework for Concurrent Security: Universal Composability from Stand-alone Non-malleability</span>
+			<br/><i><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >H. Lin, R. Pass and M. Venkitasubramaniam</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Numerical Linear Algebra in the Streaming Model</span>
+			<br/><i><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Kenneth L. Clarkson and David P. Woodruff</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >4:40-5:00</span></td>
+		<td class="schedtab"><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Non-Malleability Amplification</span>
+			<br/><i><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Huijia Lin and Rafael Pass</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >A Fast and Efficient Algorithm for Low-rank Approximation of a Matrix</span>
+			<br/><i><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Nam H. Nguyen, Thong T. Do and Trac D. Tran</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >5:05-5:25</span></td>
+		<td class="schedtab"><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >3-Query Locally Decodable Codes of Subexponential Length</span>
+			<br/><i><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Klim Efremenko</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >An Improved Constant-Time Approximation Algorithm for Maximum Matchings</span>
+			<br/><i><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Yuichi Yoshida, Masaki Yamamoto and Hiro Ito</span></i></td>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab" style="background:#EEEEDD"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >8:30-10:00</span></td>
+		<th class="schedtab" style="background:#EEEEDD" colspan="2"><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >&mdash; Business Meeting &mdash;</span><br/><span class="NormalText"><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >(Haverford/Baccarat)</span></span></th>
+	</tr>
+</table>
+
+<!-- ================================================================ -->
+<p/>
+<table class="schedtab" width="800">
+	<col style="width:12%"/>
+	<col style="width:44%"/>
+	<col style="width:44%"/>
+	<!-- ============================================================ -->
+	<tr>
+		<th class="schedtab" style="background:#DDFFDD" colspan="3">
+			<span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+			Monday, June 1</span></th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab" style="background:#EEEEDD"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >7:30-8:45</span></td>
+		<th class="schedtab" colspan="2"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >&mdash; Registration and Continental Breakfast &mdash;</span> <span class="NormalText"><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >(Ballroom Foyer)</span></span></th> 
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<th class="schedtab" style="background:#F9F9F2"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></th>
+		<th class="schedtab" style="background:#DDDDFF"><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Graph Cuts and Flows</span><br/><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Chris Umans</span><br/><span class="NormalText"><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >(Haverford/Baccarat)</span></span></th>
+		<th class="schedtab" style="background:#DDDDFF"><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Optimization</span><br/><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Rocco Servedio</span><br/><span class="NormalText"><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >(Waterford/Lalique)</span></span></th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >8:45-9:05</span></td>
+		<td class="schedtab"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Finding Sparse Cuts Locally Using Evolving Sets</span>
+			<br/><i><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Reid Andersen and Yuval Peres</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Integrality Gaps for Sherali-Adams Relaxations</span>
+			<br/><i><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >M. Charikar, K. Makarychev and Y. Makarychev</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >9:10-9:30</span></td>
+		<td class="schedtab"><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >On the Geometry of Graphs with a Forbidden Minor</span>
+			<br/><i><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >James R. Lee and Anastasios Sidiropoulos</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Sherali-Adams Relaxations of the Matching Polytope</span>
+			<br/><i><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Claire Mathieu and Alistair Sinclair</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >9:35-9:55</span></td>
+		<td class="schedtab"><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Twice-Ramanujan Sparsifiers</span>
+			<br/><i><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >J. D. Batson, D. A. Spielman and N. Srivastava</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >CSP Gaps and Reductions in the Lasserre Hierarchy</span>
+			<br/><i><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Madhur Tulsiani</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >10:00-10:20</span></td>
+		<td class="schedtab"><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Max Cut and the Smallest Eigenvalue</span>
+			<br/><i><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Luca Trevisan</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Linear Time Approximation Schemes for the Gale-Berlekamp Game and Related Minimization Problems</span>
+			<br/><i><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Marek Karpinski and Warren Schudy</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >10:25-10:45</span></td>
+		<td class="schedtab"><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Homology Flows, Cohomology Cuts</span>
+			<br/><i><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Erin W. Chambers, Jeff Erickson and Amir Nayyeri</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Non-monotone Submodular Maximization under Matroid and Knapsack Constraints</span>
+			<br/><i><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >J. Lee, V. S. Mirrokni, V. Nagarajan and M. Sviridenkos</span></i></td>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab" style="background:#EEEEDD"><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >10:45-11:15</span></td>
+		<th class="schedtab" colspan="2"><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >&mdash; Coffee break &mdash;</span> </th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<th class="schedtab" style="background:#F9F9F2"><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></th>
+		<th class="schedtab" style="background:#DDDDFF" colspan="2"><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Award Papers &mdash; Chair: Michael Mitzenmacher</span><br/><span class="NormalText"><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >(Haverford/Baccarat)</span></span></th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >11:15-11:40</span></td>
+		<td class="schedtab" colspan="2"><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Public-Key Cryptosystems from the Worst-Case Shortest Vector Problem</span>
+			<br/><i><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Chris Peikert</span></i></td>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >11:40-12:05</span></td>
+		<td class="schedtab" colspan="2"><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >A Constructive Proof of the Lov&aacute;sz Local Lemma</span>
+			<br/><i><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Robin A. Moser</span></i></td>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab" style="background:#EEEEDD"><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >12:05-1:30</span></td>
+		<th class="schedtab" colspan="2"><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >&mdash; Lunch &mdash;</span> <br/><span class="NormalText"><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >(Concours Terrace and Diplomat/Ambassador)</span></span> </th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<th class="schedtab" style="background:#F9F9F2"><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></th>
+		<th class="schedtab" style="background:#DDDDFF"><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >Privacy</span><br/><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Ravi Kumar</span><br/><span class="NormalText"><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >(Haverford/Baccarat)</span></span></th>
+		<th class="schedtab" style="background:#DDDDFF"><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Quantum</span><br/><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Anup Rao</span><br/><span class="NormalText"><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >(Waterford/Lalique)</span></span></th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >1:30-1:50</span></td>
+		<td class="schedtab"><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Universally Utility-Maximizing Privacy Mechanisms</span>
+			<br/><i><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >A. Ghosh, T. Roughgarden and M. Sundararajan</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Quantum Algorithms Using the Curvelet Transform</span>
+			<br/><i><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Yi-Kai Liu</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >1:55-2:15</span></td>
+		<td class="schedtab"><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Private Coresets</span>
+			<br/><i><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Dan Feldman, Amos Fiat, Haim Kaplan and Kobbi Nissim</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Short Seed Extractors against Quantum Storage</span>
+			<br/><i><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Amnon Ta-Shma</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >2:20-2:40</span></td>
+		<td class="schedtab"><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Differential Privacy and Robust Statistics</span>
+			<br/><i><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Cynthia Dwork and Jing Lei</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Discrete-time Simulations of Continuous-time Quantum Query Algorithms</span>
+			<br/><i><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >R. Cleve, D. Gottesman, M. Mosca, R. Somma and D. Yonge-Mallo</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >2:45-3:05</span></td>
+		<td class="schedtab"><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >On the Complexity of Differentially Private Data Release</span>
+			<br/><i><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >C. Dwork, M. Naor, O. Reingold, G. Rothblum and S. Vadhan</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >The Detectability Lemma and Quantum Gap Amplification</span>
+			<br/><i><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >D. Aharonov, I. Arad, Z. Landau and U. Vazirani</span></i></td>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab" style="background:#EEEEDD"><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >3:05-3:35</span></td>
+		<th class="schedtab" colspan="2"><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >&mdash; Coffee break &mdash;</span> </th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<th class="schedtab" style="background:#F9F9F2"><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></th>
+		<th class="schedtab" style="background:#DDDDFF"><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >Graphs</span><br/><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Rasmus Pagh</span><br/><span class="NormalText"><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >(Haverford/Baccarat)</span></span></th>
+		<th class="schedtab" style="background:#DDDDFF"><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Complexity II</span><br/><span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Jonathan Katz</span><br/><span class="NormalText"><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >(Waterford/Lalique)</span></span></th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >3:35-3:55</span></td>
+		<td class="schedtab"><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >Affiliation Networks</span>
+			<br/><i><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >Silvio Lattanzi and D. Sivakumar</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >On the Complexity of Communication Complexity</span>
+			<br/><i><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >Eyal Kushilevitz and Enav Weinreb</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >4:00-4:20</span></td>
+		<td class="schedtab"><span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >Fault-Tolerant Spanners for General Graphs</span>
+			<br/><i><span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >S. Chechik, M. Langberg, D. Peleg and L. Roditty</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >Bit-Probe Lower Bounds for Succinct Data Structures</span>
+			<br/><i><span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >Emanuele Viola</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >4:25-4:45</span></td>
+		<td class="schedtab"><span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >Hadwiger's Conjecture is Decidable</span>
+			<br/><i><span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >Ken-ichi Kawarabayashi and Bruce Reed</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >Randomly Supported Independence and Resistance</span>
+			<br/><i><span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >Per Austrin and Johan H&aring;stad</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >4:50-5:10</span></td>
+		<td class="schedtab"><span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >Finding, Minimizing, and Counting Weighted Subgraphs</span>
+			<br/><i><span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >Virginia Vassilevska and Ryan Williams</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >Conditional Hardness for Satisfiable-3CSPs</span>
+			<br/><i><span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >Ryan O'Donnell and Yi Wu</span></i></td>
+	</tr>
+	<!-- ============================================================ -->
+</table>
+
+<!-- ================================================================ -->
+<p/>
+<table class="schedtab" width="800">
+	<col style="width:12%"/>
+	<col style="width:44%"/>
+	<col style="width:44%"/>
+	<!-- ============================================================ -->
+	<tr>
+		<th class="schedtab" style="background:#DDFFDD" colspan="3">
+			<span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+			Tuesday, June 2</span></th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab" style="background:#EEEEDD"><span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >7:30-8:45</span></td>
+		<th class="schedtab" colspan="2"><span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >&mdash; Registration and Continental Breakfast &mdash;</span> <span class="NormalText"><span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >(Ballroom Foyer)</span></span></th> 
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<th class="schedtab" style="background:#F9F9F2"><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></th>
+		<th class="schedtab" style="background:#DDDDFF"><span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >Economics</span><br/><span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Nicole Immorlica</span><br/><span class="NormalText"><span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >(Haverford/Baccarat)</span></span></th>
+		<th class="schedtab" style="background:#DDDDFF"><span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >Markov Chains</span><br/><span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Michael Mitzenmacher</span><br/><span class="NormalText"><span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >(Waterford/Lalique)</span></span></th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >8:45-9:05</span></td>
+		<td class="schedtab"><span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >A New Approach to Auctions and Resilient Mechanism Design</span>
+			<br/><i><span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >Jing Chen and Silvio Micali</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >How Long Does it Take to Catch a Wild Kangaroo?</span>
+			<br/><i><span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >Ravi Montenegro and Prasad Tetali</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >9:10-9:30</span></td>
+		<td class="schedtab"><span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >Intrinsic Robustness of the Price of Anarchy</span>
+			<br/><i><span class="coloringspan" id="282" onmousedown="md(this)" onmouseup="mu(this)" >Tim Roughgarden</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="283" onmousedown="md(this)" onmouseup="mu(this)" >Random Walks on Polytopes and an Affine Interior Point Method for Linear Programming</span>
+			<br/><i><span class="coloringspan" id="284" onmousedown="md(this)" onmouseup="mu(this)" >Ravi Kannan and Hariharan Narayanan</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="285" onmousedown="md(this)" onmouseup="mu(this)" >9:35-9:55</span></td>
+		<td class="schedtab"><span class="coloringspan" id="286" onmousedown="md(this)" onmouseup="mu(this)" >On the Convergence of Regret Minimization Dynamics in Concave Games</span>
+			<br/><i><span class="coloringspan" id="287" onmousedown="md(this)" onmouseup="mu(this)" >Eyal Even-Dar, Yishay Mansour and Uri Nadav</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="288" onmousedown="md(this)" onmouseup="mu(this)" >Mixing Time for the Solid-on-Solid Model</span>
+			<br/><i><span class="coloringspan" id="289" onmousedown="md(this)" onmouseup="mu(this)" >Fabio Martinelli and Alistair Sinclair</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="290" onmousedown="md(this)" onmouseup="mu(this)" >10:00-10:20</span></td>
+		<td class="schedtab"><span class="coloringspan" id="291" onmousedown="md(this)" onmouseup="mu(this)" >Multiplicative Updates Outperform Generic No-regret Learning in Congestion Games</span>
+			<br/><i><span class="coloringspan" id="292" onmousedown="md(this)" onmouseup="mu(this)" >Robert Kleinberg, Georgios Piliouras and Eva Tardos</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="293" onmousedown="md(this)" onmouseup="mu(this)" >Reconstruction for the Potts Model</span>
+			<br/><i><span class="coloringspan" id="294" onmousedown="md(this)" onmouseup="mu(this)" >Allan Sly</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="295" onmousedown="md(this)" onmouseup="mu(this)" >10:25-10:45</span></td>
+		<td class="schedtab"><span class="coloringspan" id="296" onmousedown="md(this)" onmouseup="mu(this)" >MaxMin Allocation via Degree Lower-bounded Arborescences</span>
+			<br/><i><span class="coloringspan" id="297" onmousedown="md(this)" onmouseup="mu(this)" >M. Bateni, M. Charikar and V. Guruswami</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="298" onmousedown="md(this)" onmouseup="mu(this)" >Tight Lower Bounds for Greedy Routing in Uniform Small World Rings</span>
+			<br/><i><span class="coloringspan" id="299" onmousedown="md(this)" onmouseup="mu(this)" >Martin Dietzfelbinger and Philipp Woelfel</span></i></td>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab" style="background:#EEEEDD"><span class="coloringspan" id="300" onmousedown="md(this)" onmouseup="mu(this)" >10:45-11:15</span></td>
+		<th class="schedtab" colspan="2"><span class="coloringspan" id="301" onmousedown="md(this)" onmouseup="mu(this)" >&mdash; Coffee break &mdash;</span> </th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<th class="schedtab" style="background:#F9F9F2"><span class="coloringspan" id="302" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></th>
+		<th class="schedtab" style="background:#DDDDFF"><span class="coloringspan" id="303" onmousedown="md(this)" onmouseup="mu(this)" >Crypto II</span><br/><span class="coloringspan" id="304" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Jonathan Katz</span><br/><span class="NormalText"><span class="coloringspan" id="305" onmousedown="md(this)" onmouseup="mu(this)" >(Haverford/Baccarat)</span></span></th>
+		<th class="schedtab" style="background:#DDDDFF"><span class="coloringspan" id="306" onmousedown="md(this)" onmouseup="mu(this)" >Geometry</span><br/><span class="coloringspan" id="307" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Rasmus Pagh</span><br/><span class="NormalText"><span class="coloringspan" id="308" onmousedown="md(this)" onmouseup="mu(this)" >(Waterford/Lalique)</span></span></th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="309" onmousedown="md(this)" onmouseup="mu(this)" >11:15-11:35</span></td>
+		<td class="schedtab"><span class="coloringspan" id="310" onmousedown="md(this)" onmouseup="mu(this)" >Non-Malleable Extractors and Symmetric Key Cryptography from Weak Secrets</span>
+			<br/><i><span class="coloringspan" id="311" onmousedown="md(this)" onmouseup="mu(this)" >Yevgeniy Dodis and Daniel Wichs</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="312" onmousedown="md(this)" onmouseup="mu(this)" >Every Planar Graph is the Intersection Graph of Segments in the Plane</span>
+			<br/><i><span class="coloringspan" id="313" onmousedown="md(this)" onmouseup="mu(this)" >Jeremie Chalopin and Daniel Goncalves</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="314" onmousedown="md(this)" onmouseup="mu(this)" >11:40-12:00</span></td>
+		<td class="schedtab"><span class="coloringspan" id="315" onmousedown="md(this)" onmouseup="mu(this)" >Inaccessible Entropy</span>
+			<br/><i><span class="coloringspan" id="316" onmousedown="md(this)" onmouseup="mu(this)" >I. Haitner, O. Reingold, S. Vadhan and H. Wee</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="317" onmousedown="md(this)" onmouseup="mu(this)" >Small-size &epsilon;-nets for Axis-Parallel Rectangles and Boxes</span>
+			<br/><i><span class="coloringspan" id="318" onmousedown="md(this)" onmouseup="mu(this)" >Boris Aronov, Esther Ezra and Micha Sharir</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="319" onmousedown="md(this)" onmouseup="mu(this)" >12:05-12:25</span></td>
+		<td class="schedtab"><span class="coloringspan" id="320" onmousedown="md(this)" onmouseup="mu(this)" >On Cryptography with Auxiliary Input</span>
+			<br/><i><span class="coloringspan" id="321" onmousedown="md(this)" onmouseup="mu(this)" >Yevgeniy Dodis, Yael Tauman Kalai and Shachar Lovett</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="322" onmousedown="md(this)" onmouseup="mu(this)" >Explicit Construction of a Small &epsilon;-net for Linear Threshold Functions</span>
+			<br/><i><span class="coloringspan" id="323" onmousedown="md(this)" onmouseup="mu(this)" >Yuval Rabani and Amir Shpilka</span></i></td>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab" style="background:#EEEEDD"><span class="coloringspan" id="324" onmousedown="md(this)" onmouseup="mu(this)" >12:30-2:00</span></td>
+		<th class="schedtab" colspan="2"><span class="coloringspan" id="325" onmousedown="md(this)" onmouseup="mu(this)" >&mdash; Lunch &mdash;</span> <br/><span class="NormalText"><span class="coloringspan" id="326" onmousedown="md(this)" onmouseup="mu(this)" >(Concours Terrace and Diplomat/Ambassador)</span></span> </th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<th class="schedtab" style="background:#F9F9F2"><span class="coloringspan" id="327" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></th>
+		<th class="schedtab" style="background:#DDDDFF"><span class="coloringspan" id="328" onmousedown="md(this)" onmouseup="mu(this)" >Approximation Algorithms II</span><br/><span class="coloringspan" id="329" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Michael Mitzenmacher</span><br/><span class="NormalText"><span class="coloringspan" id="330" onmousedown="md(this)" onmouseup="mu(this)" >(Haverford/Baccarat)</span></span></th>
+		<th class="schedtab" style="background:#DDDDFF"><span class="coloringspan" id="331" onmousedown="md(this)" onmouseup="mu(this)" >Complexity III</span><br/><span class="coloringspan" id="332" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Jonathan Kelner</span><br/><span class="NormalText"><span class="coloringspan" id="333" onmousedown="md(this)" onmouseup="mu(this)" >(Waterford/Lalique)</span></span></th>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="334" onmousedown="md(this)" onmouseup="mu(this)" >2:00-2:20</span></td>
+		<td class="schedtab"><span class="coloringspan" id="335" onmousedown="md(this)" onmouseup="mu(this)" >A Constant-Factor Approximation for Stochastic Steiner Forest</span>
+			<br/><i><span class="coloringspan" id="336" onmousedown="md(this)" onmouseup="mu(this)" >Anupam Gupta and Amit Kumar</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="337" onmousedown="md(this)" onmouseup="mu(this)" >An Axiomatic Approach to Algebrization</span>
+			<br/><i><span class="coloringspan" id="338" onmousedown="md(this)" onmouseup="mu(this)" >R. Impagliazzo, V. Kabanets and A. Kolokolova</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="339" onmousedown="md(this)" onmouseup="mu(this)" >2:25-2:45</span></td>
+		<td class="schedtab"><span class="coloringspan" id="340" onmousedown="md(this)" onmouseup="mu(this)" >Multiple Intents Re-Ranking</span>
+			<br/><i><span class="coloringspan" id="341" onmousedown="md(this)" onmouseup="mu(this)" >Yossi Azar, Iftah Gamzu and Xiaoxin Yin</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="342" onmousedown="md(this)" onmouseup="mu(this)" >Random Graphs and the Parity Quantifier</span>
+			<br/><i><span class="coloringspan" id="343" onmousedown="md(this)" onmouseup="mu(this)" >Phokion Kolaitis, Swastik Kopparty</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="344" onmousedown="md(this)" onmouseup="mu(this)" >2:50-3:10</span></td>
+		<td class="schedtab"><span class="coloringspan" id="345" onmousedown="md(this)" onmouseup="mu(this)" >A Competitive Algorithm for Minimizing Weighted Flow Time on Unrelated Machines with Speed Augmentation</span>
+			<br/><i><span class="coloringspan" id="346" onmousedown="md(this)" onmouseup="mu(this)" >J. S. Chadha, N. Garg, A. Kumar and V. N. Muralidhara</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="347" onmousedown="md(this)" onmouseup="mu(this)" >Holant Problems and Counting CSP</span>
+			<br/><i><span class="coloringspan" id="348" onmousedown="md(this)" onmouseup="mu(this)" >Jin-Yi Cai, Pinyan Lu and Mingji Xia</span></i></td>
+	</tr>
+	<tr>
+		<td class="schedtab"><span class="coloringspan" id="349" onmousedown="md(this)" onmouseup="mu(this)" >3:15-3:35</span></td>
+		<td class="schedtab"><span class="coloringspan" id="350" onmousedown="md(this)" onmouseup="mu(this)" >Online and Stochastic Survivable Network Design</span>
+			<br/><i><span class="coloringspan" id="351" onmousedown="md(this)" onmouseup="mu(this)" >Anupam Gupta, Ravishankar Krishnaswamy and R. Ravi</span></i></td>
+		<td class="schedtab"><span class="coloringspan" id="352" onmousedown="md(this)" onmouseup="mu(this)" >A New Line of Attack on the Dichotomy Conjecture</span>
+			<br/><i><span class="coloringspan" id="353" onmousedown="md(this)" onmouseup="mu(this)" >Gabor Kun and Mario Szegedy</span></i></td>
+	</tr>
+	<!-- ============================================================ -->
+	<tr>
+		<td class="schedtab" style="background:#EEEEDD"><span class="coloringspan" id="354" onmousedown="md(this)" onmouseup="mu(this)" >3:35</span></td>
+		<th class="schedtab" colspan="2"><span class="coloringspan" id="355" onmousedown="md(this)" onmouseup="mu(this)" >&mdash; Conference Ends &mdash;</span></th>
+	</tr>
+	<!-- ============================================================ -->
+</table>
+
+<!-- ========= Main text ends and common trailer starts =============  -->
+		  </td>
+		</tr>
+		</table>
+	  </td>
+	</tr>
+	</table>
+  </td>
+</tr>
+
+<tr>
+  <td>
+	<hr/>
+	<p style="text-align: center">
+		<span class="coloringspan" id="356" onmousedown="md(this)" onmouseup="mu(this)" >- &nbsp;</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="index.shtml"><span class="coloringspan" id="357" onmousedown="md(this)" onmouseup="mu(this)" >STOC 2009 Home</span></span> <span class="coloringspan" id="358" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; -</span>

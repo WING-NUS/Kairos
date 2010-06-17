@@ -1,0 +1,921 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<!-- DW6 -->
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^icgi08.irisa.fr^programme.html_2009-08-05__14-24-57.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^icgi08.irisa.fr^programme.html_2009-08-05__14-24-57.yaml created on Wed Aug 05 17:31:16 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<!-- Copyright 2005 Macromedia, Inc. All rights reserved. -->
+<title>Page d'accueil</title>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+<link rel="stylesheet" href="img/mm_health_nutr.css" type="text/css" />
+<script language="JavaScript" type="text/javascript">
+//--------------- LOCALIZEABLE GLOBALS---------------
+var d=new Date();
+monthname= new Array("Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre");
+//Ensure correct for language. English is "January 1, 2004"
+var TODAY = monthname[d.getMonth()] + " " + d.getDate() + ", " + d.getFullYear();
+//--------------- END LOCALIZEABLE   ---------------
+</script>
+<style type="text/css">
+<!--
+body {
+	margin-right: 0px;
+}
+.Style1 {
+	font-size: 12px;
+	font-weight: bold;
+}
+.Style2 {font-size: 12px}
+.Style3 {color: #993300}
+.Style4 {
+	color: #993300;
+	font-size: 12px;
+	font-weight: bold;
+}
+.Style5 {font-size: 12px; font-style: italic; }
+.Style6 {font-size: 9px}
+.Style23 {font-size: 12px; font-weight: bold; font-family: Arial, Helvetica, sans-serif; }
+.Style27 {
+	color: #FF0000;
+	font-weight: bold;
+}
+.Style28 {font-size: 12px; font-weight: bold; color: #FF0000; }
+.Style29 {font-family: Arial, Helvetica, sans-serif; font-size: 12px;}
+.Style32 {font-size: 12px; font-weight: bold; color: #000000; }
+.Style33 {font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-style: italic; }
+.Style36 {color: #FF0000; font-weight: bold; font-size: 14; }
+.Style38 {font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #666666; }
+.Style39 {font-size: 14px; font-weight: bold; }
+.Style41 {color: #FFFFFF; font-size: 14px; }
+.Style42 {
+	font-size: 20px;
+	font-weight: bold;
+	color: #993300;
+}
+-->
+</style></head>
+<body onload="on_load()" onkeyup="on_key_up(event)" bgcolor="#F4FFE4"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<table width="106%" border="0" cellspacing="0" cellpadding="0">
+  <tr bgcolor="#D5EDB3">
+    <td colspan="3" rowspan="2" bgcolor="#FFFFCC"><p><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span><img onmousedown="imd(this)" src="img/icgi_bonw3.gif" alt="icgi" width="167" height="59" /></p>    </td>
+    <td height="50" colspan="3" align="center" valign="bottom" bgcolor="#FFFFCC" id="logo"><br />
+      <span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >9th International Colloquium</span> <br />
+      <span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >on Grammatical Inference</span><br />
+    <span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >St Malo, Britanny, France.</span></td>
+    <td width="232" rowspan="2" bgcolor="#FFFFCC"><div align="left"><img onmousedown="imd(this)" src="img/sillon.jpg" alt="Header image" width="229" height="171" border="0" align="middle" /><br />
+    <small><small><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >photo by</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.flickr.com/photos/galeopics/"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >galeopics</span></span></small></small></div></td>
+  </tr>
+
+  <tr bgcolor="#D5EDB3">
+    <td height="51" colspan="3" align="center" valign="top" bgcolor="#FFFFCC" id="tagline"><p><br />
+        <span class="Style1"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >September 22(Monday) -</span> <br />
+      <span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >24(Wednesday), 2008</span></span></p>    </td>
+  </tr>
+
+  <tr>
+    <td colspan="7" bgcolor="#6666FF"><img onmousedown="imd(this)" src="img/mm_spacer.gif" alt="" width="1" height="2" border="0" /></td>
+  </tr>
+
+  <tr>
+    <td colspan="7" bgcolor="#FFFFCC"><img onmousedown="imd(this)" src="img/mm_dashed_line.gif" alt="line decor" width="4" height="3" border="0" /></td>
+  </tr>
+
+  <tr bgcolor="#99CC66">
+  	<td height="20" colspan="7" bgcolor="#006699" id="dateformat"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span><script language="JavaScript" type="text/javascript">
+      document.write(TODAY);	</script>	</td>
+  </tr>
+  <tr>
+    <td colspan="7" bgcolor="#FFFFCC"><img onmousedown="imd(this)" src="img/mm_dashed_line.gif" alt="line decor" width="4" height="3" border="0" /></td>
+  </tr>
+
+  <tr>
+    <td colspan="7" bgcolor="#6666FF"><img onmousedown="imd(this)" src="img/mm_spacer.gif" alt="" width="1" height="2" border="0" /></td>
+  </tr>
+
+ <tr>
+    <td width="165" valign="top" bgcolor="#006699">
+	<table border="0" cellspacing="0" cellpadding="0" width="165" id="navigation">
+        <tr>
+          <td width="165"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+		 <span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br /></td>
+        </tr>
+        <tr>
+          <td width="165"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html" class="navText"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></td>
+        </tr>
+        <tr>
+          <td><span onclick="return false" style="text-decoration:underline; color:blue" href="call-for-papers.html" class="navText"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Call for papers</span> </span></td>
+        </tr>
+        <tr>
+          <td width="165"><span onclick="return false" style="text-decoration:underline; color:blue" href="submission.html" class="navText"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Submission</span> </span></td>
+        </tr>
+        <tr>
+          <td width="165"><span onclick="return false" style="text-decoration:underline; color:blue" href="committees.html" class="navText"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span> </span></td>
+        </tr>
+        <tr>
+          <td width="165"><span onclick="return false" style="text-decoration:underline; color:blue" href="programme.html" class="navText"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Programme</span></span></td>
+        </tr>
+        <tr>
+          <td width="165"><span onclick="return false" style="text-decoration:underline; color:blue" href="registration.html" class="navText"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></td>
+        </tr>
+        <tr>
+          <td width="165"><span onclick="return false" style="text-decoration:underline; color:blue" href="venue.html" class="navText"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Venue</span></span></td>
+        </tr>
+        <tr>
+          <td width="165"><span onclick="return false" style="text-decoration:underline; color:blue" href="accommodation.html" class="navText"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation</span></span></td>
+        </tr>
+        <tr>
+          <td><span onclick="return false" style="text-decoration:underline; color:blue" href="social-event.html" class="navText"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Social Event</span>  </span></td>
+        </tr>
+        <tr>
+          <td><span onclick="return false" style="text-decoration:underline; color:blue" href="past-conferences.html" class="navText"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >ICGI Past Conferences</span> </span></td>
+        </tr>
+      </table>
+ 	<span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" > </span><br />
+ 	<span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+  	<span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+  	<span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br /> 	</td>
+    <td width="19" bgcolor="#FFFFCC"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+    <td colspan="5" valign="top" bgcolor="#FFFFCC"><img onmousedown="imd(this)" src="img/mm_spacer.gif" alt="" width="305" height="1" border="0" /><br />
+      <h5 align="center"><span class="quote Style3"><strong><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >FINAL PROGRAMME</span></strong><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></span></h5>
+      <table width="100%" border="0" cellspacing="10">
+        
+        
+        <tr class="subHeader">
+          <td colspan="2" bgcolor="#33FFFF" class="Style4"><div align="justify">
+            <p class="Style32"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >The proceedings of ICGI-2008 are published by Springer-Verlag as volume 5278 in their Lecture Notes in Articifial Intelligence, a subseries of the Lecture Notes in Computer Science series. LNAI 5278 is now available online. You can find information about it at</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.springeronline.com/978-3-540-88008-0" target="_blank"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >http://www.springeronline.com/978-3-540-88008-0</span></span> <span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >or access the online version at</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.springerlink.com/content/978-3-540-88008-0/" target="_blank"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >http://www.springerlink.com/content/978-3-540-88008-0/</span></span> </p>
+            <p class="Style32"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Presentations have been video-recorded and can be viewed on the VIDEOLECTURES.net website at</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://videolectures.net/icgi08_saint_malo/" target="_blank"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >http://videolectures.net/icgi08_saint_malo/</span></span> </p>
+          </div></td>
+        </tr>
+        <tr class="subHeader">
+          <td colspan="2" bgcolor="#CCFF99" class="Style4"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Invited Speakers :</span> </td>
+        </tr>
+        <tr class="Style36">
+          <td colspan="2" class="Style39"><p><span class="Style27"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Fran&ccedil;ois YVON (LIMSI, Paris - France)</span></span><br />
+            <em><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Grammatical Inference: news from the Machine Translation front</span></em></p>
+            <p>              <span class="Style27"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Yasubumi SAKAKIBARA (Keio University,Department of Biosciences and Informatics, Japan)</span></span><br />
+                  <em><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Bio-molecular computing of finite-state automata</span> </em><br />
+            </p></td>
+        </tr>
+        <tr>
+          <td colspan="2" bgcolor="#CCFF99" class="subHeader Style2"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Final programme</span> </td>
+        </tr>
+        <tr>
+          <td colspan="2" bgcolor="#006699" class="subHeader Style2"><div align="center" class="Style41"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Monday September 22, 2008</span> </div></td>
+        </tr>
+        <tr valign="top">
+          <td colspan="2" bgcolor="#CCFF99" class="subHeader Style2"><table width="100%" border="0">
+            <tr>
+              <td width="16%" valign="top" bgcolor="#FFFFCC" class="Style28"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >08:30 - 09:00</span> </td>
+              <td width="84%" valign="top" bgcolor="#FFFFCC"><span class="Style27"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Registration of participants</span></span> </td>
+            </tr>
+            <tr>
+              <td valign="top" bgcolor="#FFFFCC" class="Style32"><p><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >09:00 - 10:30</span></p>
+                <p><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+                <p align="center"><span class="Style4"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Session 1</span> </span> </p>                </td>
+              <td valign="top" bgcolor="#FFFFCC" class="Style29"><p class="Style29"><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_01/cdlh-icgi08talk.ppt"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Learning languages from bounded resources: the case of the DFA and the balls of strings</span></span><br />
+                    <em><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Collin de la Higuera, Jean-Christophe Janodet and Fr&eacute;d&eacute;ric Tantini</span></em></p>
+                <p><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_01/kinber-icgi08talk.ppt"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >On learning regular expressions and patterns via membership and correction queries</span></span><br />
+                <em><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Efim Kinber</span>                  </em></p>
+                <p><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_01/Cristina_Tirnauca-icgi08talk.pdf"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >A note on the relationship between different types of correction queries</span></span><br />
+                <em><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Cristina Tirnauca</span></em></p></td>
+            </tr>
+            <tr>
+              <td valign="top" bgcolor="#FFCC99" class="Style32"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >10:30 - 11:00</span> </td>
+              <td valign="top" bgcolor="#FFCC99" class="Style23"><div align="center"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span> </div></td>
+            </tr>
+            <tr>
+              <td valign="top" bgcolor="#FFFFCC" class="Style32"><p><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >11:00 - 12:00</span> </p>
+                <p align="center"><span class="Style4"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Session 2</span></span></p>                </td>
+              <td valign="top" bgcolor="#FFFFCC" class="Style29"><p class="Style29"><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_02/Tajima_Kotani-icgi08talk.ppt"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Polynomial time probabilistic learning of a subclasss of linear languages with queries</span></span>                    <br />
+                    <em><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Yasuhiro Tajima and Yoshiyuki Kotani</span></em></p>
+                <p class="Style29"><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_02/Sempere-icgi08talk.pdf"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Learning context sensitive languages from linear structural information</span></span><br />
+                  <em><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Jose M. Sempere</span></em></p></td>
+            </tr>
+            <tr>
+              <td valign="top" bgcolor="#99CCFF" class="Style32"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >12:00 - 14:00</span> </td>
+              <td valign="top" bgcolor="#99CCFF" class="Style23"><div align="center"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></div></td>
+            </tr>
+            <tr>
+              <td valign="top" bgcolor="#FFFFCC" class="Style32"><p><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >14:00 - 15:30</span> </p>
+                <p align="center"><span class="Style4"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Session 3</span></span></p></td>
+              <td valign="top" bgcolor="#FFFFCC" class="Style29"><p class="Style27"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Invited talk:</span><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_03/FrancoisYvon-icgi08talk.pdf"> <span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Grammatical Inference: news from the Machine Translation front</span></span><br />
+                <em><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Fran&ccedil;ois YVON</span></em></p>
+                <p>                  <span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_03/LeoBecerra-icgi08talk.ppt"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Learning meaning before syntax</span></span> <br />
+                  <em><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Dana Angluin and Leonor Becerra-Bonache</span></em></p></td>
+            </tr>
+            <tr>
+              <td height="32" valign="top" bgcolor="#FFFFCC" class="Style32"><br />
+                <span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >15:30 - 16:30</span> </td>
+              <td valign="top" bgcolor="#FFFFCC" class="Style23"><div align="left" class="Style4"><br />
+                <span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Posters session</span><br />
+                <br />
+</div></td>
+            </tr>
+            <tr>
+              <td valign="top" bgcolor="#FFFFCC" class="Style32"><p><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >16:30 - 18:00</span> </p>
+                <p align="center"><span class="Style4"><br />
+                <span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Session 4</span> </span></p></td>
+              <td valign="top" bgcolor="#FFFFCC" class="Style29"><p class="Style29"><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_04/ry-icgi08talk.pdf"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Identification in the limit of $k,I$-substitutable context-free languages</span></span> <br />
+                    <em><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Ryo Yoshinaka</span></em></p>
+                <p><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_04/clark-icgi08talk.pdf"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >A polynomial algorithm for the inference of context free languages</span></span><br />
+                  <em><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Alexander Clark, R&eacute;mi Eyraud and Amaury Habrard</span></em></p>
+                <p><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_04/tellier-icgi08talk.pdf"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >How to split recursive automata</span></span><br />
+                <em><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Isabelle Tellier</span>                  </em></p></td>
+            </tr>
+            <tr>
+              <td valign="top" bgcolor="#FFFFCC" class="Style32"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >18:00</span></td>
+              <td valign="top" bgcolor="#FFFFCC" class="Style29"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >&quot;Ap&eacute;ritif&quot;</span></td>
+            </tr>
+          </table></td>
+        </tr>
+        <tr>
+          <td colspan="2" bgcolor="#006699" class="subHeader Style2"><div align="center"><span class="Style41"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday September 23, 2008</span> </span></div></td>
+        </tr>
+        <tr>
+          <td colspan="2" bgcolor="#CCFF99" class="subHeader Style2"><table width="100%" border="0">
+
+              <tr>
+                <td width="15%" valign="top" bgcolor="#FFFFCC" class="Style32"><p><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >08:30 - 10:00</span></p>
+                <p align="center"><span class="Style4"><br />
+                <span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Session 5</span></span> </p></td>
+                <td width="85%" valign="top" bgcolor="#FFFFCC" class="Style29"><p class="Style29"><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_05/cano_rpnicom-icgi08talk.pdf"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Learning commutative regular languages</span></span><br />
+                      <em><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Antonio Cano Gomez and Gloria In&eacute;s Alvarez</span></em></p>
+                  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_05/pdupont-icgi08talk.pdf"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >State-merging DFA induction algorithms with mandatory merge constraints</span> </span><br />
+                  <em><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Bernard Lambeau, Christophe Damas and Pierre Dupont</span>  </em></p>
+                  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_05/neil-icgi08talk.pdf"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Evaluation and Comparison of inferred regular grammars</span></span> <br />
+                  <em><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Neil Walkinshaw, Kirill Bogdanov and Ken Johnson</span> </em></p></td>
+              </tr>
+              <tr>
+                <td bgcolor="#FFCC99" class="Style32"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >10:00 - 10:30</span> </td>
+                <td bgcolor="#FFCC99" class="Style23"><div align="center"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span> </div></td>
+              </tr>
+              <tr>
+                <td valign="top" bgcolor="#FFFFCC" class="Style32"><p><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >10:30 - 12:00</span></p>
+                <p align="center"><span class="Style4"><br />
+                <span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Session 6</span> </span> </p></td>
+                <td valign="top" bgcolor="#FFFFCC" class="Style29"><p class="Style29"><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_06/Gavalda-icgi08talk.pdf"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Towards feasible PAC-learning probabilistic deterministic finite automata</span></span>  <br />
+                      <em><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Jorge Castro Rabal and Ricard Gavalda</span> </em></p>
+                  <p class="Style29"><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_06/AH-icgi08talk.pdf"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Relevant reprsentations for the inference of rational stochastic tree languages</span></span> <br />
+                  <em><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Fran&ccedil;ois Denis, Edouard Gilbert, Amaury Habrard, Faissal Ouardi and Marc Tommasi</span></em></p>
+                <p><span class="Style29"><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_06/Tu-icgi08talk.ppt"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Unsupervised learning of probabilistic context-free grammar using iterative biclustering</span></span></span><span class="Style33"><br />
+  <span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Kewei tu and Vasant Honavar</span> </span></p></td>
+              </tr>
+              <tr>
+                <td bgcolor="#99CCFF" class="Style32"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >12:00 - 13:45</span> </td>
+                <td bgcolor="#99CCFF" class="Style23"><div align="center"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></div></td>
+              </tr>
+              <tr>
+                <td valign="top" bgcolor="#FFFFCC" class="Style32"><p><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >13:45 - 14:45</span></p>
+                <p align="center"><span class="Style4"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Session 7</span></span></p></td>
+                <td valign="top" bgcolor="#FFFFCC" class="Style29"><p class="Style27"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Invited talk:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_07/YasubumiSakakibara-icgi08talk.ppt"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Bio-molecular computing of finite-state automata</span></span> <br />  
+                    <em><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Yasubumi SAKAKIBARA</span></em></p>                </td>
+              </tr>
+              <tr>
+                <td bgcolor="#FFCC99" class="Style32"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >15:00</span> </td>
+                <td valign="top" bgcolor="#FFCC99" class="Style23"><div align="center"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Social event</span><br />
+                  <span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Start to Le Mont Saint Michel (by bus)</span><br />
+                  <span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Guided visit of the Abbey ans &quot;Gala&quot; dinner at M&egrave;re Poulard's restaurant</span>
+</div></td>
+              </tr>
+
+          </table></td>
+        </tr>
+        <tr>
+          <td colspan="2" bgcolor="#006699" class="subHeader Style2"><div align="center"><span class="Style41"><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday September 24, 2008</span> </span></div></td>
+        </tr>
+        <tr>
+          <td colspan="2" bgcolor="#FFFFCC" class="subHeader Style2"><table width="100%" border="0" bordercolor="#CCFF99" bgcolor="#CCFF99">
+
+            <tr bordercolor="#CCFF99">
+              <td width="15%" valign="top" bgcolor="#FFFFCC" class="Style32"><p><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >09:00 - 10:30</span></p>
+                <p align="center"><br />
+                  <span class="Style4"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Session 8</span> </span> </p></td>
+              <td width="85%" valign="top" bgcolor="#FFFFCC" class="Style29"><p class="Style29"><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_08/heinz-icgi08talk.pdf"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Learning right-to-left and left-to right iterative languages</span></span> <br />
+                    <em><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Jeffrey Heinz</span> </em></p>
+                  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_08/y_kameda-icgi08talk.ppt"><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Learning bounded unions of Noetherian closed set systems via characteristic sets</span></span> <br />
+                  <em><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Yuuichi Kameda, Hiroo Tokunaga and Akihiro Yamamoto</span> </em> </p>
+                <p><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_08/kasprzik-icgi08talk.pdf"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >A learning algorithm for multi-dimensional trees, or:learning beyond context-freeness</span></span><br />
+                  <em><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Anna Kasprzik</span></em></p></td>
+            </tr>
+            <tr>
+              <td bgcolor="#FFCC99" class="Style32"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >10:30 - 11:00</span> </td>
+              <td bgcolor="#FFCC99" class="Style23"><div align="center"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span> </div></td>
+            </tr>
+            <tr>
+              <td valign="top" bgcolor="#FFFFCC" class="Style32"><p><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >11:00 - 12:00</span></p>
+                <p align="center"><span class="Style4"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Session 9</span></span> </p></td>
+              <td valign="top" bgcolor="#FFFFCC" class="Style29"><p class="Style4"><span class="Style38"><br />
+                <span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Business Meeting</span>  </span><br />
+                  </p>                  </td>
+            </tr>
+            <tr>
+              <td bgcolor="#99CCFF" class="Style32"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >12:00 - 14:00</span> </td>
+              <td bgcolor="#99CCFF" class="Style23"><div align="center"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></div></td>
+            </tr>
+            <tr>
+              <td valign="top" bgcolor="#FFFFCC" class="Style32"><p><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >14:00 - 15:30</span></p>
+                <p align="center"><br />
+                  <span class="Style4"><br />
+                  <span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Session 10</span> </span> </p></td>
+              <td valign="top" bgcolor="#FFFFCC" class="Style29"><p class="Style29"><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_10/sicco-icgi08talk.pdf"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Polynomial distinguishability of timed automata</span></span><br />
+                  <em><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Sicco Verwer, Mathijs de Weerdt and Cees Witteveen</span> </em></p>
+                  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_10/champavere-icgi08talk.pdf"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Schema-guided induction of monadic queries</span></span><em><br />
+  <span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >J&eacute;r&ocirc;me Champav&egrave;re, R&eacute;mi Guilleron, Aur&eacute;lien Lemay and Joachim Niehren</span></em></p>
+                <p><span onclick="return false" style="text-decoration:underline; color:blue" href="slidesicgi/session_10/oncina_trasp-icgi08talk.pdf"><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Using Multiplicity automata to identify transducer Relations from membership and equivalence queries</span></span><em><br />
+  <span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Jose Oncina</span> </em></p></td>
+            </tr>
+            <tr>
+              <td bgcolor="#FFFFCC" class="Style32"><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >16:00</span> </td>
+              <td bgcolor="#FFFFCC" class="Style23"><div align="left"><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >End of the conference</span>  </div></td>
+            </tr>
+
+
+          </table>
+          <p class="bodyText"><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+          <p class="bodyText"><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >16:40 Direct train to Paris (arrival 20:00)</span></p></td>
+        </tr>
+        <tr>
+          <td colspan="2" bgcolor="#CCFF99" class="subHeader Style2"><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Selected Full Papers:</span><br />
+            <span class="Style6"><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >(ordered by submission number)</span></span></td>
+        </tr>
+        <tr>
+          <td width="44%" class="Style1"><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Title</span></td>
+          <td width="56%" class="Style1"><blockquote>
+            <p><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Authors</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td height="41" class="Style2"><p><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >On Learning Regular Expressions and Patterns via   Membership and Correction Queries</span></p></td>
+          <td class="Style2"><blockquote>
+            <p><em><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Efim Kinber</span></em></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >A Polynomial   Algorithm for the Inference of Context Free Languages</span> </td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Alexander Clark, R&eacute;mi Eyraud and Amaury Habrard</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >A Note on the Relationship between Different Types   of Correction Queries</span></td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Cristina Tirnauca</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Learning bounded   unions of Noetherian closed set systems via characteristic sets</span> </td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Yuuichi Kameda, Hiroo Tokunaga and Akihiro Yamamoto</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Learning Commutative   Regular Languages</span></td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Antonio Cano Gomez and Gloria In&eacute;s Alvarez</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >A learning algorithm for multi-dimensional trees, or:   Learning beyond context-freeness</span></td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Anna Kasprzik</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Learning Languages from Bounded Resources: the Case of the DFA and the   Balls of Strings</span> </td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Colin de la Higuera, Jean-Christophe Janodet and Fr&eacute;d&eacute;ric Tantini</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Unsupervised Learning of Probabilistic   Context-Free Grammar using Iterative Biclustering</span> </td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Kewei Tu and Vasant Honavar</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Identification in the Limit of $k,l$-Substitutable   Context-Free Languages</span></td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Ryo YOSHINAKA</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >State-merging   DFA Induction Algorithms with Mandatory Merge Constraints</span> </td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Bernard LAMBEAU, Christophe Damas and Pierre Dupont</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Using Multiplicity Automata to identify Transducer   Relations from Membership and Equivalence Queries</span></td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Jose Oncina</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >How to Split Recursive Automata</span></td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Isabelle Tellier</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Schema-Guided Induction of Monadic Queries</span> </td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >J&eacute;r&ocirc;me Champav&egrave;re, R&eacute;mi Gilleron, Aur&eacute;lien Lemay and Joachim   Niehren</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Learning context sensitive languages from linear   structural information</span></td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Jose M. Sempere</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Learning Meaning Before Syntax</span></td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Dana Angluin and Leonor Becerra-Bonache</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Polynomial   distinguishability of timed automata</span></td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Sicco Verwer, Mathijs de Weerdt and Cees Witteveen</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Towards Feasible PAC-Learning   of Probabilistic Deterministic Finite Automata</span> </td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Jorge Castro Rabal and Ricard Gavalda</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Learning right-to-left and left-to-right iterative   languages</span></td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Jeffrey Heinz</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Polynomial time probabilistic   learning of a subclass of linear languages with queries</span> </td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Yasuhiro TAJIMA and Yoshiyuki Kotani</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Relevant Representations for the Inference of Rational   Stochastic Tree Languages</span> </td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Fran&ccedil;ois Denis, Edouard Gilbert, Amaury Habrard, Faissal Ouardi and   Marc Tommasi</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Evaluation and   Comparison of Inferred Regular Grammars</span> </td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Neil Walkinshaw, Kirill Bogdanov and Ken Johnson</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td colspan="2" bgcolor="#CCFF99" class="subHeader Style2"><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Selected Posters:</span></td>
+        </tr>
+        <tr>
+          <td class="Style1"><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Title</span></td>
+          <td class="Style1"><blockquote>
+              <p><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Authors</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Learning subclasses of pure pattern languages</span> </td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >P J Abisha, Thomas D G and Sindhu J Kumaar</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Problems with Evaluation of   Unsupervised Empirical Grammatical Inference Systems</span> </td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Menno van Zaanen and Jeroen Geertzen</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Learning of   Regular omega-Tree Languages</span></td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Jayasri Rani M., Thomas D G and Humrosia Begam M</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Inference of   Uniquely Terminating EML</span></td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Kannamma S, Thomas D G and Rangarajan rangarajan</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Inducing Regular Languages using Grammar-based   Classifier System</span></td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Olgierd Unold</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Estimating Graph Parameters using   Graph Grammars</span></td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Sourav Mukherjee and Tim Oates</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Which Came First, the Grammar or the   Lexicon?</span> </td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Tom Armstrong and Tim Oates</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"> <span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Identification of Node Label Controlled   Graph Grammars</span> <br /></td>
+          <td class="Style5"><blockquote>
+            <p><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Christophe Costa Florencio</span></p>
+          </blockquote></td>
+        </tr>
+        <tr>
+          <td class="Style2"><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          <td class="Style5"><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+        </tr>
+        <tr>
+          <td colspan="2" class="Style2"><div align="center"><span class="quote Style3"><strong><span onclick="return false" style="text-decoration:underline; color:blue" name="instructions" id="instructions"></span><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >INSTRUCTIONS FOR SPEAKERS</span> </strong><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span></div></td>
+        </tr>
+        <tr>
+          <td colspan="2" class="Style2"><p><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >- Information for ICGI'08 presentations:</span> </p>
+            <p><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Each accepted paper is allocated a 30 minutes slot (about 20 minutes for   the presentation and 10 minutes for the questions and comments).</span> <br />
+              <span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >In the conference room there will be a computer - connected to a data   projector - with the following configuration:</span> <br />
+              <span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >+ Windows XP SP2</span> <br />
+              <span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >+ PowerPoint 2002</span> <br />
+              <span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >+ Acrobat 7</span> <br />
+              <span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Please make sure that your presentation works flawlessly with the   specified software.</span> <br />
+              <span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Each presentation in an electronic form should be handed over to the   organizers or the chair before the session.</span> <br />
+              <span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >For this, a USB Flash disk will be available (CD or DVD medium should be   fine also).</span> <br />
+              <span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >In case you need your own computer for your presentation, please contact   the organizers.</span> <br />
+              <br />
+              <span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >- Information for ICGI'08 posters:</span> <br />
+              <br />
+              <span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >The posters will be visible during all the conference. Their   presentation is planned on Monday from 15:30 to 16:30.</span> <br />
+              <span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Posters will have an allocated space of 90cm wide by 120cm high (i.e.   about 35 inches by 47 inches).</span> <br />
+              <span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Your poster, in portrait format, must not exceed these dimensions.</span> <br />
+              <br />
+              <span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >With the help of the Pascal2 Network of Excellence   (</span><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.pascal-network.org/"><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >http://www.pascal-network.org/</span></span><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >), we propose to record the ICGI'08   presentations and to publish them with the other events organized or   sponsored by Pascal2 on Videolectures (</span><span onclick="return false" style="text-decoration:underline; color:blue" href="http://videolectures.net/pascal/"><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >http://videolectures.net/pascal/</span></span><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >)... Please, warn us if you don't want your presentation to be video-recorded.</span> </p>
+            <p><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Do not hesitate to contact us if you need further information.</span> <br />
+              <span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >Looking forward to meeting you in St Malo,</span> <br />
+              <span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >The ICGI'08 organizing committee.</span> <br />
+            <span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:icgi08@irisa.fr"><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >icgi08@irisa.fr</span></span></p></td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td width="165"><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+    <td width="19"><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+    <td width="3"><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+    <td width="455"><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+    <td width="4"><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+    <td width="4"><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+	<td width="232"><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>

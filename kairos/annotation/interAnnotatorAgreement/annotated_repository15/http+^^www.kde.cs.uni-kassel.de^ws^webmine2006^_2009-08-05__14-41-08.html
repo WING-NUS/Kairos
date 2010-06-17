@@ -1,0 +1,1302 @@
+  <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/7/annotation/annotated_repository/http+^^www.kde.cs.uni-kassel.de^ws^webmine2006^_2009-08-05__14-41-08.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/7/annotation/annotated_repository/http+^^www.kde.cs.uni-kassel.de^ws^webmine2006^_2009-08-05__14-41-08.yaml created on Thu Aug 13 13:57:22 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<base href="http://www.kde.cs.uni-kassel.de/ws/webmine2006/" />
+
+
+  <meta http-equiv="Content-Language" content="en">
+
+  <meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
+
+  <meta name="author" content="Michael Brueckner">
+
+  <meta name="description" content="ECML/PKDD 2006 - Berlin. The 17th European Conference on Machine Learning and the 10th European Conference on Principles and Practice of Knowledge Discovery in Databases will be held from September 18th to 22nd in Berlin, Germany.">
+
+  <meta name="keywords" content="ECML, PKDD, 2006, Berlin, Conference, Machine Learning, Web Mining">
+
+  <meta name="robots" content="follow">
+
+  <link href="index_files/ecml.css" type="text/css" rel="stylesheet" media="all">
+
+  <link rel="SHORTCUT ICON" href="http://www.ecmlpkdd2006.org/ecml.ico">
+  <title>Web Mining Workshop at ECML/PKDD 2006 - Berlin, Germany</title>
+
+
+</head>
+
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<!-- Do not edit the following part of this page in any way -->
+<table align="center" border="0" cellpadding="0" cellspacing="0" height="100%" width="872">
+
+  <tbody>
+
+    <tr>
+
+      <td class="main" width="170">
+      <p align="center"><br>
+
+      <br>
+
+      <img onmousedown="imd(this)" src="index_files/logo.gif" border="0" height="61" width="142"></p>
+
+      </td>
+
+      <td colspan="2" width="702"><img onmousedown="imd(this)" src="index_files/berlin.png" border="0" height="180" width="702"></td>
+
+    </tr>
+
+    <tr>
+
+      <td class="light" height="17"></td>
+
+      <td class="line" rowspan="4" width="1"></td>
+
+      <td class="line" height="17"> </td>
+
+    </tr>
+
+    <tr>
+
+      <td class="navigation" height="100%" valign="top" width="170">
+      <div class="navigation">
+      <table border="0" cellpadding="0" cellspacing="0" width="170">
+
+        <tbody>
+
+          <tr>
+
+            <td class="mouseout" height="1" width="1"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="mouseover" height="1" width="1"></td>
+
+          </tr>
+
+          <tr>
+
+            <td>
+            <div onmouseout="this.className='mouseout'" onmouseover="this.className='mouseover'">
+            <table border="0" cellpadding="0" cellspacing="0" width="170">
+
+              <tbody>
+
+                <tr>
+
+                  <td height="23" width="10"></td>
+
+                  <td width="10"><img onmousedown="imd(this)" src="index_files/dot.gif" height="4" width="4"></td>
+
+                  <td width="150"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ecmlpkdd2006.org/index.html" target="_blank"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >ECML
+PKDD 2006</span></span></td>
+
+                  <td width="5"></td>
+
+                </tr>
+
+              </tbody>
+            </table>
+
+            </div>
+
+            </td>
+
+          </tr>
+
+          <tr>
+
+            <td class="mouseout" height="1" width="1"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="mouseover" height="1" width="1"></td>
+
+          </tr>
+
+          <tr>
+
+            <td>
+            <div onmouseout="this.className='mouseout'" onmouseover="this.className='mouseover'">
+            <table border="0" cellpadding="0" cellspacing="0" width="170">
+
+              <tbody>
+
+                <tr>
+
+                  <td height="23" width="10"></td>
+
+                  <td width="10"><img onmousedown="imd(this)" src="index_files/dot.gif" height="4" width="4"></td>
+
+                  <td width="150"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ecmlpkdd2006.org/workshops.html" target="_blank"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >All Workshops</span></span></td>
+
+                  <td width="5"></td>
+
+                </tr>
+
+              </tbody>
+            </table>
+
+            </div>
+
+            </td>
+
+          </tr>
+
+<!-- Do not edit the preceding part of this document in any way-->
+          <tr>
+
+            <td class="mouseout" height="1" width="1"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="mouseover" height="1" width="1"></td>
+
+          </tr>
+
+          <tr>
+
+            <td>
+            <div class="mouseout" onmouseout="this.className='mouseout'" onmouseover="this.className='mouseover'">
+            <table border="0" cellpadding="0" cellspacing="0" width="170">
+
+              <tbody>
+
+                <tr>
+
+                  <td height="23" width="10"></td>
+
+                  <td width="10"><img onmousedown="imd(this)" src="index_files/dot.gif" height="4" width="4"></td>
+
+                  <td width="150"><span onclick="return false" style="text-decoration:underline; color:blue" href="#Submission"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Workshop
+Submission</span></span></td>
+
+                  <td width="5"></td>
+
+                </tr>
+
+              </tbody>
+            </table>
+
+            </div>
+
+            </td>
+
+          </tr>
+
+          <tr>
+
+            <td class="mouseout" height="1" width="1"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="mouseover" height="1" width="1"></td>
+
+          </tr>
+
+          <tr>
+
+            <td>
+            <div class="mouseout" onmouseout="this.className='mouseout'" onmouseover="this.className='mouseover'">
+            <table border="0" cellpadding="0" cellspacing="0" width="170">
+
+              <tbody>
+
+                <tr>
+
+                  <td height="23" width="10"></td>
+
+                  <td width="10"><img onmousedown="imd(this)" src="index_files/dot.gif" height="4" width="4"></td>
+
+                  <td width="150"><span onclick="return false" style="text-decoration:underline; color:blue" href="#Accepted"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Accepted
+Papers</span></span></td>
+
+                  <td width="5"></td>
+
+                </tr>
+
+              </tbody>
+            </table>
+
+            </div>
+
+            </td>
+
+          </tr>
+
+          <tr>
+
+            <td class="mouseout" height="1" width="1"></td>
+
+          </tr>
+
+          <tr>
+
+            <td>
+            <div class="mouseout" onmouseout="this.className='mouseout'" onmouseover="this.className='mouseover'">
+            <table border="0" cellpadding="0" cellspacing="0" width="170">
+
+              <tbody>
+
+                <tr>
+
+                  <td height="23" width="10"></td>
+
+                  <td width="10"><img onmousedown="imd(this)" src="index_files/dot.gif" height="4" width="4"></td>
+
+                  <td width="150"><span onclick="return false" style="text-decoration:underline; color:blue" href="#Program"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Workshop
+Program</span></span></td>
+
+                  <td width="5"></td>
+
+                </tr>
+
+              </tbody>
+            </table>
+
+            </div>
+
+            </td>
+
+          </tr>
+
+          <tr>
+
+            <td class="mouseout" height="1" width="1"></td>
+
+          </tr>
+
+          <tr>
+
+            <td class="mouseover" height="1" width="1"></td>
+
+          </tr>
+
+          <tr>
+
+            <td>
+            <div class="mouseout" onmouseout="this.className='mouseout'" onmouseover="this.className='mouseover'">
+            <table border="0" cellpadding="0" cellspacing="0" width="170">
+
+              <tbody>
+
+                <tr>
+
+                  <td height="23" width="10"></td>
+
+                  <td width="10"><img onmousedown="imd(this)" src="index_files/dot.gif" height="4" width="4"></td>
+
+                  <td width="150"><span onclick="return false" style="text-decoration:underline; color:blue" href="#Proceedings"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></span></td>
+
+                  <td width="5"></td>
+
+                </tr>
+
+              </tbody>
+            </table>
+
+            </div>
+
+            </td>
+
+          </tr>
+
+          <tr>
+
+            <td class="mouseout" height="1" width="1"></td>
+
+          </tr>
+
+<!-- To add another menu item, duplicate this block and replace "Organization" by
+the name of your new menu item -->
+          <tr>
+
+            <td class="mouseover" height="1" width="1"></td>
+
+          </tr>
+
+          <tr>
+
+            <td>
+            <div onmouseout="this.className='mouseout'" onmouseover="this.className='mouseover'">
+            <table border="0" cellpadding="0" cellspacing="0" width="170">
+
+              <tbody>
+
+                <tr>
+
+                  <td height="23" width="10"></td>
+
+                  <td width="10"><img onmousedown="imd(this)" src="index_files/dot.gif" height="4" width="4"></td>
+
+                  <td width="150"><span onclick="return false" style="text-decoration:underline; color:blue" href="#Organization"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Organization</span></span></td>
+
+                  <td width="5"></td>
+
+                </tr>
+
+              </tbody>
+            </table>
+
+            </div>
+
+            </td>
+
+          </tr>
+
+          <tr>
+
+            <td class="mouseout" height="1" width="1"></td>
+
+          </tr>
+
+<!-- end of duplicate block -->
+        </tbody>
+      </table>
+
+      </div>
+
+      </td>
+
+      <td class="main" valign="top" width="701">
+      <table border="0" cellpadding="20" cellspacing="0" width="701">
+
+        <tbody>
+
+          <tr>
+
+            <td class="main" height="600" valign="top" width="701"><!-- start of page body; edit this part of the page only -->
+            <div class="bibsokasten"> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.bibsonomy.org" class="bibsokastengr" title="System to manage Bookmarks and Publications"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >BibSonomy</span></span>
+            <br>
+
+            <span onclick="return false" style="text-decoration:underline; color:blue" class="bibsokastenklein" href="http://www.bibsonomy.org/ShowBookmarkEntry?url=http%3A%2F%2Fwww.kde.cs.uni-kassel.de%2Fws%2Fwebmine2006%2F&amp;description=Web%20Mining%20Workshop&amp;copytag=web%20mining%20workshop" title="bookmark this pape in BibSonomy"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >[Bookmark this page]</span></span>
+            </div>
+
+            <h1><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Workshop on Web Mining 2006 (WebMine)</span></h1>
+
+            <div class="bibsokasten"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.flickr.com/photos/58435261@N00/246401454/"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Here
+is a picture of the workshop.</span></span></div>
+
+            <h2><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >September 18th, 2006, Berlin, Germany</span></h2>
+
+            <p><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >The World Wide Web is a rich source of information
+about human behavior. It contains large amount of data organized via
+interconnected Web pages, traces of information search, user feedback
+on items of interest, etc. One of the important characteristics of the
+Web in addition to large data volumes is its dynamics, where content,
+structure and usage is changing over time. This shows up in the rise of
+related research areas like communities of practice, knowledge
+management, web communities, and peer to peer. In particular the notion
+of collaborative work and thus the need of its systematic analysis
+become more and more important. For instance, to develop effective web
+applications, it is essential to analyze patterns hidden in the usage
+of web resources, their contents and their interconnections. Machine
+Learning and Data mining methods have been used extensively to find
+patterns in usage of the network by exploiting both contents and link
+structures.</span> </p>
+
+            <p><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >The topics of the workshop include:</span></p>
+
+            <ul>
+
+              <li> <span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >analysis of weblogs and blogs</span></li>
+
+              <li><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >semantic association identification by link
+analysis</span></li>
+
+              <li><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >discovering social structures and communities</span></li>
+
+              <li><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >predicting trends and user behavior</span></li>
+
+              <li><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >analysis of dynamic networks</span></li>
+
+              <li><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >using prior knowledge and the semantic web for
+user modelling</span></li>
+
+              <li><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >using content of the web for modelling</span></li>
+
+              <li><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >applications in e-commerce, education</span></li>
+
+              <li><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >discovering misuse and fraud</span></li>
+
+              <li><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >combining the web with data from other sources</span></li>
+
+              <li><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >network or link analysis of social resources
+sharing systems</span></li>
+
+              <li><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >analysis of folksonomies or web 2.0 application</span></li>
+
+              <li><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >deriving profiles from usage</span></li>
+
+              <li><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >personalized delivery of news and journals</span></li>
+
+              <li><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >semantic web personalization</span></li>
+
+              <li><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >semantic web technologies for recommender
+systems</span><br>
+
+              </li>
+
+            </ul>
+
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="Submission">
+            <h2><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Submission</span></h2>
+
+            </span>
+            <p><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates:</span><br>
+
+<span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >-----------------</span><br>
+
+<span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Submissions: June 28</span><br>
+
+<span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Notifications: August 2</span><br>
+
+<span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Camera ready: August 9</span><br>
+
+<span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Workshop day: September 18</span></p>
+
+            <p><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >We invite two types of submissions for this
+workshop:</span></p>
+
+            <ul>
+
+              <li><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Technical papers (maximum 12 pages)</span> </li>
+
+              <li> <span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Short position papers (maximum 6 pages)</span></li>
+
+            </ul>
+
+            <p> <span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Submitted papers will be peer-reviewed and
+selected on the basis of these reviews. Accepted papers will be
+presented at the workshop. All submissions should be made
+electronically if possible, by email attachment and preferably in
+Postscript or PDF format.</span> </p>
+
+            <p><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >All submissions must be sent to</span>
+            <script type="text/javascript" language="javascript">{at="@"; q='"'; document.write("<span onclick="return false" style="text-decoration:underline; color:blue" href=" + q + "mailto:webmine2006" + at + "cs.uni-kassel.de" + q + ">webmine2006" + at + "cs.uni-kassel.de<\/a>"); }</script>
+            <noscript><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >webmine2006 at cs.uni-kassel.de</span></noscript>
+
+<span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >. Although not required for the initial submission, we recommend to
+follow the format guidelines of</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ecmlpkdd2006.org"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >ECML/PKDD</span></span>
+<span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >(Springer LNCS --</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.kde.cs.uni-kassel.de/ws/ewmf05/llncs.cls"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >LaTeX
+Style File</span></span><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >), as this will be the required format for accepted
+papers.</span> </p>
+
+            <p><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >The workshop proceedings will be distributed
+during the workshop. We plan to issue a post workshop publication of
+selected papers by Springer Lecture Notes.</span></p>
+
+            <p><br>
+
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="Accepted"></span> </p>
+
+            <h2><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers</span></h2>
+
+            <ul>
+
+              <li><em><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >XPath-Wrapper Induction by
+generalizing tree traversal patterns</span></em>
+<span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >(Tobias Anton, Technical University of Darmstadt, Germany)</span></li>
+
+              <li><em><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >An Analysis of Bloggers and Topics
+for a Blog Recommender System</span></em>
+<span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >(Conor Hayes, Paolo Avesani, Sriharsha Veeramachaneni, ITC-IRST,
+Trento, Italy)</span></li>
+
+              <li><em><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Web Usage Mining and XML Mining: a
+real case study</span></em>
+<span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >(Federico Michele Facca, Politecnico di Milano, Italy)</span></li>
+
+              <li><em><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Semi-Supervised Learning to Extract
+Attribute-Value Pairs from Product Descriptions on the Web</span></em>
+<span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >(Katharina Probst, Rayid Ghani, Marko Krema, Andy Fano, Yan Liu,
+Accenture Technology Labs, Chicago, USA/Carnegie Mellon University,
+Pittsburgh, PA, USA)</span></li>
+
+              <li><em><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Mining Associations from Web Query
+Logs</span></em>
+<span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >(Benjamin Rey, Pradhuman Jhala, Yahoo! Research, Burbank, USA)</span></li>
+
+              <li><em><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Collaborative Filtering: Fallacies
+and Insights in Measuring Similarity</span></em>
+<span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >(Panagiotis Symeonidis, Alexandros Nanopoulos, Apostolos N.
+Papadopoulos, and Yannis Manolopoulos, Aristotle University of
+Thessaloniki, Greece)</span></li>
+
+              <li><em><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Discovering User Profiles from Papers
+by Using Word Sense Disambiguation</span></em>
+<span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >(G. Semeraro, P. Basile, M. Degemmis, and P. Lops, Universita di Bari,
+Italy)</span></li>
+
+            </ul>
+
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="Program"></span>
+            <h2><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Program</span></h2>
+
+            <table class="MsoNormalTable" style="border: 1pt solid windowtext; width: 90%;" border="1" cellpadding="0" width="90%">
+
+              <tbody>
+
+                <tr>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><span style="font-size: 10pt; font-family: Arial; color: black;" lang="IT"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >09:30-09:45</span></span></p>
+
+                  </td>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><b><span style="font-size: 10pt; font-family: Arial; color: black;" lang="IT"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Welcome and</span> </span></b><b><span style="font-size: 10pt; font-family: Arial; color: black;" lang="EN-GB"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >opening</span></span></b></p>
+
+                  </td>
+
+                </tr>
+
+                <tr>
+
+                  <td colspan="2" style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><em><b><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Session 1</span></span></b></em></p>
+
+                  </td>
+
+                </tr>
+
+                <tr>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><span style="font-size: 10pt; font-family: Arial; color: black;" lang="IT"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >09:45-10:30</span></span></p>
+
+                  </td>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><b><span style="font-size: 10pt; font-family: Arial; color: black;" lang="EN-GB"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span></span></b><span style="font-size: 10pt; font-family: Arial; color: black;" lang="EN-GB"> <span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span><span onclick="return false" style="text-decoration:underline; color:blue" href="pdf/Nasraoui-ECML-PKDD-WEbMIne-2006-Invited-Talk.pdf"><img onmousedown="imd(this)" style="border: 0px solid ; width: 40px; height: 18px;" src="pdf/pdf_icon.gif" alt=""></span><span onclick="return false" style="text-decoration:underline; color:blue" href="pdf/Nasraoui-ECML-PKDD-WEbMIne-2006-Invited-Talk.pps"><img onmousedown="imd(this)" style="border: 0px solid ;" src="pdf/ppt_icon.gif" alt=""></span><br>
+
+                  <span style="font-size: 10pt; font-family: Arial; color: black;" lang="EN-GB"><b><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Web Usage Mining &amp;
+Personalization in Noisy, Dynamic, and Ambiguous Environments</span></b><br>
+
+<span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Olfa Nasraoui, University of Louisville</span> <strong><span style="font-family: Arial; font-weight: normal;"></span></strong></span></p>
+
+                  <p></p>
+
+                  </td>
+
+                </tr>
+
+                <tr>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><span style="font-size: 10pt; font-family: Arial; color: black;" lang="IT"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >10:30-11:00</span></span></p>
+
+                  </td>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><span style="font-size: 10pt; font-family: Arial; color: black;" lang="IT"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></span></p>
+
+                  </td>
+
+                </tr>
+
+                <tr>
+
+                  <td colspan="2" style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><span onclick="return false" style="text-decoration:underline; color:blue" name="OLE_LINK26"><em><b><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Session 2</span></span></b></em></span></p>
+
+                  </td>
+
+                </tr>
+
+                <tr>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><span style="font-size: 10pt; font-family: Arial; color: black;" lang="IT"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >11:00-11:30</span></span></p>
+
+                  </td>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><em><b><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Collaborative Filtering: Fallacies and Insights
+in Measuring Similarity</span><br>
+
+                  </span></b></em><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >(Panagiotis Symeonidis, Alexandros Nanopoulos,
+Apostolos N. Papadopoulos, and Yannis Manolopoulos, Aristotle
+University of Thessaloniki, Greece)</span></span></p>
+
+                  </td>
+
+                </tr>
+
+                <tr>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><span style="font-size: 10pt; font-family: Arial; color: black;" lang="IT"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >11:30-12:00</span></span></p>
+
+                  </td>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><em><b><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >An Analysis of Bloggers and Topics for a Blog
+Recommender System</span><br>
+
+                  </span></b></em><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >(Conor Hayes, Paolo Avesani, Sriharsha
+Veeramachaneni, ITC-IRST, Trento, Italy)</span></span></p>
+
+                  </td>
+
+                </tr>
+
+                <tr>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><span style="font-size: 10pt; font-family: Arial; color: black;" lang="IT"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >12:00-12:30</span></span></p>
+
+                  </td>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><em><b><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Semi-Supervised Learning to Extract
+Attribute-Value Pairs from Product Descriptions on the Web</span> <br>
+
+                  </span></b></em><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >(Katharina Probst, Rayid Ghani, Marko Krema,
+Andy Fano, Yan Liu, Accenture Technology Labs, Chicago, USA/Carnegie
+Mellon University, Pittsburgh, PA, USA)</span></span></p>
+
+                  </td>
+
+                </tr>
+
+                <tr>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><span style="font-size: 10pt; font-family: Arial; color: black;" lang="IT"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >12:30-14:00</span></span></p>
+
+                  </td>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><span style="font-size: 10pt; font-family: Arial; color: black;" lang="IT"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Lunch Break</span></span></p>
+
+                  </td>
+
+                </tr>
+
+                <tr>
+
+                  <td colspan="2" style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><em><b><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Session 3</span></span></b></em></p>
+
+                  </td>
+
+                </tr>
+
+                <tr>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><span style="font-size: 10pt; font-family: Arial; color: black;" lang="IT"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >14:00-14:30</span></span></p>
+
+                  </td>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><b><i><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Web Usage Mining and XML Mining: a real case
+study</span></span></i></b><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"> <br>
+
+                  </span><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="IT"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >(Federico Michele Facca, Politecnico di Milano,</span> <span lang="EN-GB"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Italy</span></span><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >)</span> </span></p>
+
+                  </td>
+
+                </tr>
+
+                <tr>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><span style="font-size: 10pt; font-family: Arial; color: black;" lang="IT"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >14:30-15:00</span></span></p>
+
+                  </td>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><em><b><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Mining Associations from Web Query Logs</span></span></b></em><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"> <br>
+
+<span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >(Benjamin Rey, Pradhuman Jhala, Yahoo!</span> </span><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="IT"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Research, Burbank, USA)</span></span></p>
+
+                  </td>
+
+                </tr>
+
+                <tr>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><span style="font-size: 10pt; font-family: Arial; color: black;" lang="IT"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >15:00-15:30</span> </span></p>
+
+                  </td>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><em><b><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >XPath-Wrapper Induction by generalizing tree
+traversal patterns</span></span></b></em><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"><br>
+
+<span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >(Tobias Anton, Technical University of Darmstadt, Germany)</span></span></p>
+
+                  </td>
+
+                </tr>
+
+                <tr>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><span style="font-size: 10pt; font-family: Arial; color: black;" lang="IT"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >15:30-16:00</span></span></p>
+
+                  </td>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><span style="font-size: 10pt; font-family: Arial; color: black;" lang="IT"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></span></p>
+
+                  </td>
+
+                </tr>
+
+                <tr>
+
+                  <td colspan="2" style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><em><b><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Session 4</span></span></b></em></p>
+
+                  </td>
+
+                </tr>
+
+                <tr>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><span style="font-size: 10pt; font-family: Arial; color: black;" lang="IT"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >16:00-16:30</span></span></p>
+
+                  </td>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><em><b><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Discovering User Profiles from Papers by Using
+Word Sense Disambiguation</span></span></b></em><b><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"> <br>
+
+                  </span></b><span style="font-size: 10pt; font-family: Verdana; color: black;" lang="EN-GB"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >(G. Semeraro, P. Basile, M. Degemmis, and P.
+Lops, University of Bari, Italy)</span></span></p>
+
+                  </td>
+
+                </tr>
+
+                <tr>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><span style="font-size: 10pt; font-family: Arial; color: black;" lang="IT"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >16:30-17:00</span></span></p>
+
+                  </td>
+
+                  <td style="border: 1pt solid windowtext; padding: 3.75pt;" valign="top">
+                  <p class="MsoNormal"><b><span style="font-size: 10pt; font-family: Arial; color: black;" lang="EN-GB"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Discussion, Closing</span></span></b></p>
+
+                  </td>
+
+                </tr>
+
+              </tbody>
+            </table>
+
+            <h2><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></h2>
+
+<span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >The electronic workshop proceedings are&nbsp;available as&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="pdf/WebMine2006.pdf"><img onmousedown="imd(this)" style="border: 0px solid ; width: 40px; height: 18px;" src="pdf/pdf_icon.gif" alt=""></span> <span onclick="return false" style="text-decoration:underline; color:blue" name="Organization">
+            <h2><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Organization</span></h2>
+
+            </span>
+            <p><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Chairs:</span> </p>
+
+            <ul>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.wiwi.hu-berlin.de/%7Eberendt/"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Bettina
+Berendt</span></span><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >, Institute of Information Systems of Humboldt
+University Berlin, Germany</span></li>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.kde.cs.uni-kassel.de/hotho"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Andreas Hotho</span></span><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >,
+Group of Knowledge and Data Engineering, University of Kassel, Germany</span></li>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www-ai.ijs.si/DunjaMladenic/home.html"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Dunja
+Mladenic</span></span><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >, J. Stefan Institute, Ljubljana, Slovenia</span></li>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://lacam.di.uniba.it:8000/people/semeraro.htm"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Giovanni
+Semeraro</span></span><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >, Department of Informatics, University of Bari, Italy</span></li>
+
+            </ul>
+
+            <p><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee (to be extended)</span></p>
+
+            <ul>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.dcs.warwick.ac.uk/people/academic/Sarabjot.Anand/"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Sarabjot
+Anand</span></span><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >, UK</span></li>
+
+              <li><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Mathias Bauer, Germany</span></li>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.wiwi.hu-berlin.de/%7Eberendt/"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Bettina
+Berendt</span></span><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >, Germany</span></li>
+
+              <li><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Janez Brank, Slovenia</span></li>
+
+              <li><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Michelangelo Ceci, Italy</span></li>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://lacam.di.uniba.it:8000/phd/degemmis.html"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Marco
+Degemmis</span></span><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >, Italy</span></li>
+
+              <li><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Miha Grcar, Slovenia</span></li>
+
+              <li><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Marko Grobelnik, Slovenia</span></li>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.kde.cs.uni-kassel.de/hotho"><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Andreas Hotho</span></span><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >,
+Germany</span></li>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://lacam.di.uniba.it:8000/people/lops.html"><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Pasquale
+Lops</span></span><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >, Italy</span></li>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www-ai.ijs.si/DunjaMladenic/home.html"><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Dunja
+Mladenic</span></span><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >, Slovenia</span></li>
+
+              <li><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Bamshad Mobasher, USA</span></li>
+
+              <li><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Ion Muslea, USA</span></li>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://lacam.di.uniba.it:8000/people/semeraro.htm"><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Giovanni
+Semeraro</span></span><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >, Italy</span></li>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://omen.cs.uni-magdeburg.de/itikmd/Myra_Spilopoulou.62.1.html"><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Myra
+Spiliopoulou</span></span><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >, Germany</span></li>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.kde.cs.uni-kassel.de/stumme"><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Gerd Stumme</span></span><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >,
+Germany</span></li>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://hcs.science.uva.nl/usr/maarten/home.html"><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Maarten
+van Someren</span></span><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >, Netherlands</span></li>
+
+<!-- end of page body -->
+            </ul>
+
+            <h2><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Related Events</span></h2>
+
+            <ul>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.cmu.edu/%7Edunja/LinkKDD2003/"><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Link
+Analysis Workshop at KDD-2003</span></span></li>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.cmu.edu/%7Edunja/TextLink2003/"><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Text-Mining
+&amp; Link-Analysis Workshop at IJCAI-2003</span></span></li>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.cmu.edu/%7Edunja/LinkKDD2004/"><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Link
+Analysis Workshop at KDD-2004</span></span></li>
+
+              <li> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.isi.edu/LinkKDD-05/"><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Link
+Discovery: Issues, Approaches and Applications (LinkKDD-2005) at KDD
+2005</span></span></li>
+
+              <li> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://semwebmine2001.aifb.uni-karlsruhe.de/"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Semantic
+Web Mining Workshop at ECML/PKDD 2001</span></span> </li>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://km.aifb.uni-karlsruhe.de/ws/semwebmine2002/"><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Semantic
+Web Mining Workshop at ECML/PKDD 2002</span></span></li>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://km.aifb.uni-karlsruhe.de/ws/ewmf03/"><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >1st
+European Web Mining Forum at ECML/PKDD 2003</span></span></li>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.kde.cs.uni-kassel.de/ws/ewmf05"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >European
+Web Mining Forum (EWMF 2005) at ECML/PKDD 2005</span></span></li>
+
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.kde.cs.uni-kassel.de/ws/ontop2p2005"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Workshop
+on Ontologies in Peer-to-Peer Communities at ESWC 2005</span></span></li>
+
+            </ul>
+
+            </td>
+
+          </tr>
+
+        </tbody>
+      </table>
+
+      </td>
+
+    </tr>
+
+    <tr>
+
+      <td class="navigation" height="1"></td>
+
+      <td class="line" height="1"></td>
+
+    </tr>
+
+    <tr>
+
+      <td class="navigation" height="24"></td>
+
+      <td class="main" height="24">
+      <table border="0" cellpadding="0" cellspacing="0" height="24" width="701">
+
+        <tbody>
+
+          <tr>
+
+            <td width="20"></td>
+
+            <td class="contact1" width="320"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Kontakt:</span>
+            <script type="text/javascript" language="javascript"> {at="@"; q='"'; document.write("<span onclick="return false" style="text-decoration:underline; color:blue" href=" + q + "mailto:webmine2006" + at + "cs.uni-kassel.de" + q + ">webmine2006" + at + "cs.uni-kassel.de<\/a>"); }</script>
+            <noscript><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >webmine2006 at cs.uni-kassel.de</span>

@@ -1,0 +1,663 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3c.org/TR/1999/REC-html401-19991224/loose.dtd">
+<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/2/annotation/annotated_repository/http+^^www.fm2008.abo.fi^tutorials.php_2009-08-05__14-36-08.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/2/annotation/annotated_repository/http+^^www.fm2008.abo.fi^tutorials.php_2009-08-05__14-36-08.yaml created on Thu Aug 13 13:56:17 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+	<title>Formal Methods 2008</title>
+	<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+	<link href="static/style_test.css" type="text/css" rel="stylesheet">
+
+
+
+<SCRIPT LANGUAGE="JavaScript">
+
+function popUp(URL) {
+day = new Date();
+id = day.getTime();
+eval("page" + id + " = window.open(URL, '" + id + "', 'toolbar=0,scrollbars=1,location=0,statusbar=0,menubar=0,resizable=1,width=1024,height=681,left = 1,top = 1');");
+}
+</script>
+
+<script>
+function newWindow(url) {
+        popupWindow =  window.open(
+                url,
+                'popUpWindow',
+                'height=500,
+                width=450,
+                left=100,
+                top=100,
+                resizable=yes,
+                scrollbars=yes,
+                toolbar=yes,
+                menubar=no,
+                location=no,
+                directories=no,
+                status=yes')
+}
+</script>
+
+<script type="text/javascript" src="http://www.fm2008.abo.fi/java/coolmenu.js"></script>
+		<script type="text/javascript" src="java/menu_items.js"></script>
+		<link rel="stylesheet" type="text/css" href="java/menu_styles.css">
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<div>
+	<table class="body_inner" cellspacing="0" cellpadding="0" width="1000">
+		<tr>
+			<td colspan="3">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi"><img onmousedown="imd(this)" src="images/logo_main_w3.jpg" border="0" alt="FM 2008"></span>
+			</td>
+		</tr>
+		<tr background="images/logo_bg_w.jpg">
+			<td align="left" colspan="2" height="24" valign="top">
+
+			<script type="text/javascript">
+			var m1 = new COOLjsMenu("menu1", MENU_ITEMS)
+			</script>
+			</td>
+			<td align="right">
+				
+			<!--<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/help.php">help?</span>-->
+			</td>
+		</tr>
+		<tr>
+			<td valign="top" class="menu">
+			<br>
+<table border="0" cellpadding="0" cellspacing="0">
+<tr><td aling="left">
+<ul class="bullet">
+
+<!--	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/index.php">FM'08 Main Page</span></li> -->
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.win.tue.nl/fm2009/index.html"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Welcome to FM'09</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/conference_theme.php"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Welcome to FM'08</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/invited_speakers.php"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Invited Speakers</span></span> </li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/proceedings.php"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/technical_symposium.php"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Technical Symposium</span> </span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/industry_day.php"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Industry Day</span> </span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/workshops.php"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span> </li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/tutorials.php"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span> </li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/doctoral_symposium.php"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Doctoral Symposium</span> </span>
+<!--		<ul>
+			<li style="margin-left: -10px;"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/DoctorialSymposiumCall070108.pdf">PDF version</span></li>
+		</ul>-->
+	</li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/posters_and_research_tools.php"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Posters &amp; Research Tools</span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/photos.php"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Photos</span></span></li>
+	<br><br>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/sponsors.php"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></span></li>
+	<br>
+        <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/help.php"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Help</span></span></li>
+</ul> 
+</td></tr>
+<tr><td align="center">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.abo.fi/aa/engelska/"><img onmousedown="imd(this)" src="images/AA-logo.gif" style="margin: 20px 5px 20px 10px; border: 0;" alt="Åbo Akademi University"></span>
+        <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fmeurope.org/"><img onmousedown="imd(this)" src="images/FME-logo.png" style="margin: 20px 0 20px 5px; border: 0;" alt="Formal Methods Europe"></span>
+</td></tr></table>
+			</td>
+			<td valign="top" class="content">
+
+<h1><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></h1>
+
+<p><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >The FM 2008 tutorial program aims to provide conference participants with the opportunity 
+to learn new techniques and gain insights in a wide range of areas of formal methods. 
+This
+year we have six tutorials, given by renowned experts in their fields.</span>
+</p>
+
+
+<p><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >A reduced fee will be offered to tutorial presenters. If the number of participants is less than 6, the accepted tutorial may be cancelled.</span></p>
+<p>
+<span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Inquiries should be directed to the Tutorial Chair,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.abo.fi/~marina.walden/"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Marina Waldén</span></span> <span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >(Åbo
+Akademi University).</span>
+</p>
+<h3><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></h3>
+<table class="colored">
+<tr><td><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Final tutorial notes:</span></td><td><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >14 May 2008</span></td></tr>
+</table>
+<br><br>
+<h2><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial Schedule (26&ndash;27 May 2008)</span><br><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></h2>
+
+<h3><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Monday 26th</span></h3>
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="#1"><b><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Computational Systems
+Biology (full day)</span></b></span> <span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >(</span><b><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >T1</span></b><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >)</span>
+<br><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Ion Petre and Ralph-Johan Back</span></p>
+
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="#2"><b><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Teaching formal methods to students in high school and introductory university courses (full day)</span></b></span> <span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >(</span><b><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >T2</span></b><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >)</span>
+<br><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Ralph-Johan Back</span></p>
+
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="#3"><b><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Event-B and the Rodin Platform (full day)</span></b></span> <span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >(</span><b><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >T3</span></b><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >)</span>
+<br><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Jean-Raymond Abrial</span></p>
+
+<h3><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday 27th</span></h3>
+
+
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="#7"><b><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Why formal verification remains on the fringes of commercial development (full day)</span></b></span> <span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >(</span><b><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >T4</span></b><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >)</span>
+<br><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Arvind</span></p>
+
+<p><b><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Morning session only</span></b></p>
+
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="#4"><b><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Formal Methods and Signal Processing (half day)</span></b></span> <span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >(</span><b><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >T5</span></b><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >)</span>
+<br><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Raymond Boute</span></p>
+
+<p><b><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Afternoon session only</span></b></p>
+
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="#5"><b><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Runtime Model Checking of Multithreaded C Programs using Automated Instrumentation Dynamic Partial Order Reduction and Distributed Checking (half day)</span></b></span> <span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >(</span><b><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >T6</span></b><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >)</span>
+<br><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Ganesh Gopalakrishnan and Yu Yang</span></p>
+
+<p><b><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Formal modelling and analysis of real-time systems using UPPAAL (half day)</span></b> <span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >(</span><b><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >T7</span></b><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >)</span>
+<br><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Paul Pettersson and Wang Yi</span> <font color="red" size="+1"><b><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >(cancelled)</span></b></font>
+</p>
+
+<p><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="1"></span><p><b><span onclick="return false" style="text-decoration:underline; color:blue" href="http://combio.abo.fi/tcsb08"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Computational Systems
+Biology (full day)</span></span></b>
+<br><i><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Ion Petre and Ralph-Johan Back</span><br><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >&Aring;bo Akademi University, Turku, Finland</span></i></p>
+
+<p><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Biology is witnessing nowadays a transformation towards a more quantitative science, based on major technological breakthroughs in the past decade. In this transformation, biology is incorporating mathematical modeling techniques and computational approaches towards numerical simulations, model analysis, and predictions. Systems biology is perhaps the best example in this respect. A major effort here goes into understanding the biological functioning of the whole based on the well-understood function of its parts. The aim is to formalize and analyze the ever-changing inter-connections between components (often on different time and space scales), their influence on one another, regulatory patterns, alternative pathways, etc. This is a typical example of a branch of biology where formal reasoning rather than empirical observations is the main driving force.</span><br><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >The importance of biology as a new application area for applied mathematics and computer science has been recognized in our community. There are already significant contributions in this field from well-established computer science research groups (from the formal methods community see D.Harel, L.Cardelli, G.Plotkin, and others), as well as a number of international conferences and journals dedicated to the topic, having computer science as the main target community.</span> </p>
+
+<p><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >The main difficulties for a computer scientist entering this field are on one hand, the lack of a proper (if minimal) biological background and on the other hand, the lack of training in the mathematical and computational techniques most often used in this field. Through this one-day (6 hours) tutorial, we aim to give an introduction to computational systems biology, starting with a crash course on molecular biology for computer scientist, continuing with continuous and discrete modeling techniques, as well as formal methods-based modeling approaches. We also plan to give a computer tutorial on Copasi (Complex Pathway Simulator), a useful tool for modeling and simulating sysbio projects. Finally, we plan to give an overview of a well-rounded off sysbio project (on the heat shock response) that we have been working on in our groups for a couple of years now. We believe that this combination of basic notions and techniques, computer tutorial, and a well-defined complex research project should give our audience a valuable insight into the beauty and the challenges of systems biology. We also hope to give them an insight into the potential of their already existing computer science tools and techniques in this new application area.</span></p>
+
+<!--<p><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials/Tutorial_CompSysBio.pdf">Full version (PDF)</span></p>-->
+
+<p><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="2"></span><p><b><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Teaching formal methods to students in high school and introductory university courses (full day)</span></b>
+<br><i><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Ralph-Johan Back</span><br><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Abo Akademi University, Turku, Finland</span></i></p>
+
+<p><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Formal methods are a standard ingredient in CS and SE university curriculum. However, the emphasis on using mathematical methods in building software systems is not always received very well by students, as the methods taught are often seen as overly complex and difficult to apply in practice. We have been working on this problem in our research lab, Learning and Reasoning (Abo Akademi and University of Turku) for a number of years now, and have developed new methods for teaching formal methods to novices that seem to work very well in practice. Novices are here students in high school and first year university students who encounter formal methods for the first time.</span></p>
+
+<p><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >The course will focus on two main topics:</span></p>
+<ul>
+<li><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >how to teach the systematic construction of mathematical proofs and derivations in high school and introductory university courses, and</span></li>
+<li><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >how to teach the construction of correct programs for first year CS and SE students in university.</span></li>
+</ul>
+<p><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >On the first topic, we describe how to use structured derivations for presenting mathematical proofs and derivations. Structured derivations are a further development of Dijkstra&rsquo;s calculational proof style. The main extension is the use of nested derivations, which makes it possible to express arbitrary logical derivations in a rather natural fashion. We have adapted the structured derivation proof style to the mathematics curriculum in Finnish high schools, and carried out extensive case studies on the use of structured derivations in mathematics teaching. The experiences have been very good, showing that the use of structured derivations improves the performance of students in mathematics quite markedly. Structured derivations also provide a good formalism for computer supported and web based mathematics teaching, because the syntax of mathematical proofs is more explicit and therefore easier to construct, read and analyze.</span></p>
+
+<p><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >The second topic is concerned with how to build programs that are correct by construction. The traditional approach is to either use a posteriori verification, where we first construct the program, identify the necessary pre- and postconditions and loop invariants, and then verify that the program is correct. Alternatively, we can use Dijkstra&rsquo;s constructive approach, and build the program code and the proof hand in hand. In invariant based programming, we take Dijkstra&rsquo;s approach to the extreme, by constructing pre- and postcondition as well as possible loop invariants before any code is written at all. The program is then verified in the usual way by proving the verification conditions (using structured derivations). Invariant based programming is supported by a new visual formalism, nested invariant diagrams. This approach, when supported by an appropriate work flow, seems to work quite well in practice, and allows the programmer to quickly identify errors in his program while he is constructing it, and in the end deliver a program that has been proved mathematically correct. We have taught invariant based programming to first year CS students with very good results. The students have learned how to construct correct programs in practice, and have expressed quite a strong appreciation of the method. We have also taught the approach to experienced programmers (some with prior knowledge of formal methods, some without), with similar good results.</span></p>
+
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials/Tutorial_Teaching.pdf"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Full version (PDF)</span></span></p>
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="t2_programme.php" target="new"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Programme</span></span>
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="t2_material.php" target="new"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Material</span></span>
+
+<p><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="3"></span><p><b><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Event-B and the Rodin Platform (full day)</span></b>
+<br><i><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Jean-Raymond Abrial</span></i></p>
+
+<p><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >This tutorial is an introduction to the construction of complex systems using  Event-B and the Rodin Platform.</span></p>
+
+<p><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Event-B is a mathematical formalism (based on first-order logic and set theory) used to develop formal models of discrete transition systems. These models are elaborated before effectively building these systems which are thus intended to be correct by construction.</span></p>
+
+<p><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Discrete transition system is the unifying paradigm which can be used in many different areas: sequential, distributed, concurrent, parallel. It also covers larger systems where one takes into account not only the future software but also its (fragile) environment.</span></p>
+
+<p><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Models are made of constants and variables related by possibly complex invariants. Their dynamics is defined by means of transitions (called events) made of guards (the enabling conditions) and actions (supposed to modify variables in parallel).</span></p>
+
+<p><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Models are developed by means of successive refinements steps: from quite simple and abstract to very  concrete.  When a model becomes too complicated, it can be decomposed into smaller ones communicating in a systematic fashion.</span></p>
+
+<p><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Proofs and model-checking are performed  at each step of the development. They insure that each model is coherent and that it indeed refines its abstraction (if any).</span></p>
+
+<p><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >The Rodin Platform is the tool set which has been developed (as funded by the European Project Rodin) to ensure a mechanical aid to the user of this approach. This platform is open source and implemented on Eclipse. It works on Windows, Linux and Mac-OS. It contains a database suppoert which contains the developed models. This database is surrounded by various plugins: provers, model-checkers, animators, UML transformers, etc. New plugins can be added.</span></p>
+
+<p><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >The intent of the tutorial is to explain all this in greater details by means of various practical examples and tool demonstrations.</span></p>
+
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials/Tutorial_RODINtool.pdf"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Full version (PDF)</span></span></p>
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="abrial/sld_intro_light.pdf"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Slide: Introduction (PDF)</span></span><br>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="abrial/sld_press.pdf"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Slide: A Mechanical Press Controller (PDF)</span></span><br>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="abrial/sld.brp.pdf"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Slide: The Bounded Re-transmission Protocol (PDF)</span></span><br>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="abrial/ref-card.pdf"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Slide: Reference Card (PDF)</span></span><br>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="abrial/sld_mth1.pdf"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Slide: Summary of Mathematical Notation (PDF)</span></span></br>
+</p>
+
+<p><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="4"></span><p><b><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Formal Methods and Signal Processing (half day)</span></b>
+<br><i><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Raymond Boute</span><br><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >INTEC&ndash;Ghent University</span></i></p>
+
+<p><i><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Motivation</span></i><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; Signal Processing (SP) is an ideal discipline to combine with Formal Methods (FM).  Benefits are mutual: using FM techniques in SP, and using SP as a foothold for broadening FM into a general engineering discipline.</span><br><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;SP is ideal as a target area because it is one of the traditionally more mathematics-intensive disciplines and mathematical modeling is routine engineering practice (a role model for software engineering&#33;).  Still, defective formulations have been noted by SP professionals [references in</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials/Tutorial_SignalProc.pdf" target="_blank"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >full version</span></span><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >], where FM can provide fully defect-free conventions ``letting the symbols do the work''.  Moreover, SP has broadened from analog models to including multidimensional information and algorithms implemented in software, where modeling is weak and FM can also help. Conversely,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://doi.ieeecomputersociety.org/10.1109/2.48796" target="_blank" ><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Parnas's observations</span></span> <span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >from nearly two decades ago are even more relevant today: CS students often end up doing engineering jobs where a strong</span> <i><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >signals and systems</span></i> <span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >background is necessary. Combination with FM provides significant synergy.</span></p>
+
+<p><i><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Overview</span></i><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; A unifying formalism (</span><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.funmath.be/" target="_blank" ><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Functional Mathematics</span></span><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >) is presented that avoids all defects of the traditional conventions while still maintaining the familiar &ldquo;look and feel&rdquo; of the formulas. It supports the same calculational style of reasoning in differential/integral calculus, formal logic, theories of signals and systems, algorithms and software. The two main components are:</span>
+<br><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;(i) an algebra of generic functionals, originally designed for structuring signals and systems, but equally useful in formal logic and modeling software;</span>
+<br><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;(ii) a functional predicate calculus that allows engineers to calculate as fluently with quantifiers as they have learned to do with derivatives and integrals, and hence opens the door to modeling programs mathematically.</span>
+<br><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;Throughout, examples show the unification between &ldquo;continuous&rdquo; SP models for signals and systems and &ldquo;discrete&rdquo; FM models for computers and software.</span></p>
+
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials/Tutorial_SignalProc.pdf"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Full version (PDF)</span></span></p>
+
+<p><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="5"></span><p><b><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Runtime Model Checking of Multithreaded C Programs using Automated Instrumentation Dynamic Partial Order Reduction and Distributed Checking (half day)</span></b>
+<br><i><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Ganesh Gopalakrishnan and Yu Yang</span><br><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >School of Computing, University of Utah, Salt Lake City, UT 84112, U.S.A.</span></i></p>
+
+<p><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Conventional testing methods are inadequate for debugging multithreaded C programs because many &ldquo;unexpected&rdquo; thread interactions can only be manifested through very low probability event sequences that are easily missed during test creation. As a result, bugs can escape into the field, and often manifest years after code deployment. While the approach of building formal models in modeling languages such as Promela followed by model checking using tools such as SPIN has been shown to be effective for verification, the burden of model extraction makes this approach inapplicable in general software development. Runtime model checking &ndash; first implemented in the Verisoft tool &ndash; can help solve this problem by running the actual code under the control of a scheduling mechanism, and detecting violations of assertions (typically deadlocks and other safety properties).</span></p>
+
+<p><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >It is well recognized that when interleaving thread actions, one must prevent the interleaving of independent actions to avoid state explosion. Static partial order reduction methods achieve this objective by a priori (through static criteria) determining persistent sets (which are a subset of actions enabled at any given state) and only interleaving actions within persistent sets. This method is ineffective in the face of information that is difficult to compute statically. For instance, given the actions of two threads a[e1] and a[e2] that are simultaneously enabled, unless one can determine whether e1==e2, it is not possible to tell whether the actions commute. The dynamic partial order reduction (DPOR) approach of Flanagan and Godefroid avoids this difficulty by taking advantage of the known values of expressions and pointer references (in the above example checking whether e1==e2 at runtime) to dramatically cut down the number of interleavings examined. It has been shown to be very effective in detecting safety violations and deadlocks by systematically exploring all relevant interleavings of the multithreaded programs under specific inputs (meaning, specific external input drivers).</span></p>
+
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials/Tutorial_ModelCheck.pdf"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Full version (PDF)</span></span></p>
+
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.utah.edu/formal_verification/fm2008-tutorial" target="new"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Material</span></span></p>
+
+<p><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+
+<!--
+<span onclick="return false" style="text-decoration:underline; color:blue" name="6"></span><p><b>Formal modelling and analysis of real-time systems using UPPAAL (half day)</b>
+<br><i>Paul Pettersson and Wang Yi<br>M&auml;lardalen University and Uppsala University Sweden</i></p>
+
+<p>The main theme of the tutorial is formal modelling and verification of real-time systems. The goal is to introduce the theories, algorithms, and data structures behind the UPPAAL tool developed jointly by Uppsala University and Aalborg University.</p>
+
+<p>The tutorial will cover models for finite state systems and introduce temporal logics and model checking. The focus will be put on the theory of timed automata covering the syntax, semantics, verification problems, and techniques for symbolic reachability analysis which is the core of the UPPAAL tool. The practical part of the tutorial will introduce the UPPAAL modelling and specification languages (the GUI) and the model checker as well as case studies to show how to use the tool to model and solve problems.</p>
+
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials/Tutorial_UPPAAL.pdf">Full version (PDF)</span></p>
+
+<p>&nbsp;</p>-->
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="7"></span><p><b><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Why formal verification remains on the fringes of commercial development (full day)</span></b>
+<br><i><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Arvind</span><br><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >CSAIL, MIT</span></i></p>
+
+<p><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >There are dozens of papers and theses on successful verification of cache-coherence protocols and out-of-order processors. Yet this formal verification has little impact on the design of actual chips embodying these functionalities. Formal verification does not seem to reduce the need for ad hoc verification and testing of designs before fabrication. We will give reasons for this persistent &ldquo;gap&rdquo; and offer a possible solution.</span></p>
+
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials/Tutorial_Arvind.pdf"><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Full version (PDF)</span></span></p>
+
+<p><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+
+			</td>
+		<td valign="top" class="news">
+		<center>
+<h3><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >News</span></h3>
+</center>
+
+<ul><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/photos.php"><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Pictures</span></span> <span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >from the conference week now available.</span> <i><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >(2.7.2008)</span></i></li></ul>
+<ul><li><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Material for the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/industry_day.php"><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >IDay</span></span> <span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >presentations available.</span> <i><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >(4.6.2008)</span></i></li></ul>
+
+<ul><li><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >The</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/technical_symposium.php"><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >diploma</span></span> <span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >for the best paper award is on the web.</span> <i><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >(4.6.2008)</span></i></li></ul>
+
+<ul><li><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >The</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.win.tue.nl/fm2009/index.html"><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >link</span></span> <span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >to the next Formal Methods conference has been added.</span> <i><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >(4.6.2008)</span></i></li></ul>
+
+<ul><li><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >The abstract of Paolo Bresciani is now</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/invited_speakers.php"><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >available</span></span><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >(23.5.2008)</span></i></li></ul>
+
+<ul><li><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >The registration is now closed.</span> <i><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >(22.5.2008)</span></i></li></ul>
+
+<ul><li><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >The program of the Doctoral Symposium is now</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/doctoral_symposium.php"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >available</span></span><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >(15.5.2008)</span></i></li></ul>
+
+<ul><li><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Unfortunately,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/tutorials.php"><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial 7</span></span> <span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >has been
+cancelled.</span> <i><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >(9.5.2008)</span></i></li></ul>
+
+<ul><li><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Comparing the hotels in Turku by
+a non-profit organisation can be found</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hotelscombined.com/City/Turku.htm"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >here</span></span><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >(9.5.2008)</span></i></li></ul>
+
+<ul><li><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >A list of selected restaurants, pubs and cafés can now be found</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/restaurants.php"><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >here</span></span><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >(9.5.2008)</span></i></li></ul>
+
+
+<ul><li><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >The</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.york.ac.uk/circus/mc/fm08"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Workshop on Pilot Projects for the Grand Challenge in Verified Software</span></span> <span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >is now accessible.</span> <i><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >(17.4.2008)</span></i></li></ul>
+
+<ul><li><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Hostel Turku added as new accommodation alternative. Please check the</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/accomodation.php"><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >accommodation page</span></span> <span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >for more information.</span> <i><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >(15.4.2008)</span></i></li></ul>
+
+<ul><li><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >The abstract of Prof. Arvind is now</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/invited_speakers.php"><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >accessible</span></span><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >(11.4.2008)</span></i></li></ul>
+
+<center><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fm2008.abo.fi/news_archive.php"><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Archive</span></span></center>
+		</td>
+		</tr>
+		<tr>
+		<td colspan="3" class="footer" align="center">
+<span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Email: fm2008@abo.fi, 
+Phone: +358 2 215 4754, 
+Fax: +358 2 215 4732</span>

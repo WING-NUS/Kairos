@@ -1,0 +1,611 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session1/5/annotation/annotated_repository/http+^^icwsm.org^2008^program.shtml_2009-08-05__14-25-23.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session1/5/annotation/annotated_repository/http+^^icwsm.org^2008^program.shtml_2009-08-05__14-25-23.yaml created on Thu Aug 13 13:47:45 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<title>ICWSM || Program
+</title>
+<meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1" />
+<meta name="keywords" content="weblog, weblogs, blog, blogs, splog, splogs, spam, anti-spam, vlog, vlogs, 
+post, posting, decomposition, comment, response, reply, rollback, rss, syndication, 
+graph, graphs, link analysis, influencer analysis, community, communities, 
+sentiment, opinion, emotions, positive, negative, mood, moods, emoticon, emoticons,
+demographics, 
+social media, sna, hci, analytics, nlp, nlu, nlg, cl, ir, 
+ie, information extraction, content extraction, 
+corpus, corpora, data driven, empirical, dataset, 
+ml, machine learning, optimization, 
+pattern, patterns, social network analysis,
+mt, machine translation, 
+wsd, word sense disambiguation, qa, question answering, 
+parsing, structure, syntax,
+hmm, hidden markov models, svm, svms, support vector machines, 
+max-ent, maximum entropy, summarization, named entity extraction, ne, 
+coreference resolution, coref, anaphora, anaphora resolution,
+inference, reasoning, semantics, 
+uima, gate, system architecture, 
+blog pulse, technorati, ice rocket, feedster, blogger, livejournal, xanga" />
+<link href="http://www.icwsm.org/styles/styles.css" rel="stylesheet" type="text/css" />
+
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<div align="center">
+
+<table width="800" border="0" align="center" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" id="icwsm">
+  
+  <!-- header -->
+  <tr>
+    <td><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/index.shtml"><img onmousedown="imd(this)" src="http://www.icwsm.org/2008/images/icwsm_hdr.jpg" alt="International Conference on Weblogs and Social Media " width="800" height="252" border="0" /></span></td>
+  </tr>
+  
+  <!-- body -->
+  <tr>
+    <td valign="top">
+		<table width="100%" border="0" cellspacing="0" cellpadding="0">
+		  <tr>
+		  	<!-- sidebar -->
+			<td width="175" valign="top">
+			
+			<div id="linkList">			
+			<ul>
+			
+
+
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/blog/index.html"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >ICWSM Blog/News</span></span></li>
+		                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/registration.shtml"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></li>				
+		                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/venue.shtml"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Venue</span></span></li>				
+		                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/program.shtml"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span></li>				
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/invited.shtml"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Invited Speakers</span></span></li> 
+ 			        <li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/tutorials.shtml"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span></li> 
+		                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/studentgrants.shtml"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Student Grants</span></span></li>				
+		                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/sponsors.shtml"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></span></li>				
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/committees.shtml"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></span></li>
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/submission.shtml"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Submission</span></span></li>
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/cfp.shtml"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span></li>
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/dates.shtml"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></li>
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/history.shtml"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >History</span></span></li>
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2007/index.html"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >2007 Conference</span></span></li>
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/data-08.shtml"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Social Media Datasets</span></span></li>
+
+</ul>
+</div>
+
+
+			<div id="contact">
+			
+<!--
+				<p><span class="contacthdr">Mailing List</span><br />
+					If you would like to receive information, please subscribe to the
+					conference mailing list by sending an e-mail to 
+					<script language="javascript">
+						var user="name";
+						var ateach="@";
+						var domain="emailaddress.com";
+						var addr=user+ateach+domain;
+						document.writeln('<span onclick="return false" style="text-decoration:underline; color:blue" href=\"mailto:'+addr+'\">'+addr+'</span>');
+					</script>
+					</p>
+-->
+					
+				<p><span class="contacthdr"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Contact Information</span></span><br />
+					<span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >For questions, please e-mail:</span> 
+					<script language="javascript">
+						var user="info";
+						var ateach="@";
+						var domain="icwsm.org";
+						var addr=user+ateach+domain;
+						document.writeln('<span onclick="return false" style="text-decoration:underline; color:blue" href=\"mailto:'+addr+'\">'+addr+'</span>');
+					</script>
+				</p>
+
+			</div><!-- end contact -->
+<CENTER><span onclick="return false" style="text-decoration:underline; color:blue" HREF="http://aaai.org"><img onmousedown="imd(this)" SRC="http://www.icwsm.org/2008/images/aaai-logo.jpg" BORDER="0"></span></CENTER>
+			
+		    <p><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+			</td>
+			<!-- main content -->
+			<td valign="top">
+			
+			<div id="date">
+				<p><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >March 30-April 2, 2008</span></p>
+			</div><!-- end div date -->
+			
+			
+			<div id="main">
+
+
+<H1><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Pre-Conference Tutorials</span></H1>
+<H2><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Sunday, March 30th, 2008</span></H2>
+<H3><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >1:30 - 3:30 PM,</span>  <span onclick="return false" style="text-decoration:underline; color:blue" HREF="tutorials.shtml"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial 1: Subjectivity and Sentiment Analysis</span></span></H3>
+<H3><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >3:30 - 4:00 PM,  Break</span></H3>
+<H3><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >4:00 - 6:00 PM,</span>  <span onclick="return false" style="text-decoration:underline; color:blue" HREF="tutorials.shtml"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial 2: Graph Mining Techniques for Social Media Analysis</span></span></H3>
+<P></P>
+<H1><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Technical Program - Accepted Papers</span></H1>
+<H2><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Monday, March 31, 2008</span></H2>
+<H3><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >8:45 AM - 9:00, Opening Remarks</span></H3>
+<H3><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >9:00 - 10:00, Invited Speaker: Brad Fitzpatrick</span></H3>
+<H3><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >10:00 - 10:30, Break</span></H3>
+<H3><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >10:30 - 12:00 PM, Data Mining 1 (Chair: Lise Getoor)</span></H3>
+<BR>
+<UL>
+<LI><B><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Link-PLSA-LDA: A new unsupervised model for topics and influence of blogs</span></B><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >, Ramesh Nallapati, William Cohen</span></LI>
+<LI><B><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Competing to Share Expertise: the Taskcn Knowledge Sharing Community</span></B><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >,Jiang Yang, Lada Adamic, Mark Ackerman</span>
+<LI><B><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Finding Influencers and Consumer Insights in the Blogosphere</span></B><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >, Naohiro Matsumura, Hikaru Yamamoto, Daisuke Tomozawa</span>
+</UL>
+<H3><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >12:00 - 1:30, Lunch</span></H3>
+<H3><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >1:30 - 3:30, Psychology (Chair: Ed Chi)</span></H3>
+<BR>
+<UL>
+<LI><B><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >What Elements of an Online Social Networking Profile Predict Target-Rater Agreement in Personality?</span></B> <span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >David Evans, Sam Gosling, Anthony Carroll (</span><B><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >best paper nominee</span></B><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >)</span></LI>
+<LI><B><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Spontaneous Inference of Personality Traits from Online Profiles</span></B><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >, Kristin Stecher, Scott Counts</span></LI>
+<LI><B><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >The Psychology of Word Use in Depression Forums in English and in Spanish</span></B><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >, Nairan Ramírez-Esparza, Cindy Chung, Ewa Kacewicz, James W. Pennebaker</span></LI>
+<LI><B><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Thin Slices of Online Profile Attributes</span></B><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >, Kristin Stecher, Scott Counts</span></LI>
+</UL>
+<H3><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >3:30 - 4:00, Break</span></H3>
+<H3><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >4:00 - 5:30, Data Mining 2 (Chair: Lada Adamic)</span></H3>
+<BR>
+<UL>
+<LI><B><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Document Representation and Query Expansion Models for Blog Recommendation</span></B><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >, Jaime Arguello, Jonathan Elsas, Jamie Callan, Jaime Carbonell (</span><B><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >best paper nominee</span></B><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >)</span></LI>
+<LI><B><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Polling the Blogosphere: a Rule-Based Approach to Belief Classification</span></B><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >, Jason Kessler</span></LI>
+<LI><B><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >International Sentiment Analysis for News and Blogs</span></B><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >, Mikhail Bautin, Lohit Vijayarenu, Steven Skiena</span></LI>
+</UL>
+<H3><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >6:30PM - 10:00, Reception at the Seattle Art Museum Sculpture Garden</span></H3>
+<BR>
+<H2><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday, April 1, 2008</span></H2>
+<H3><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >8:45 AM - 9:00, Opening Remarks</span></H3>
+<H3><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >9:00 - 10:00, Invited Speaker: Marc Smith [Update]</span></H3>
+<H3><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >10:00 - 10:30, Break</span></H3>
+<H3><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >10:30 - 12:00 PM, Design and Analysis (Chair: Marti Hearst)</span></H3>
+<BR>
+<UL>
+<LI><B><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Wikipedian Self-Governance in Action: Motivating the Policy Lens</span></B><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >, Ivan Beschastnikh, Travis Kriplean, David McDonald (</span><B><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >best paper award</span></B><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >)</span></LI>
+<LI><B><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >A Large-Scale Study of MySpace: Observations and Implications for Online Social Networks</span></B><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >, James Caverlee, Steve Webb</span></LI>
+<LI><B><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Space Planning for Online Community</span></B><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >, Danyel Fisher, Tammara Turner, Marc Smith</span></LI>
+</UL>
+<H3><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >12:00 - 1:15, Lunch</span></H3>
+<H3><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >1:15 - 2:15, Invited Talk: David Sifry</span></H3>
+<H3><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >2:15 - 2:45, Break</span></H3>
+<H3><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >2:45 - 4:45, Data Mining 3 (Chair: Marc Smith)</span></H3>
+<BR>
+<UL>
+<LI><B><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Recovering Implicit Thread Structure in Newsgroup Style Conversations</span></B><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >, Yi-Chia Wang, Mahesh Joshi, William Cohen, Carolyn Rosé</span></LI>
+<LI><B><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >A Social Network Based Approach to Personalized Recommendation of Participatory Media Content</span></B><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >, Aaditeshwar Seth, Jie Zhang</span></LI>
+<LI><B><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Wikipedia as an Ontology for Describing Documents</span></B><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >, Zareen Syed, Tim Finin, Anupam Joshi</span></LI>
+<LI><B><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >On TREC Blog Track</span></B><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >, Iadh Ounis, Craig Macdonald, Ian Soboroff</span></LI>
+</UL>
+<H3><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >4:45 - 5:30, Poster Madness</span></H3>
+<H3><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >6:30 PM - 8:30,</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="#posters"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Poster Reception</span></span> <span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >at the Hilton</span></H3>
+<BR>
+<H2><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, April 2, 2008</span></H2>
+<H3><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >8:30 AM - 8:45, Opening Remarks</span></H3>
+<H3><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >8:45 - 10:15, News/Media (Chair: TBA)</span></H3>
+<BR>
+<UL>
+<LI><B><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >BLEWS: Using Blogs to Provide Context for News Articles</span></B><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >, Michael Gamon, Sumit Basu, Dmitriy Belenko, Danyel Fisher, Matthew Hurst, Arnd Christian König</span></LI>
+<LI><B><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Exploring Social Media Scenarios for the Television</span></B><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >, Noor Ali-Hasan</span></LI>
+<LI><B><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >The Politics of Sourcing: A Study of Journalistic Practices in the Blogosphere</span></B><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >, Gina Walejko, Thomas Ksiazek</span></LI>
+</UL>
+<H3><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >10:15 - 10:45, Break</span></H3>
+<H3><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >10:45 - 12:15, Panel,</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="#panel"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Politics and Social Media</span></span></H3>
+<H3><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >12:15 - 12:30 PM, Closing Remarks</span></H3>
+<BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" NAME="panel"></span>
+<H3><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Panel</span></H3>
+<span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >The news media and politics have a historical relationship that evolves with each new media channel. The Kennedy-Nixon debate is now seen as a watershed moment for television and politics; television's immediacy and visual messages provided a stark contrast to newspapers and was an evolutionary step from radio. Today, social media such as blogs and wikis differ dramatically from traditional media in their facilitation of interaction and dialog and in their ability to leverage what Chris Anderson has dubbed "the long tail" of the market. As we approach a pivotal presidential election, what is relationship between social media and politics today and where is it headed?</span>
+<UL>
+<LI><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Kathy Gill (University of Washington)</span>
+<LI><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Sumit Basu (Microsoft Research)</span>
+<LI><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >David Postman (Seattle Times)</span>
+<LI><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Derek Young (Exit133)</span>
+</UL>
+<span onclick="return false" style="text-decoration:underline; color:blue" NAME="posters"></span>
+<H3><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Posters</span></H3>
+<UL>
+<LI><B><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Mining and Visualizing Online Web Content Using BAM: Brand Association Map</span></B><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >, Navot Akiva, Eliyahu Greitzer, Yakir Krichman, Jonathan Schler</span>
+<LI><B><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Computational Metaphor Identification in Communities of Blogs</span></B><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >, Eric Baumer, Bill Tomlinson</span>
+<LI><B><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Examining Privacy in Blogging from the Reader's Perspective</span></B><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >, Eric Baumer, Mark Sueyoshi, Bill Tomlinson</span>
+<LI><B><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >ASL-STEM Forum: A Bottom-Up Approach to Enabling American Sign Language to Grow in STEM Fields</span></B><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >, Jeffrey P. Bigham, Daniel S. Otero, Jessica N. DeWitt, Anna C. Cavender, and Richard E. Ladner</span>
+<LI><B><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Understanding the Efficiency of Social Tagging Systems using Information Theory</span></B><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >, Ed H. Chi, Todd Mytkowicz</span>
+<LI><B><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Predicting Success and Failure in Weight Loss Blogs through Natural Language Use</span></B><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >, Cindy K. Chung, Clinton Jones, Alexander Liu, James W. Pennebaker</span>
+<LI><B><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Extracting Topics and Innovators Using Topic Diffusion Process in Weblogs</span></B><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >, Tadanobu Furukawa, Yutaka Matsuo, Ikki Ohmukai, Koki Uchiyama, Mitsuru Ishizuka</span>
+<LI><B><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Communicative Informatics: A Social Media Perspective for Online Communities</span></B><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >, Linda Gallant, Gloria Boone</span>
+<LI><B><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >An Automatic Classification of Book Texts to User-Defined Tags</span></B><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >, Sharon Givon, Theresa Wilson</span>
+<LI><B><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >StoryUpgrade: Finding Stories in Internet Weblogs</span></B><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >, Andrew S. Gordon, Reid Swanson</span>
+<LI><B><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >iBlogVis: An Interactive Blog Visualization Tool</span></B><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >, Indratmo, Julita Vassileva</span>
+<LI><B><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Logsonomy: A Search Engine Folksonomy</span></B><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >, Robert Jäschke, Beate Krause, Andreas Hotho, Gerd Stumme</span>
+<LI><B><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Approximating the Community Structure of the Long Tail</span></B><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >, Akshay Java, Anupam Joshi, Tim Finin</span>
+<LI><B><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Preliminary Semantic Analysis of Political Blogs</span></B><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >, Maojin Jiang, Shlomo Argamon</span>
+<LI><B><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Second Space: A Generative Model for the Blogosphere</span></B><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >, Amit Karandikar, Akshay Java, Anupam Joshi, Tim Finin, Yaacov Yesha, Yelena Yesha</span>
+<LI><B><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Cross-Lingual Blog Analysis based on Multilingual Blog Distillation from Multilingual Wikipedia
+Entries</span></B><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >, Mariko Kawaba, Hiroyuki Nakasaki, Takehito Utsuro, Tomohiro Fukuhara</span>
+<LI><B><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Discovering Relationships among Tags and Geotags</span></B><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >, Sang Su Lee, Dongwoo Won, Dennis McLeod</span>
+<LI><B><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Some Users Pack a Wallop: Measuring the Impact of Core Users on the Participation of Others in
+Online Social Systems</span></B><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >, Thomas M. Lento, Eric Gleave, Marc A. Smith, Howard T. Welser</span>
+<LI><B><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >The MultiRank Bootstrap Algorithm: Self-Supervised Political Blog Classification and Ranking Using Semi-Supervised Link Classification</span></B><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >, Frank Lin, William W. Cohen</span>
+<LI><B><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Blog Link Classification</span></B><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >, Justin Martineau, Matthew Hurst</span>
+<LI><B><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Analysis of Online Question-Answering Forums as Heterogeneous Networks</span></B><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >, Tsuyoshi Murata, Tomoyuki Ikeya</span>
+<LI><B><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Extraction of Topical Consumer Products from Weblogs</span></B><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >, Shinichi Nagano, Masumi Inaba, Yumiko Mizoguchi, Takahiro Kawamura</span>
+<LI><B><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Thematic and Social Indicators for Flickr Groups</span></B><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >, Christophe Prieur, Nicolas Pissard, Jean-Samuel Beuscart, Dominique Cardon, Pascal Pons</span>
+<LI><B><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >A Shallow Approach to Subjectivity Classification</span></B><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >, Stephan Raaijmakers, Wessel Kraaij</span>
+<LI><B><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Collecting and Analyzing Japanese Splogs based on Characteristics of Keywords</span></B><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >, Yuuki Sato, Takehito Utsuro, Tomohiro Fukuhara, Yasuhide Kawada, Yoshiaki Murakami, Hiroshi Nakagawa, Noriko Kando</span>
+<LI><B><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >StYLiD: Structure Your Own Linked Data</span></B><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >, Aman Shakya, Hideaki Takeda, Vilas Wuwongse</span>
+<LI><B><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Clustering Tags in Enterprise and Web Folksonomies</span></B><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >, Edwin Simpson</span>
+<LI><B><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >The Psychology of Blogging Communities: Social Identities and Knowledge Transfer across Work-Groups</span></B><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >, Bryan Sippel, Susan E. Brodt</span>
+<LI><B><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Recommendation of Multimedia Items by Link Analysis and Collaborative Filtering</span></B><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >, Davin Wong, Ella Bingham, Saara Hyvöne</span>
+</UL>
+
+<H3><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Demonstrations</span></H3>
+<UL>
+<LI><B><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >GroupMe! - Combining Ideas of Wikis, Social Bookmarking, and Blogging</span></B><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >, Fabian Abel, Mischa Frank, Nicola Henze, Daniel Krause, Patrick Siehndel</span>
+<LI><B><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Visualization of Social Interactions in Facebook</span></B><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >, Takashi Okamoto, Kyle Buza</span>
+<LI><B><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Social Access Control for Social Media Using Shared Knowledge Questions</span></B><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >, Michael Toomim, Xianhang Zhang, James Fogarty, Nathan Morris</span>
+
+				
+			</div><!-- end div main -->			
+			</td>
+		  </tr>
+		</table>
+	</td>
+  </tr>
+  
+  <!-- footer -->
+  <tr>
+    <td>
+	<div id="footer">
+		<p><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >International Conference on Weblogs and Social Media, 2008</span></p>
+<P><span onclick="return false" style="text-decoration:underline; color:blue" HREF="http://flickr.com/photos/leo_watson/225619348/"><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Header image</span>

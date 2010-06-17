@@ -1,0 +1,716 @@
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/10/annotation/annotated_repository/http+^^www.sigkdd.org^kdd2009^tutorials.html_2009-08-05__14-44-49.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/10/annotation/annotated_repository/http+^^www.sigkdd.org^kdd2009^tutorials.html_2009-08-05__14-44-49.yaml created on Thu Aug 13 13:58:45 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+    <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+    <title>KDD 2009: Tutorials</title>
+    <link rel="stylesheet" href="style.css" type="text/css" />
+    <style type="text/css">
+        .dropdown
+        {
+            font-size: 11pt;
+            margin-bottom: 8px;
+        }
+        .details
+        {
+            display: none;
+            margin-bottom: 25px;
+            margin-top: 10px;
+            font-size: 9pt;
+        }
+    </style>
+
+    <script type="text/javascript">
+    function item_mouseover(item)
+    {
+        item.style.textDecoration = "underline";
+    }
+    
+    function item_mouseout(item)
+    {
+        item.style.textDecoration = "none";
+    }
+    
+    function item_toggle(item)
+    {
+        var elem = item.getElementsByTagName("div");
+        if (elem.length > 0)
+        {
+            var current = elem[0].style.display;
+            var span = item.getElementsByTagName("span")[0];
+            var sign = item.getElementsByTagName("span")[1];
+            
+            if (current == "block")
+            {
+                elem[0].style.display = "none";
+                //span.style.backgroundColor = "transparent";
+                sign.innerHTML = "+";
+            }
+            else
+            {
+                elem[0].style.display = "block";
+                //span.style.backgroundColor = "yellow";
+                sign.innerHTML = "&ndash;";
+            }
+        }
+    }
+    </script>
+
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+    <div style="text-align: center;">
+        <img onmousedown="imd(this)" alt="" src="images/title.jpg" width="1003" height="112"></div>
+    <div style="text-align: center;">
+        <table border="0" align="center" cellspacing="0" cellpadding="0" class="page">
+            <tr>
+                <td colspan="2" class="mainNav">
+                    <div>
+                        <span onclick="return false" style="text-decoration:underline; color:blue" href="index.html"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="dates.html"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Key Dates</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="papers.html"
+                            style="background-color: #E9D657; color: #000000"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Activities</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="kddcup.html">
+                                <span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >KDD Cup</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="program.html"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="registration.html"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span>
+                        <span onclick="return false" style="text-decoration:underline; color:blue" href="organizers.html"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Organizers</span></span>
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <td colspan="2" class="subNav">
+                    <div>
+                        <span onclick="return false" style="text-decoration:underline; color:blue" href="papers.html"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Papers</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.html"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials.html"
+                            style="font-weight: bold; color: #000000"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="panels.html"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Panels</span></span>
+                        <span onclick="return false" style="text-decoration:underline; color:blue" href="demos.html"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Demos</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="exhibits.html"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Exhibits</span></span>
+                        <span onclick="return false" style="text-decoration:underline; color:blue" href="industry_sessions.html"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Industry Sessions</span></span>
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <td class="leftNav">
+                    <div>
+                    </div>
+                </td>
+                <td class="content">
+                    <h1><span onclick="return false" style="text-decoration:underline; color:blue" name="top"></span><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></h1>
+                    <p><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >All tutorials will be held on Sunday, June 28th.</span></p>
+                    <h2><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Morning</span> </h2>
+                    <ul>
+                      <li><span onclick="return false" style="text-decoration:underline; color:blue" href="#t1"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >T1 - Statistical Challenges in Computational Advertising</span> </span><br>
+                      <span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Deepayan Chakrabarti, Deepak Agarwal</span></li>
+                      <li><span onclick="return false" style="text-decoration:underline; color:blue" href="#t2"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >T2 - How to do good research, get it published in SIGKDD and get it cited!</span></span><br>
+                      <span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Eamonn Keogh</span></li>
+                      <li><span onclick="return false" style="text-decoration:underline; color:blue" href="#t3"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >T3 - Large Graph-Mining: Power Tools and a Practitioner's Guide</span></span><br>
+                      <span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Christos Faloutsos, Gary Miller, Charalampos (Babis) Tsourakakis</span></li>
+                      <li><span onclick="return false" style="text-decoration:underline; color:blue" href="#t4"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >T4 - Planning, Running, and Analyzing Controlled Experiments on the Web</span></span><br>
+                      <span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Ronny Kohavi, Roger Longbotham, John Quarto-vonTivadar</span><br></li>
+                    </ul>
+                  <h2><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Afternoon</span></h2>
+                    <ul>
+                      <li><span onclick="return false" style="text-decoration:underline; color:blue" href="#t5"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >T5 - Predictive Modelling in the Wild: Success Factors in Data Mining Competitions and Real-World Applications</span></span><br>
+                      <span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Saharon Rosset, Claudia Perlich</span></li>
+                      <li><span onclick="return false" style="text-decoration:underline; color:blue" href="#t6"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >T6 - New Directions in Data Quality Mining</span></span><br>
+                      <span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Laure Berti-Equille, Tamraparni Dasu</span></li>
+                      <li><span onclick="return false" style="text-decoration:underline; color:blue" href="#t7"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >T7 - Event Detection</span></span><br>
+                      <span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Neill, Weng-Keen Wong</span></li>
+                      <li><span onclick="return false" style="text-decoration:underline; color:blue" href="#t8"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >T8 - Advances in Mining the Web</span></span><br>
+                      <span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Myra Spiliopoulou, Osmar Zaiane, Bamshad Mobasher, Olfa Nasraoui</span></li>
+                      <li><span onclick="return false" style="text-decoration:underline; color:blue" href="#t9"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >T9 - Real World Text Mining</span></span><br>
+                      <span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Ronen Feldman, Lyle Ungar</span></li>
+                    </ul>
+                  <h1><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Abstracts</span></h1>
+                  <h2><span onclick="return false" style="text-decoration:underline; color:blue" name="t1"></span><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >T1 - Statistical Challenges in Computational Advertising</span> </h2>
+                    <p><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Deepayan Chakrabarti, Deepak Agarwal</span></p>
+                    <p><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Many organizations now devote significant fractions of their
+                      advertising/outreach budgets to online advertising; ad-networks like
+                      Yahoo!, Google, MSN have responded by constructing new kinds of
+                      economic models and perform the fundamental task of matching the most
+                      relevant ads (selected from a large inventory) for a
+                      (query,user) pair in a given context. Nearly all of
+                      the challenges that arise are substantially data- or model-driven (or
+                      both). Computational Advertising is a relatively new scientific
+                      sub-discipline at the interesection of large scale search and text
+                      analysis, information retrieval, statistical modeling, machine
+                      learning, optimization and microeconomics that address this
+                      match-making problem and provides unprecedented opportunities to data
+                    miners.</span></p>
+                    <p><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Topics covered include a comprehensive introduction to several
+                      advertising forms (sponsored search, contextual adverting,
+                      display advertising), revenue models (pay-per-click, pay-per-view,
+                      pay-per-conversion) and data mining challenges involved, along with an
+                      overview of state-of-the-art techniques in the area with a detailed
+                      discussion of open problems.  We will cover
+                      information retrieval techniques and their limitations; data mining
+                      challenges involved in performing ad matching through clickstream
+                      data and challenging optimization issues that arise in display
+                      advertising. In particular, we will cover statistical modeling 
+                      techniques for
+                      clickstream data and explore/exploit schemes to perform online
+                      experiments for better long-term performance using multi-armed bandit
+                      schemes. We also discuss the close relationship of techniques used in
+                      recommender systems to our problem but indicate several additional
+                      issues that needs to be addressed before they become routine in
+                  computational advertising.</span></p>
+                    <p><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >We will only assume basic knowledge of statistical methods, no prior
+                      knowledge of online advertising is required. In fact, the first hour
+                      that provides an introduction to the area would be appropriate for all
+                      registered attendees of KDD 2009. The second half would require
+                      familiarity with basic concepts like regression, probability
+                      distributions and appreciation of issues involved in fitting
+                      statistical models to large scale applications. No prior knowledge of
+                  multi-armed bandits would be assumed.</span></p>
+                    <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#top"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Back to top...</span></span></p>
+                    <h2><span onclick="return false" style="text-decoration:underline; color:blue" name="t2"></span><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >T2 - How to do good research, get it published in SIGKDD and get it cited!</span></h2>
+                    <p><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Eamonn Keogh</span></p>
+                    <p><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >While SIGKDD has traditionally enjoyed an unusually high quality of reviewing, there is no doubt that publishing in SIGKDD (and other high quality data mining conferences) is very challenging. This is especially true for young faculty, grad students whose primary advisor is not an experienced SIGKDD author, or people from outside the community (i.e. a biologist or mathematician who has a result that might greatly interest the data mining community).</span></p>
+                    <p><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >In this tutorial Dr. Keogh will demonstrate some simple ideas to enhance the probability of success in getting your paper published in a top data mining conference; and after the work is published, getting it highly cited.</span></p>
+                    <p><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >These tips and tricks are based on 12 years experience as a SIGKDD author and reviewer, and wisdom solicited from many of the most prolific data mining researchers/reviewers.</span></p>
+                    <p><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Topics covered in the tutorial include:</span> </p>
+                    <ul>
+                      <li> <span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Finding the right problems to work on (80% of the battle).</span></li>
+                      <li>                        <span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Don't summarize, sell! Writing abstracts that put the reviewer on your side from the start.</span></li>
+                      <li>                        <span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Getting or creating the perfect dataset.</span></li>
+                      <li>                        <span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Experiments that tell a story.</span></li>
+                      <li>                        <span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Making effective and interesting figures.</span></li>
+                      <li> <span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Getting the reviewers on your side.</span></li>
+                      <li> <span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >The top-ten avoidable reasons why papers get rejected from SIGKDD.</span></li>
+                      <li>                        <span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Three simple tricks to increase the number of citations to your work.</span></li>
+                    </ul>
+                    <p><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >While Dr. Keogh does not claim to have a &ldquo;magic bullet&rdquo; for publishing in SIGKDD, his significant track record of publishing in top data mining venues, combined with extensive (and deliberately uncredited) experience in helping younger researchers &ldquo;break-in&rdquo; to SIGKDD have placed him in a unique position to share useful and actionable advice.</span></p>
+                    <p><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >While writing this tutorial Dr. Keogh, sought and received advice from many respected data mining researchers, their advice is incorporated into this tutorial.</span></p>
+                    <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#top"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Back to top...</span></span></p>
+                    <h2><span onclick="return false" style="text-decoration:underline; color:blue" name="t3"></span><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >T3 - Large Graph-Mining: Power Tools and a Practitioner's Guide</span></h2>
+                  <p><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Christos Faloutsos, Gary Miller, Charalampos (Babis) Tsourakakis</span></p>
+                    <p><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Numerous real-world datasets are in matrix form, thus matrix algebra, linear and multilinear, provides important algorithmic tools for analyzing them. The main type of datasets of interest in 
+                    this tutorial are graphs. Important datasets modeled as graphs include the Internet, the Web, social networks (e,g Facebook, LinkedIn), computer networks, biological networks and many more.</span></p>
+                    <p><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >We will discuss how we represent a graph as a matrix (adjacency matrix, Laplacian)  and the important properties of  those representations. We will then show how these properties are used in several important problems, including node importance via random walks (Pagerank), community detection (METIS, Cheeger inequality), graph isomorphism and graph similarity. Important dimensionality reduction techniques (SVD and random projections) will be discussed in the context of graph mining problems.</span></p>
+                    <p><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Furthermore, we provide a survey of the work on the epidemic threshold, node proximity and center-piece subgraphs. State-of-art graph mining tools for analyzing time evolving graphs will also be presented. Throughout the tutorial, patterns in static and time evolving, weighted and unweighted real-world graphs will be presented.</span></p>
+                    <p><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >The target audience are data mining professionals who wish to know the most important matrix algebra tools, their applications in large graph mining and the theory behing them.</span><br>
+                        <span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Prerequisites: Computer science background (B.Sc or equivalent); familiarity with undergraduate linear algebra.</span><br>
+                    <span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Demos will be presented.</span></p>
+                    <p><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.cmu.edu/~christos/TALKS/09-KDD-tutorial/" target="_blank"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >http://www.cs.cmu.edu/~christos/TALKS/09-KDD-tutorial/</span></span></p>
+                  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#top"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Back to top...</span></span></p>
+                    <h2><span onclick="return false" style="text-decoration:underline; color:blue" name="t4"></span><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >T4 - Planning, Running, and Analyzing Controlled Experiments on the Web</span></h2>
+                    <p><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Ronny Kohavi, Roger Longbotham, John Quarto-vonTivadar</span></p>
+                    <p><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >The web provides an unprecedented opportunity to evaluate ideas quickly using controlled experiments, also called randomized experiments, A/B tests (and their generalizations), split tests, and MultiVariable Tests (MVT).  Controlled experiments embody the best scientific design for establishing a causal relationship between changes and their influence on user-observable behavior.   Data Mining and Knowledge Discovery techniques can then be used to analyze the data from such experiments.  The tutorial will provide a survey and practical guide to running controlled experiments based on the recently published survey article in the Data Mining and Knowledge Discovery Journal, co-authored with the two of the tutorial co-presenters (</span><span onclick="return false" style="text-decoration:underline; color:blue" href="http://exp-platform.com/dmkd_survey.aspx" target="_blank"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >http://exp-platform.com/dmkd_survey.aspx</span></span><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >), and based on the book &ldquo;Always Be Testing&rdquo; co-authored by the 3rd tutorial co-presenter (</span><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.amazon.com/Always-Be-Testing-Complete-Optimizer/dp/0470290633" target="_blank"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >http://www.amazon.com/Always-Be-Testing-Complete-Optimizer/dp/0470290633</span></span><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >).  The book includes use of industry tools, such as Google Website Optimizer and recently ranked #2 on Amazon&rsquo;s sales rank for computers/e-commerce books. The tutorial includes multiple real-world examples of actual controlled experiments (many with surprising results), a review the theory and the statistics used to plan and analyze such experiments, and a discussion of the limitations and pitfalls that might face experimenters.  Demos will be shown of some tools that support controlled experiments.</span> </p>
+                    <p><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >A video of a related talk can be found on the videolectures website:</span><br>
+                    <span onclick="return false" style="text-decoration:underline; color:blue" href="http://videolectures.net/cikm08_kohavi_pgtce/"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >http://videolectures.net/cikm08_kohavi_pgtce/</span></span></p>
+                    <p><br>
+                      <span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >The shorter version of the DMKD survey paper is now part of the class reading for several classes at Stanford University (CS147, CS376), USCD (CSE 291), and at the University of Washington (CSEP 510).</span><br>
+                    </p>
+                  <p><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Topics covered include:</span><br>
+                    </p>
+                    <ol>
+                      <li><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Why online experimentation using controlled experiments is important</span><br>
+                      </li>
+                      <li><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >What you need in order to conduct a valid experiment</span><br>
+                      </li>
+                      <li><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Planning and Analysis of basic experiments</span><br>
+                      </li>
+                      <li><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Benefits and limitations of experimentation</span><br>
+                      </li>
+                      <li><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Multivariable experiments: setup, analysis, interpretation, and interactions</span><br>
+                      </li>
+                      <li><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Architectures</span><br>
+                      </li>
+                      <li><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Using online free and low-cost software services (demos)</span></li>
+                      <li><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Challenges and advanced statistical concepts for experiments</span></li>
+                    </ol>
+                    <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#top"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Back to top...</span></span></p>
+                    <h2><span onclick="return false" style="text-decoration:underline; color:blue" name="t5"></span><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >T5 - Predictive Modelling in the Wild: Success Factors in Data Mining Competitions and Real-World Applications</span></h2>
+                    <p><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Saharon Rosset, Claudia Perlich</span></p>
+                    <p><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >In this tutorial, we give our perspective on the keys to success in 
+                      application of predictive modeling to competitions like KDD Cup and 
+                      real-life business intelligence projects. We argue that these two 
+                      modes of applying predictive modeling share many similarities, but 
+                      have also some important differences. We discuss the main success 
+                      factors in predictive modeling: domain understanding, statistical 
+                      acumen, and appropriate algorithmic approaches. We describe our 
+                      relevant experiences in the context of three recent predictive 
+                      modeling competitions where our team has had success (KDD Cup 2007 and 
+                      2008 and INFORMS DM challenge 2008) and two case studies of projects 
+                      we have led at IBM Research. We also survey some of the recurring 
+                      challenges and complexities in practical predictive modeling 
+                      applications. One key issue is information leakage, and we discuss its 
+                      definition, influence, detection and avoidance. We consider leakage to 
+                      be the silent killer of many predictive modeling projects, and we 
+                      demonstrate its impact on the competitions, and discuss the challenges 
+                      in addressing it in the real-life projects. Other challenges include 
+                      framing real-life modeling objectives into predictive modeling, and 
+                      usefully applying relational learning concepts when modeling &quot;real-life&quot; complex, relational datasets.</span></p>
+                    <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#top"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Back to top...</span></span></p>
+                    <h2><span onclick="return false" style="text-decoration:underline; color:blue" name="t6"></span><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >T6 - New Directions in Data Quality Mining</span><br>
+                    </h2>
+                    <p><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Laure Berti-Equille</span> <em><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >(Univ. of Rennes 1, France)</span></em><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >, Tamraparni Dasu</span> <em><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >(AT&amp;T Labs - Research)</span></em></p>
+                    <p><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >As data types and data structures change to keep up with evolving 
+                      technologies and applications, data quality problems too have evolved 
+                      and become more complex and interwoven. Data streams, web logs, 
+                      Wikipedias, biomedical applications, video streams and social 
+                      networking websites generate a mind boggling variety of data types. 
+                      However, data quality mining, the use of data mining to manage, 
+                      measure and improve data quality, has focused mostly on addressing 
+                    each category of data glitch separately as a static entity.</span></p>
+                  <p><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >In this tutorial we provide a technical, KDD-focused account of recent 
+                      research and developments in discovering  and treating complex data 
+                      anomalies in a broad range of data. In particular, we highlight new 
+                      directions in data quality mining: (a) the applicability and 
+                      effectiveness of the methodologies for various data types such as 
+                      structured, semi-structured and stream data, (b) the detection of 
+                      concomitant data glitches and patterns like the occurrence of outliers 
+                      in data with missing values and duplicates, or the co-occurrence of 
+                      missing values and duplicates, (c) the design of sequential approaches 
+                      to data quality mining, such as workflows composed of a sequence of 
+                      tasks for data quality exploration and analysis. We give an overview 
+                      of past work, introduce current research in this area including recent 
+                      methods and techniques for discovering complex patterns of anomalies 
+                      (e.g., multivariate outliers, disguised missing values, combination of 
+                    different types of noise), and highlight new directions and open 
+                    problems in data quality mining.</span></p>
+                  <p><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >The tutorial includes extensive case studies and practical examples of 
+                      mining data quality problems for a variety of large datasets and data 
+                      types e.g., relational, XML, data streams. We discuss illustrative 
+                    examples drawn from a variety of domains like CRM, networking, 
+                    biology, and mobility.</span></p>
+                    <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#top"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Back to top...</span></span></p>
+                    <h2><span onclick="return false" style="text-decoration:underline; color:blue" name="t7"></span><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >T7 - Event Detection</span></h2>
+                    <p><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Neill, Weng-Keen Wong</span></p>
+                    <p><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >A common task in surveillance, scientific discovery and data cleaning
+                      involves monitoring routinely collected data for anomalous events. Detecting
+                      events in univariate time series data can be effectively accomplished using
+                      well-established techniques such as Box-Jenkins models, regression, and
+                      statistical quality control methods. In recent years, however, routinely
+                      collected data has become increasingly complex. At each time step, the data
+                      collected can consist of multivariate vectors and/or be spatial in nature.
+                      For instance, healthcare data used in disease surveillance often consists of
+                      multivariate patient records or spatially distributed pharmaceutical sales
+                      data.  Consequently, new event detection algorithms have been developed that
+                      not only consider temporal information but also detect spatial patterns and
+                    integrate information from multiple spatio-temporal data streams.</span></p>
+<p><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >This tutorial will present algorithms for event detection, with a focus on
+          algorithms dealing with multivariate temporal and spatio-temporal data. We
+          will introduce event detection by providing a general formulation of the
+          event detection problem and describing its unique challenges.  In the first
+          half of the tutorial, we will cover algorithms for detecting events in both
+          univariate and multivariate temporal data. The second half will present
+          methods for detecting events in spatio-temporal data, including several
+                      recently proposed multivariate approaches.</span></p>
+                    <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#top"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Back to top...</span></span></p>
+                    <h2><span onclick="return false" style="text-decoration:underline; color:blue" name="t8"></span><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >T8 - Advances in Mining the Web</span></h2>
+                    <p><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Myra Spiliopoulou, Osmar Zaiane, Bamshad Mobasher, Olfa Nasraoui</span></p>
+                    <p><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >The Web has changed our way of life and the Web 2.0 has changed our 
+                      way of perceiving and using the Web. Data analysis is now required in 
+                      a plethora of applications that aim to enrich the experience of people 
+                      with the Web. We first discuss data mining for the social Web. We 
+                      elaborate on social network analysis and focus on community mining, 
+                      then go over to recommendation engines and personalization. We discuss 
+                      the challenges that emerged through the shift from the traditional Web 
+                      to Web 2.0. We then focus on two issues - the need to protect Web 
+                      applications from manipulation and the need to make them adaptive 
+                      towards change. We first discuss manipulations/attacks in recommender 
+                      systems and present counter-measures. We then elaborate on how changes/concept drifts can be dealt with in applications that analyze 
+                      clickstream data, monitor topics in news and blogs, or monitor 
+                    communities and their evolution.</span></p>
+                    <p><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >This tutorial is aimed at novice researchers that have general 
+                      background in data mining and are interested in understanding the</span> <br>
+                      <span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >potential and challenges pertinent to the social Web. The participants 
+                      should have a basic understanding of recommendation engines, 
+                      personalization and text modeling for mining (vector space models). 
+                      They will learn how basic techniques are extended and new techniques 
+                      are designed for mining the Web, especially the social Web. They will 
+                      also learn about issues that are still open and require further 
+                      research - research that the tutorial participants may decide to 
+                      perform themselves.</span><br>
+                  </p>
+                    <p><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >OUTLINE</span><br>
+                      <span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >PART I: Mining the Social Web [Osmar Zaiane]</span><br>
+                      <span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >PART II: Recommendations and Personalization in the Social Web [Bamshad
+                      Mobasher]</span><br>
+                      <span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >PART III: Dealing with Evolution in the Web [Myra Spiliopoulou]</span><br>
+                      <span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >PART IV: Mining Web Data Streams [Olfa Nasraoui]</span></p>
+                    <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#top"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Back to top...</span></span></p>
+                    <h2><span onclick="return false" style="text-decoration:underline; color:blue" name="t9"></span><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >T9 - Real World Text Mining</span></h2>
+                    <p><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Ronen Feldman, Lyle Ungar</span></p>
+                    <p><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >The proliferation of documents available on the Web and on corporate
+  intranets is driving a new wave of text mining research and application. Earlier research addressed extraction of information from relatively small collections of well-structured documents such as newswire or scientific publications. Text mining from the other corpora such as the web requires new techniques drawn from data mining, machine learning, NLP and IR. Text mining requires preprocessing document collections (text categorization, information extraction, term extraction), storage of the intermediate representations, analysis of these intermediate representations (distribution analysis, clustering, trend analysis, association rules, etc.), and visualization of the results. In this tutorial we will present the algorithms and methods used to build text mining systems including pre-processing techniques, supervised leearning (e.g., CRF), entity resolution, relationship extraction, unsupervised learning and machine reading.</span><br>
+  <br>
+  <span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >The tutorial will cover the state of the art in this rapidly growing area of research, including recent advances in unsupervised methods for extracting facts from text and methods used for web-scale mining. We will also present several real world applications of text mining.  Special emphasis will be given to lessons learned from years of experience in developing real world text mining systems, including how to handle informal texts such as blogs and user reviews and how to build scalable systems.</span><br>
+  <br>
+  <span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >The instructors are Ronen Feldman and Lyle Ungar. Ronen is an Associate Professor of Information Systems at the Business School of the Hebrew University in Jerusalem. He is the founder of the ClearForest text mining corporation, and the author of the book &quot;The Text Mining Handbook&quot; published by Cambridge University Press in 2007. Lyle is an Associate Professor of Computer and Information Science at the University of Pennsylvania.He recently returned from a sabbatical at Google, where he and a team built what is probably the world&rsquo;s largest named entity recognition system.</span></p>
+                    <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#top"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Back to top...</span></span></p>
+                  <h1><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >KDD 2009 Call for Tuturial Proposals (expired)</span></h1>
+                  <p><strong><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Please note that the submission deadline has expired. We will not be able to accept any more submissions.</span></strong></p>
+              <p><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >KDD'09 will host tutorials covering topics in data mining of interest to the research community as well as application developers. The tutorials will be part of the main conference technical program, and are free of charge to the attendees of the conference.</span></p>
+              <p><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >We invite proposals for half-day tutorials from active researchers and experienced tutors. Ideally, a tutorial will cover the state-of-the-art research, development and applications in a specific data mining direction, and stimulate and facilitate future work. Tutorials on interdisciplinary directions, novel and fast growing directions, and significant applications are highly encouraged. Accepted tutorials will receive one free registration to the conference and an honorarium of $500.</span></p>
+              <h2><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></h2>
+              <ul>
+              <li><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Proposals due: February 23</span><strong> <span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >(Expired)</span></strong></li>
+              <li><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Notification of Acceptance: May 25</span></li>
+              </ul>
+              <h2><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Proposal Submission</span></h2>
+              <p><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >A tutorial proposal should be formatted in the following sections.</span></p>
+              <ol>
+                <li><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Title</span></li>
+                <li><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Abstract (up to 150 words)</span></li>
+                <li><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Target audience and prerequisites. Proposals must clearly identify the intended audience for the tutorial (e.g., novice users of statistical techniques, or expert researchers in text mining). What background will be required of the audience? Why is this topic important/interesting to the KDD community? What is the benefit to participants?</span></li>
+                <li><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Outline of the tutorial. Enough material should be included to provide a sense of both the scope of material to be covered and the depth to which it will be covered. The more details that can be provided, the better (up to and including links to the actual slides). Note that the tutors should NOT focus mainly on their own research results. A KDD tutorial is not a forum for promoting one's research or product.</span></li>
+                <li><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >A list of forums and their time and locations if the tutorial or a similar/highly related tutorial has been presented by the same author(s) before, and highlight the similarity/difference between those and the one proposed for KDD'09 (up to 100 words for each entry).</span></li>
+                <li><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >A list of tutorials on the same/similar/highly related topics given by other people, and highlight the difference between yours and theirs (up to 100 words for each entry).</span></li>
+                <li><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >A list of other tutorials given by the authors, please list the titles, the presenters and the forums only.</span></li>
+                <li><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Tutors' short bio and their expertise related to the tutorial (up to 200 words per tutor).</span></li>
+                <li><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >A list of up to 20 most important references that will be covered in the tutorial.</span></li>
+                <li><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >(Optional) URLs of the slides/notes of the previous tutorials given by the authors, and any specific audio/video/computer requirements for the tutorial.</span></li>
+              </ol>
+              <p><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Please send your submission to:</span></p>
+              <p><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Bart Goethals</span><br>
+                <span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials Chair</span><br>
+</p>
+              <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#top"><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Back to top...</span>

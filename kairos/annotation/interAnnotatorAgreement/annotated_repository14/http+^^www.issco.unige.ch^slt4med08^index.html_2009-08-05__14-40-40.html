@@ -1,0 +1,479 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN"
+   "http://www.w3.org/TR/html4/frameset.dtd">
+<HTML>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/6/annotation/annotated_repository/http+^^www.issco.unige.ch^slt4med08^index.html_2009-08-05__14-40-40.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/6/annotation/annotated_repository/http+^^www.issco.unige.ch^slt4med08^index.html_2009-08-05__14-40-40.yaml created on Thu Aug 13 13:57:21 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+ <title>SLT for Med - Coling 08</title>
+ <meta http-equiv="Content-Type" content="application/xhtml+xml; charset=windows-1250" />
+ <meta name="Robots" content="index,follow" />
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)" BGCOLOR="#F4F496" VLINK="#54548B"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<CENTER>
+<table>
+<tr><td><img onmousedown="imd(this)" src="/images/manchester_coling08.jpg" width=200></td>
+<td><h1><font color=red><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Coling 2008</span><br><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Workshop on</span><br>
+
+<span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Speech Processing for Safety Critical Translation and Pervasive Applications</span></font></h1>
+<h2><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Manchester, Saturday 23 August, 2008</span></h2>
+ 
+</td></tr>
+</table>
+<span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >In connection with</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://personalpages.manchester.ac.uk/staff/harold.somers/coling/index.html"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Coling 2008</span></span><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >, 
+the 22nd International Conference on Computational Linguistics</span><br>
+</CENTER>
+<BR>
+<B><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html#Programme" title="Programme"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Programme</span></span> <span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >including demo session now available</span></B>
+<BR>
+	<h2><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></h2>
+	<P>
+<span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Two ideas currently gaining popularity in spoken dialogue construction are safety critical translation and pervasive speech-enabled applications. Safety critical, and in particular, medical, applications have emerged as one of the most popular domains for speech translation. At the first workshop on medical speech translation, held at HLT 2006, a measure of consensus emerged on at least some points. The key issue that differentiates the medical domain from most other application areas for speech translation is its safety-critical nature; systems can realistically be field- deployed now or in the very near future; the basic communication model should be collaborative, and allow the client users to play an active role; and medical systems are often most useful when deployed on mobile devices. This last point offers a natural link to pervasive computing applications, where spoken language technologies provide an effective and natural interface for mobile devices in situations where traditional modes of communication are less appropriate.</span>
+        </P>
+	<P>
+<span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >However, there is so far little agreement on many central questions, including choices of architectures, component technologies, and evaluation methodologies. In this workshop we hope that people interested in these types of application will meet, exchange ideas and demo live systems.</span>
+</P>
+	<h3><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Submission</span></h3>
+	<P>
+        <span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Submissions may be of the following kinds:</span>
+        </P>
+        <UL>
+        <LI><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Long papers (up to 8 pages) describing substantial work on
+   speech translation for medical and other safety-critical
+   applications. We particularly encourage papers describing
+   user-centered system evaluations.</span>
+        <LI><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >System demonstrations, accompanied by short papers (up to 4 pages).
+   Submission of a long paper does NOT preclude submission of an
+   accompanying demo paper.</span>
+        <LI><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Short papers (up to 4 pages) describing component systems, including
+   ASR, MT and TTS, which are particularly relevant to medical and
+   safety critical speech translation.</span>
+        <LI><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Position statements (up to 4 pages) suggesting definitions of a
+   shared task.</span>
+        </UL>
+        <P>
+        <span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Papers should be submitted via the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="https://www.softconf.com/coling08/SLT4MED08/submit.html"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >START
+submission web page</span></span><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >.
+All submissions should use the same style and format as for the main
+conference. Style files can be downloaded from the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://personalpages.manchester.ac.uk/staff/harold.somers/coling/s
+tyle.html"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Coling 2008 style guidelines</span></span> <span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >page. Author information
+should be included in the papers, since reviewing will NOT be blind.</span>
+	</P>
+	<H3><span onclick="return false" style="text-decoration:underline; color:blue" name="Programme"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Programme</span></span></H3>
+<table cellspacing="0" cellpadding="5" border="0">
+<tr><td colspan=2><B><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Saturday, August 23, 2008</span></B></td></tr>
+<tr><td valign=top><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >9:30&#8211;9:40</span></td><td valign=top><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Opening Remarks</span></td></tr>
+<tr><td valign=top><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td><td valign=top><b><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Session 1: Architectures for Speech Translation</span></b></td></tr>
+<tr><td valign=top><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >09:40&#8211;10:05</span></td><td valign=top><i><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Mitigation of Data Sparsity in Classifier-Based Translation</span></i><br>
+<span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Emil Ettelaie, Panayiotis G. Georgiou and Shrikanth S. Narayanan</span></td></tr>
+<tr><td valign=top><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >10:05&#8211;10:30</span></td><td valign=top><i><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Speech Translation with Grammatical Framework</span></i><br>
+<span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Bj&ouml;rn Bringert</span></td></tr>
+<tr><td valign=top><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >10:30&#8211;11:00</span></td><td valign=top><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></td></tr>
+<tr><td valign=top><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td><td valign=top><b><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Session 2: Pervasive Speech Applications</span></b></td></tr>
+<tr><td valign=top><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >11:00&#8211;11:25</span></td><td valign=top><i><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >An Integrated Dialog Simulation Technique for Evaluating Spoken Dialog Systems</span></i><br>
+<span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Sangkeun Jung, Cheongjae Lee, Kyungduk Kim and Gary Geunbae Lee</span></td></tr>
+<tr><td valign=top><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >11:25&#8211;11:50</span></td><td valign=top><i><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Economical Global Access to a VoiceXML Gateway Using Open Source Technologies</span></i><br>
+<span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Kulwinder Singh and Dong-Won Park</span></td></tr>
+<tr><td valign=top><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >11:50&#8211;12:15</span></td><td valign=top><i><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Interoperability and Knowledge Representation in Distributed Health and Fitness Companion Dialogue System</span></i><br>
+<span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Jaakko Hakulinen and Markku Turunen</span></td></tr>
+<tr><td valign=top><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >12:30&#8211;14:00</span></td><td valign=top><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></td></tr>
+<tr><td valign=top><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td><td valign=top><b><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Session 3: Speech Translation Demos</span></b></td></tr>
+<tr><td valign=top><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >14:00&#8211;15:30</span></td><td valign=top><i><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >The 2008 MedSLT System</span></i><br>
+<span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Manny Rayner, Pierrette Bouillon, Jane Brotanek, Glenn Flores, Sonia Halimi, Beth Ann Hockey, Hitoshi Isahara, Kyoko Kanzaki, Elisabeth Kron, Yukie Nakao, Marianne Santaholma, Marianne Starlander and Nikos Tsourakis</span></td></tr>
+<tr><td valign=top><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >14:00&#8211;15:30</span></td><td valign=top><i><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Language Understanding in Maryland Virtual Patient</span></i><br>
+<span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Sergei Nirenburg, Stephen Beale, Marjorie McShane, Bruce Jarrell and George Fantry</span></td></tr>
+<tr><td valign=top><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >14:00&#8211;15:30</span></td><td valign=top><i><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Rapid Portability among Domains in an Interactive Spoken Language Translation System</span></i><br>
+<span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Mark Seligman and Mike Dillinger</span></td></tr>
+<tr><td valign=top><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >15:30&#8211;16:00</span></td><td valign=top><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></td></tr>
+<tr><td valign=top><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td><td valign=top><b><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Session 4: Speech Translation Systems</span></b></td></tr>
+<tr><td valign=top><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >16:00&#8211;16:25</span></td><td valign=top><i><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Speech Translation for Triage of Emergency Phonecalls in Minority Languages</span></i><br>
+<span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Udhyakumar Nallasamy, Alan Black, Tanja Schultz, Robert Frederking and Jerry Weltman</span></td></tr>
+<tr><td valign=top><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >16:25&#8211;16:50</span></td><td valign=top><i><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Speech to Speech Translation for Nurse Patient Interaction</span></i><br>
+<span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Farzad Ehsani, Jim Kimzey, Elaine Zuber, Demitrios Master and Karen Sudre</span></td></tr>
+<tr><td valign=top><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td><td valign=top><b><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Session 5: A Shared Task for Medical Speech Translation?</span></b></td></tr>
+<tr><td valign=top><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >16:50&#8211;17:05</span></td><td valign=top><i><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >A Small-Vocabulary Shared Task for Medical Speech Translation</span></i><br>
+<span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Manny Rayner, Pierrette Bouillon, Glenn Flores, Farzad Ehsani, Marianne Starlander, Beth Ann Hockey, Jane Brotanek and Lukas Biewald</span></td></tr>
+<tr><td valign=top><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >17:05&#8211;close</span></td><td valign=top><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Panel Discussion</span></td></tr>
+</table>
+	<h3><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Calendar</span></h3>
+<table border=1>
+<!-- <tr><td>Paper submission deadline</td><td align=right>15 May</td></tr>
+<tr><td>Notification of acceptance of Papers</td><td align=right>6 June</td></tr>
+<tr><td>Camera-ready copy of papers due</td><td align=right>1 July </td></tr>
+-->
+<tr><td><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Workshop</span></td><td align=right><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >23 August</span></td></tr>
+</table>
+
+
+	<h3><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Programme committee</span></h3>
+	<P>
+<span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Laurent Besacier - U Grenoble, France</span><br>
+<span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Pierrette Bouillon (co-chair) - U Geneva, Switzerland</span><br>
+<span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Mike Dillinger - SpokenTranslation, US</span><br>
+<span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Farzad Ehsani (co-chair) - Fluential, US</span><br>
+<span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Glenn Flores - U Texas, US</span><br>
+<span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Robert Frederking (co-chair) - CMU, US</span><br>
+<span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Hitoshi Isahara - NICT, Japan</span><br>
+<span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Michael McTear (co-chair) -  U Ulster, Northern Ireland</span><BR>
+<span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Shri Narayanan - USC, US</span><br>
+<span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Aarne Ranta - U Gothenburg, Sweden</span><br>
+<span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Manny Rayner (co-chair) - U Geneva, Switzerland</span><br>
+<span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Tanja Schultz - U Karlsruhe, Germany</span><br>
+<span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Harold Somers - U Manchester, UK, and Dublin City U, Ireland</span><br>
+<span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Bowen Zhou - IBM, US</span>
+        </P>
+
+<small><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Last updated: Mon Jul 07, 2008</span>

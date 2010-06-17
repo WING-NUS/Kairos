@@ -1,0 +1,747 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session1/13/annotation/annotated_repository/http+^^www.civr2009.org^program_2009-08-05__14-33-06.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session1/13/annotation/annotated_repository/http+^^www.civr2009.org^program_2009-08-05__14-33-06.yaml created on Thu Aug 13 13:54:02 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>Program | CIVR2009</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="shortcut icon" href="/files/pixture_favicon.ico" type="image/x-icon" />
+  <style type="text/css" media="all">@import "/modules/aggregator/aggregator.css";</style>
+<style type="text/css" media="all">@import "/modules/book/book.css";</style>
+<style type="text/css" media="all">@import "/modules/node/node.css";</style>
+<style type="text/css" media="all">@import "/modules/system/defaults.css";</style>
+<style type="text/css" media="all">@import "/modules/system/system.css";</style>
+<style type="text/css" media="all">@import "/modules/user/user.css";</style>
+<style type="text/css" media="all">@import "/sites/all/modules/lightbox2/css/lightbox.css";</style>
+<style type="text/css" media="all">@import "/sites/all/themes/pixture/style.css";</style>
+<style type="text/css" media="all">@import "/files/color/pixture-773a9c7a/style.css";</style>
+  <script type="text/javascript" src="/misc/jquery.js"></script>
+<script type="text/javascript" src="/misc/drupal.js"></script>
+<script type="text/javascript" src="/sites/all/modules/jquery_update/compat.js"></script>
+<script type="text/javascript" src="/sites/all/modules/lightbox2/js/auto_image_handling.js"></script>
+<script type="text/javascript" src="/sites/all/modules/lightbox2/js/lightbox.js"></script>
+<script type="text/javascript">Drupal.extend({ settings: { "googleanalytics": { "trackOutgoing": 1, "trackMailto": 1, "trackDownload": 1, "trackDownloadExtensions": "7z|aac|avi|csv|doc|exe|flv|gif|gz|jpe?g|js|mp(3|4|e?g)|mov|pdf|phps|png|ppt|rar|sit|tar|torrent|txt|wma|wmv|xls|xml|zip", "LegacyVersion": 0 }, "lightbox2": { "rtl": false, "file_path": "/(\\w\\w/)files", "base_path": "/", "default_image": "/sites/all/modules/lightbox2/images/brokenimage.jpg", "border_size": "10", "font_color": "000", "box_color": "fff", "top_position": "", "overlay_opacity": "0.8", "overlay_color": "000", "disable_close_click": 1, "resize_sequence": "0", "resize_speed": 400, "fade_in_speed": 400, "slide_down_speed": 600, "use_alt_layout": 0, "disable_resize": 0, "disable_zoom": 0, "force_show_nav": 0, "loop_items": 0, "node_link_text": "View Image Details", "node_link_target": 0, "image_count": "Image !current of !total", "page_count": "Page !current of !total", "video_count": "Video !current of !total", "lite_press_x_close": "press \x3ca href=\"#\" onclick=\"hideLightbox(); return FALSE;\"\x3e\x3ckbd\x3ex\x3c/kbd\x3e\x3c/a\x3e to close", "enable_login": false, "enable_contact": false, "keys_close": "c x 27", "keys_previous": "p 37", "keys_next": "n 39", "keys_zoom": "z", "keys_play_pause": "32", "display_image_size": "", "image_node_sizes": "()", "trigger_lightbox_classes": "img.inline", "trigger_lightbox_group_classes": "", "trigger_slideshow_classes": "", "trigger_lightframe_classes": "", "trigger_lightframe_group_classes": "", "custom_class_handler": 0, "custom_trigger_classes": "", "disable_for_gallery_lists": 0, "disable_for_acidfree_gallery_lists": true, "enable_acidfree_videos": false, "slideshow_interval": 5000, "slideshow_automatic_start": true, "slideshow_automatic_exit": true, "show_play_pause": true, "pause_on_next_click": false, "pause_on_previous_click": true, "loop_slides": false, "iframe_width": 600, "iframe_height": 400, "iframe_border": 1, "enable_video": 0 } } });</script>
+    <!--[if lt IE 7]>
+    <style type="text/css" media="all">@import "/sites/all/themes/pixture/fix-ie.css";</style>
+    <![endif]-->
+  <script type="text/javascript"></script>
+</head>
+
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<div id="wrapper" style="width: 97%;">
+
+<div id="container">
+
+<table border="0" cellpadding="0" cellspacing="0" id="header">
+<tr>
+    <td id="logo" valign=top rowspan=2>
+        </td>
+  <td id="site_name">
+	  <img onmousedown="imd(this)" src="/files/acm_logo.png" alt="" width="70" height="71" align="right" />
+      <h1 class='site-name'><span onclick="return false" style="text-decoration:underline; color:blue" href="/" title="Home"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >CIVR2009</span></span></h1>	  
+      <div class="site-slogan"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >ACM International Conference on Image and Video Retrieval, July 8-10, 2009</span></div>    </td>
+    <td id="site_search">
+        </td>
+</tr>
+<tr>
+    <td id="menu" colspan=2>
+            <ul class="links" id="navlist"><li  class="first menu-1-1-2"><span onclick="return false" style="text-decoration:underline; color:blue" href="/" class="menu-1-1-2"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >CIVR 2009</span></span></li>
+<li  class="menu-1-2-2"><span onclick="return false" style="text-decoration:underline; color:blue" href="/cfp" class="menu-1-2-2"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span></li>
+<li  class="menu-1-3-2"><span onclick="return false" style="text-decoration:underline; color:blue" href="/dates" class="menu-1-3-2"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></li>
+<li  class="menu-1-4-2"><span onclick="return false" style="text-decoration:underline; color:blue" href="/submission" class="menu-1-4-2"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Cam-Ready</span></span></li>
+<li  class="menu-1-5-2-active"><span onclick="return false" style="text-decoration:underline; color:blue" href="/program" class="menu-1-5-2-active active"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span></li>
+<li  class="menu-1-6-2"><span onclick="return false" style="text-decoration:underline; color:blue" href="/registration" class="menu-1-6-2"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></li>
+<li  class="menu-1-7-2"><span onclick="return false" style="text-decoration:underline; color:blue" href="/committee" class="menu-1-7-2"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Committee</span></span></li>
+<li  class="menu-1-8-2"><span onclick="return false" style="text-decoration:underline; color:blue" href="/sponsors" class="menu-1-8-2"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></span></li>
+<li  class="menu-1-9-2"><span onclick="return false" style="text-decoration:underline; color:blue" href="/accommodation" class="menu-1-9-2"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation</span></span></li>
+<li  class="menu-1-10-2"><span onclick="return false" style="text-decoration:underline; color:blue" href="/local" class="menu-1-10-2"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Local Info-Travel</span></span></li>
+<li  class="last menu-1-11-2"><span onclick="return false" style="text-decoration:underline; color:blue" href="/contact" class="menu-1-11-2"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Contact</span></span></li>
+</ul>    </td>
+</tr>
+<tr>
+    <td colspan="3"><div></div></td>
+</tr>
+</table>
+
+
+<table border="0" cellpadding="0" cellspacing="0" id="content">
+  <tr>
+
+  
+  <td id="main-content" valign="top">
+      <div id="main">
+    <div class="breadcrumb"><span onclick="return false" style="text-decoration:underline; color:blue" href="/"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></div>          <div id="cr8"></div>
+        <div class="tabs"></div>
+            <table class="node"> 
+  
+  <tr>
+  <td class="node-tl"></td>
+  <td class="node-tc"></td>
+  <td class="node-tr"></td>
+  <tr>
+
+  <tr>
+  <td class="node-ml"></td>
+  <td class="node-mc">
+
+    <table class="nodetitle">
+    <tr>
+      <td>
+        <h2 class="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="/program"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span></h2>
+        <span class="submitted"></span>
+        <span class="taxonomy"></span>
+      </td>
+    </tr>
+    </table>
+        <div class="content"><p>
+<span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >The CIVR 2009 conference will include sessions for presenting
+high-quality research papers and for sharing</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/pd"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >practitioner experience</span></span><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >.
+For this purpose it will contain keynote speeches, oral/poster
+sessions, as well as a demo session for demonstration of existing commercial products, systems, and prototypes.</span> 
+</p>
+<p>
+<span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >The program will also include the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/pd"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >practitioner day</span></span> <span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >and the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.videolympics.org/"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >VideOlympics</span></span> <span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >showcase.</span>
+</p>
+<p>
+<span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >During the welcome reception, the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.semedia.org"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >SEMEDIA</span></span> <span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >project, will demonstrate the group of search tools they have developed for video environments, such as audiovisual production, film industry postproduction and online communications media. SEMEDIA is co-funded by the European Union. </span>
+</p>
+<br />
+<hr size="2" width="100%" />
+<br />
+<h1><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Invited Speakers</span></h1>
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/invited-speakers"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Prof. Luis von Ahn</span></span> <span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >(CMU) and</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/invited-speakers"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Prof. Luc Van Gool</span></span>
+<span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >(ETHZ and Univ. Leuven) are confirmed as invited
+speakers.</span>
+</p>
+<br />
+<hr size="2" width="100%" />
+<br />
+<h1><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Day 1: July 8</span></h1>
+<p>
+<b><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >[09.00-10.00] Keynote 1</span></b> <span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >- Chair: Yiannis Kompatsiaris</span>
+</p>
+<p>
+<i><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >&quot;Human Computation&quot;,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/invited-speakers"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Prof. Luis von Ahn</span></span><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" > </span></i>
+</p>
+<p>
+<b><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >[10.00-10.20] Coffee break</span></b>
+</p>
+<p>
+<b><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >[10.20-12.00] Oral session 1 -</span> </b><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Marcel Worring</span>
+</p>
+<p>
+<i><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Interactive systems:Retrieval and Browsing</span></i>
+</p>
+<ul>
+	<li><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Peter Wilkins,
+	Raphael Troncy, Martin Halvey, Daragh Byrne, Alia Amin, P Punitha, Alan Smeaton
+	and Robert Villa,</span> <i><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >User Variance and its
+	Impact on Video Retrieval Benchmarking</span></i></li>
+	<li>
+	<span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Grant Strong and Minglun Gong,</span> <i><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Organizing
+	and Browsing Photos using Different Feature Vectors and Their Evaluations</span></i> </li>
+	<li>
+	<span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Qizhen He, Zhiwu
+	Lu and Horace Ip,</span> <i><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >View Topics:
+	Automatically Generated Characteristic View for Content-Based 3D Object
+	Retrieval</span></i></li>
+	<li><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Edward Lo, Mark Pickering, Michael
+	Frater and John Arnold,</span> <i><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Query by Example
+	using Invariant Features from the Double Dyadic Dual-Tree Complex Wavelet
+	Transform</span> </i></li>
+</ul>
+<p>
+<b><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >[12.00-13.30] Lunch break</span></b>
+</p>
+<p>
+<b><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >[13.30-15.10] Oral session 2</span> </b><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >- Chair: Nicu Sebe</span> 
+</p>
+<p>
+<i><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Best paper candidates</span></i>
+</p>
+<ul>
+	<li>
+	<span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Jasper Uijlings, Arnold Smeulders and Remko Scha,</span> <i><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Real-time Bag of Words, Approximately</span> </i></li>
+	<li>
+	<span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Lyndsey Pickup and Andrew Zisserman,</span> <i><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Automatic retrieval of visual continuity errors in movies</span> </i></li>
+	<li>
+	<span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Martin Halvey and Joemon M. Jose,</span> <i><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Role
+	of Expertise in Aiding Video Search</span> </i>
+	</li>
+	<li>
+	<span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Rainer Lienhart, Stefan Romberg and Eva Hörster,</span> <i><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Multilayer pLSA for Multimodal Image Retrieval</span></i></li>
+</ul>
+<p>
+<b><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >[15.40-18.00] Poster session</span> </b><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >- Chair: Vasileios Mezaris</span>
+</p>
+<ul>
+	<li><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Costantino Grana, Daniele Borghesani and  Rita Cucchiara.</span> <i><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Picture  Extraction from Digitized Historical Manuscripts</span></i></li>
+	<li><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Motoaki Kawanabe, Shinichi Nakajima and  Alexander Binder.</span> <i><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >A  Procedure of Adaptive Kernel Combination with Kernel-Target Alignment for  Object Classification</span></i></li>
+	<li><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Mihir Jain, Sreekanth Vempati, Chandrika  Pulla and Jawahar C. V..</span> <i><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Example  Based Video Filters</span></i></li>
+	<li><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Georgios Goudelis, Anastasios Tefas and  Ioannis Pitas.</span> <i><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Using  Mutual Information to Indicate Facial Poses in Video Sequences</span></i></li>
+	<li><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Takahiko Furuya and Ryutarou Ohbuchi.</span> <i><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >dense  sampling and fast encoding for 3d model retrieval using bag-of-visual features</span></i></li>
+	<li><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Joao Magalhaes, José Iria and Fabio  Ciravegna.</span> <i><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Web  News Categorization using a Cross-Media Document Graph</span></i></li>
+	<li><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Rainer Lienhart and Ina Döhring.</span> <i><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Mining  TV Broadcasts for Recurring Video Sequences</span></i></li>
+	<li><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Ioannis Arapakis, Yashar Moshfeghi, Hideo  Joho, Reede Ren, David Hannah and Joemon M. Jose.</span> <i><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Enriching  User Proﬁling with Affective Features for the Improvement of a Multimodal  Recommender System</span></i></li>
+	<li><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Zhiwu Lu, Horace Ip and Qizhen He.</span> <i><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Context-Based  Multi-Label Image Annotation</span></i></li>
+	<li><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Hideo Joho, Joemon Jose, Roberto Valenti  and Nicu Sebe.</span> <i><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Exploiting  Facial Expressions for Affective Video Summarisation</span></i></li>
+	<li><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Philip DeCamp and Deb Roy.</span> <i><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >A  Human-Machine Collaborative Approach to Tracking Human Movement in Multi-Camera  Video</span></i></li>
+	<li><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Philip Kelly, Ciaran O Conaire and Noel OConnor.</span> <i><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Exploiting  Contextual Data for Event Retrieval in Surveillance Video</span></i></li>
+	<li><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Ceyhun Burak Akgul, Devrim Unay and Ahmet  Ekin.</span> <i><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Automated  Diagnosis of Alzheimer’s Disease using Image Similarity and User Feedback</span></i></li>
+	<li><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Vasileios Chasanis, Argyris Kalogeratos and  Aristidis Likas.</span> <i><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Movie  Segmentation into Scenes and Chapters Using Locally Weighted Bag of Visual  Words</span></i></li>
+	<li><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Jianping Fan.</span> <i><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Integrating  Visual and Semantic Contexts for Topic Network Generation and Word Sense  Disambiguation</span></i></li>
+	<li><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Ville Viitaniemi and Jorma Laaksonen.</span> <i><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Spatial  Extensions to Bag of Visual Words</span></i></li>
+	<li><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Stefanie Tellex and Deb Roy.</span> <i><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Towards  Surveillance Video Search by Natural Language Query</span></i></li>
+	<li><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Thomas Deselaers, Tobias Gass, Philippe  Dreuw and Hermann Ney.</span> <i><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Jointly  Optimising Relevance and Diversity in Image Retrieval</span></i></li>
+	<li><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Thi Lan Le, Monique Thonnat, Alain Boucher  and Francois Bremond.</span> <i><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Appearance  based retrieval for tracked objects in surveillance videos</span></i></li>
+	<li><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Manni Duan, Adrian Ulges, Thomas Breuel and  Xiu-qing Wu.</span> <i><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Style  Modeling for Tagging Personal Photo Collections</span></i></li>
+	<li><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Songhua Xu, Hao Jiang and Francis C.M. Lau.</span> <i><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Learning  to rank videos personally using multiple clues</span></i></li>
+	<li><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Alexandre Hervieu, Patrick Bouthemy and  Jean-Pierre Le Cadre.</span> <i><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Trajectory-based  handball video undestanding</span></i></li>
+	<li><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Robin ALy, Djoerd Hiemstra and Arjen de  Vries.</span> <i><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Reusing  Annotation Labor for Concept Selection</span></i></li>
+	<li><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Mei-Chen Yeh and Kwang-Ting Cheng.</span> <i><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Video  Copy Detection by Fast Sequence Matching</span></i></li>
+	<li><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Hongtao Xu, Xiangdong Zhou, Mei Wang, Yu  Xiang and Baile Shi.</span> <i><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Exploring  Flickr's Related Tags for Semantic Annotation of Web Images</span></i></li>
+	<li><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Thierry Urruty, Frank Hopfgartner, David  Hannah, Desmond Elliott and Joemon M. Jose.</span> <i><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Supporting  Aspect-Based Video Browsing – Analysis of a User Study</span></i></li>
+	<li><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Tat-Seng Chua, Jinhui Tang, Richang Hong,  Haojie Li, Zhiping Luo and Yantao Zheng.</span> <i><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >NUS-WIDE:  A Real-World Web Image Database from National University of Singapore</span></i></li>
+</ul>
+<p>
+<b><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >[19:00 - 21:00] SEMEDIA Welcome Reception</span></b>
+</p>
+<p>
+<span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>
+</p>
+<hr size="2" width="50%" />
+<h1><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Day 2: July 9</span></h1>
+<p>
+<b><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >[09.00-10.00] Keynote 2 -</span> </b><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Stephane Marchand-Maillet</span>
+</p>
+<p>
+<i><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >&quot;Mining from large image sets&quot;,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/invited-speakers"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Prof. Luc Van Gool</span></span><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" > </span></i>
+</p>
+<p>
+<b><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >[10.00-10.20] Coffee break</span></b>
+</p>
+<p>
+<b><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >[10.20-12.25] Oral session 3</span></b> <span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >- Chair: Georges Quénot</span>
+</p>
+<p>
+<i><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Geo-tagging and high-level semantic annotation</span></i>
+</p>
+<ul>
+	<li>
+	<span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Adrian Popescu and Pierre-Alain Moëllic,</span> <i><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >MonuAnno: Automatic Annotation of Georeferenced Landmarks Images</span> </i></li>
+	<li>
+	<span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Jim Kleban, Emily Moxley, Jiejun Xu and B.S. Manjunath,</span> <i><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Global Annotation on Georeferenced Photographs</span></i>
+	</li>
+	<li>
+	<span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Keiji Yanai, Hidetoshi Kawakubo and Bingyu Qiu,</span> <i><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >A Visual Analysis of the Relationship between Word Concepts and
+	Geographical Locations</span></i> </li>
+	<li>
+	<span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Theodora Tsikrika, Christos Diou, Arjen de Vries and Anastasios
+	Delopoulos,</span> <i><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Image annotation using
+	clickthrough data</span> </i></li>
+	<li><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Xiao-Yong Wei, Yu-Gang Jiang and Chong-Wah Ngo,</span> <i><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Exploring Inter-Concept Relationship with Context Space for Semantic Video Indexing</span> <br />
+	</i></li>
+</ul>
+<p>
+<b><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >[12.25-14.00] Lunch break</span></b>
+</p>
+<p>
+<b><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >[14.00-16.05] Oral session 4</span></b> <span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >- Chair: Cees Snoek</span>
+</p>
+<p>
+<i><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Image and Video Processing</span></i>
+</p>
+<ul>
+	<li><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Ruixuan Wang, Stephen J. McKenna and Junwei Han,</span> <i><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >High-Entropy Layouts for Content-based Browsing and Retrieval</span></i> </li>
+	<li>
+	<span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Hideki Nakayama,Tatsuya Harada and Yasuo Kuniyoshi,</span> <i><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Dense Sampling Low-Level Statistics of Local Features</span></i></li>
+	<li>
+	<span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Wei-Ta Chu, Che-Cheng
+	Lin and Jen-Yu Yu,</span> <i><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Using Cross-Media
+	Correlation for Scene Detection in Travel Videos</span></i>
+	</li>
+	<li>
+	<span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Matthijs Douze, Hervé Jégou, Harsimrat
+	Singh, Laurent Amsaleg and Cordelia Schmid.</span> <i><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Evaluation
+	of GIST descriptors for web-scale image search</span></i></li>
+	<li>
+	<span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Mahmudur Rahman
+	and Prabir Bhattacharya,</span> <i><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Image Retrieval
+	with Automatic Query Expansion Based on Local Analysis in a Semantical Concept
+	Feature Space</span></i> </li>
+</ul>
+<p>
+<b><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >[16.05-16.30] Coffee break</span></b>
+</p>
+<p>
+<b><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >[16.30-18.30] Videolympics -</span> </b><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Alan Smeaton</span>
+</p>
+<ul>
+	<li><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Colum Foley, Peter Wilkins and Alan F. Smeaton,</span><i> <span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >DCU Collaborative Video Search System</span></i></li>
+	<li><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Ork de Rooij, Cees G.M. Snoek, and Marcel Worring,</span> <i><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >MediaMill: Guiding the User to Results
+	using the ForkBrowser</span></i></li>
+	<li>                <span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Stefanos Vrochidis, Paul King, Lambros Makris, Anastasia Moumtzidou, Spiros Nikolopoulos,
+	Anastasios Dimou, Vasileios Mezaris and Ioannis Kompatsiaris,</span><i> <span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >MKLab Interactive Video Retrieval System</span></i></li>
+	<li><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Jianmin Li, Zhikun Wang, Bo Zhang,</span> <i><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >The Interactive Video Retrieval System in SMARTV 2009</span></i></li>
+	<li><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Stéphane Ayache, Georges Quénot, Laurent Besacier,</span><i> <span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >The LIG Multi-Criteria System for Video Retrieval</span></i></li>
+	<li><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Juan Cao, Yong-Dong Zhang, Jun-Bo Guo, Lei Bao, Jin-Tao Li,</span> <i><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >VideoMap: An Interactive Video Retrieval System of MCG-ICT-CAS</span></i></li>
+	<li> <span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Yan-Tao Zheng, Shi-Yong Neo, Xiangyu Chen and Tat-Seng Chua,</span><i> <span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >VisionGo: Towards True Interactivity</span></i></li>
+</ul>
+<p>
+<b><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >[19:30-22:30] Social event -</span> </b><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Dinner at Skala Restaurant, Oia</span> 
+</p>
+<p>
+<span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>
+</p>
+<hr size="2" width="50%" />
+<h1><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Day 3: July 10</span></h1>
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/pd"><b><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Practitioners day</span></b></span>
+</p>
+<br />
+<hr size="2" width="100%" />
+<br />
+<h1>
+<span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >VideOlympics Showcase</span>
+</h1>
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.videolympics.org"><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >VideOlympics Showcase</span></span> <span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >is real-time demo session of video retrieval systems. The major aim of the VideOlympics is to promote video retrieval research. An additional main goal of the VideOlympics is giving the audience a good perspective on the possibilities and limitations of the current state-of-the-art systems. Where traditional evaluation campaigns like TRECVID focus primarily on the effectiveness of collected retrieval results, the VideOlympics also allows to take into account the influence of interaction mechanisms and the advanced visualizations in the interface. Specifically, VideOlympics is a showcase that goes beyond the regular demo session: it should be fun to do for the participants and fun to watch for the conference audience. For all these reasons, the VideOlympics should only have winners. Similar to previous years, a number of TRECVID participants will simultaneously do an interactive search task during the VideOlympics showcase event. For the first time, in the 2009 edition of the VideOlympics a round with novice users will be included, in addition to the round with expert users.</span> 
+</p>
+</div>
+    
+  </td>
+  <td class="node-mr"></td>
+  </tr>
+
+  <tr>
+  <td class="node-bl"></td>
+  <td class="node-bc"></td>
+  <td class="node-br"></td>
+  <tr>
+</table>
+        </div>
+  </td>
+
+    <td id="sidebar-right" class="sidebar" valign="top">
+    <table width="100%" id="block-block-1" class="clear-block block block-block">
+<tr>
+  <td class="block-tl"></td>
+  <td class="block-tc">
+          <h2><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >News</span></h2>
+      </td>
+  <td class="block-tr"></td>
+</tr>
+<tr>
+  <td class="block-bl"></td>
+  <td class="block-bc">
+    <div class="content"><p><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Flickr group for uploading your photos is</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.flickr.com/groups/1141951@N20/"><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >CIVR2009</span></span></p>
+
+<p><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >The best paper of CIVR 2009 is: "Jasper Uijlings, Arnold Smeulders and Remko Scha, Real-time Bag of Words, Approximately"</span></p>
+
+<p><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >The registration desk will open at 8am on July 8.</span></p>
+
+<p><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Poster size should be A0 portrait (841 × 1189 mm).</span></p>
+
+<p><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >The</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/pd"><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Practitioners Day</span></span> <span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >program is now available</span></p>
+
+<p><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >The</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/program"><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >program</span></span> <span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >is now available.</span></p>
+
+<p><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Twitter tag</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://search.twitter.com/search?q=%23civr2009"><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >#civr2009</span></span></p>
+
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="/registration"><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span> <span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >is now open.</span></p>
+
+<p>
+<span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >31/03/2009 Notifications have been sent.</span>
+</p>
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/accommodation"><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation</span></span> <span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >page opened.</span>
+</p>
+
+<p>
+<span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >We received 127 submissions this year and the review process took longer than we expected trying to ensure high quality review for all these submissions. We apologise for the delay.</span>
+</p>
+
+<p><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Paper submission is now CLOSED</span></p>
+
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="/submission"><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Paper submission</span></span> <span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >deadline extended to February 8th.</span></p>
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.cmu.edu/~biglou/"><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Prof. Luis von Ahn</span></span> <span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >(CMU) and</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.vision.ee.ethz.ch/members/get_member.cgi?id=1"><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Prof. Luc van Gool</span></span>
+<span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >(ETHZ and Univ. Leuven) are confirmed as invited
+speakers.</span>
+</p>
+<span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >First Call for</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/cfssp"><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Special Session Proposals</span></span> <span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >(Deadline: 8 Dec 2008)</span><br /><br />
+<span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >Following the tradition of previous CIVR conferences, a</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.videolympics.org/"><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >VideOlympics Showcase</span></span> <span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >will also take place in CIVR 2009.</span><br /><br />
+<span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Selected papers after resubmission and review will be published in a Special Issue of Springer,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.springer.com/computer/information+systems/journal/11042"><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >Multimedia Tools and Applications Journal</span></span><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >.</span><br /><br />
+<span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >CIVR will take place right after the 16th International Conference on Digital Signal Processing (DSP 2009,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.dsp2009.org" title="http://www.dsp2009.org"><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >http://www.dsp2009.org</span></span><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >), the most longstanding conference in the area of DSP, which will take place in 5-7 July 2009.</span></div>
+  </td>
+  <td class="block-br"></td>
+</tr>
+</table>
+  </td>
+  
+  </tr>
+</table>
+
+</div><!-- end of div#container -->
+
+<div id="footer"><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >CIVR 2009</span>

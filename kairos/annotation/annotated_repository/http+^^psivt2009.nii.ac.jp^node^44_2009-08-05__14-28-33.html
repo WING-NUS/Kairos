@@ -1,0 +1,1078 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+  <head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^psivt2009.nii.ac.jp^node^44_2009-08-05__14-28-33.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^psivt2009.nii.ac.jp^node^44_2009-08-05__14-28-33.yaml created on Wed Aug 05 17:31:26 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+    <title>Accepted Papers | Pacific-Rim Symposium on Image and Video Technology 2009</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <style type="text/css" media="all">@import "/modules/node/node.css";</style>
+<style type="text/css" media="all">@import "/modules/system/defaults.css";</style>
+<style type="text/css" media="all">@import "/modules/system/system.css";</style>
+<style type="text/css" media="all">@import "/modules/user/user.css";</style>
+<style type="text/css" media="all">@import "/themes/psivt/style.css";</style>
+        <style type="text/css" media="print">@import "/themes/psivt/print.css";</style>
+    <!--[if lt IE 7]>
+    <style type="text/css" media="all">@import "/themes/psivt/fix-ie.css";</style>
+    <![endif]-->
+  </head>
+  <body onload="on_load()" onkeyup="on_key_up(event)" class="sidebar-left"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<!-- Layout -->
+  <div id="header-region" class="clear-block"><div id="block-user-0" class="clear-block block block-user">
+
+  <h2><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >STAFF Login</span></h2>
+
+  <div class="content"><form action="/node/44?destination=node%2F44"  accept-charset="UTF-8" method="post" id="user-login-form">
+<div><div class="form-item" id="edit-name-wrapper">
+ <label for="edit-name"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Username:</span> <span class="form-required" title="This field is required."><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >*</span></span></label>
+ <input type="text" maxlength="60" name="name" id="edit-name"  size="15" value="" class="form-text required" />
+</div>
+<div class="form-item" id="edit-pass-wrapper">
+ <label for="edit-pass"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Password:</span> <span class="form-required" title="This field is required."><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >*</span></span></label>
+ <input type="password" name="pass" id="edit-pass"  maxlength="60"  size="15"  class="form-text required" />
+</div>
+<input type="submit" name="op" id="edit-submit" value="Log in"  class="form-submit" />
+<div class="item-list"><ul><li><span onclick="return false" style="text-decoration:underline; color:blue" href="/user/password" title="Request new password via e-mail."><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Request new password</span></span></li></ul></div><input type="hidden" name="form_id" id="edit-user-login-block" value="user_login_block"  />
+
+</div></form>
+</div>
+</div>
+</div>
+
+    <div id="wrapper">
+    <div id="container" class="clear-block">
+
+      <div id="header">
+        <div id="logo-floater">
+        <h1><span onclick="return false" style="text-decoration:underline; color:blue" href="/" title="Pacific-Rim Symposium on Image and Video Technology 2009"><img onmousedown="imd(this)" src="/files/logo.png" alt="Pacific-Rim Symposium on Image and Video Technology 2009" id="logo" /><span><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Pacific-Rim Symposium on Image and Video Technology 2009</span></span></span></h1>        </div>
+
+                  <ul class="links primary-links"><li  class="first last menu-1-1-2"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.nii.ac.jp/index.shtml.en" title="National Institute of Informatics" class="menu-1-1-2"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >NII</span></span></li>
+</ul>                
+      </div> <!-- /header -->
+
+              <div id="sidebar-left" class="sidebar">
+                    <div id="block-menu-70" class="clear-block block block-menu">
+
+  <h2><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Information</span></h2>
+
+  <div class="content">
+<ul class="menu">
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/26"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >News</span></span></li>
+<li class="expanded"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/34"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Awards</span></span>
+<ul class="menu">
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/59"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Awarded Papers</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/60"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Best Reviewer Award</span></span></li>
+
+</ul>
+</li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/58"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Statistics of Participants</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://psivt2009.nii.ac.jp/image"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Photos</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/8"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Venue</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/23"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Local Information</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/33"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Special Issues</span></span></li>
+
+</ul>
+</div>
+</div>
+<div id="block-menu-97" class="clear-block block block-menu">
+
+  <h2><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Scientific Program</span></h2>
+
+  <div class="content">
+<ul class="menu">
+<li class="collapsed"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/11"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Final Program</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/28"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Keynote and Invited Speakers</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/14"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Demos/Exhibit</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/13"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/12"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Workshop</span></span></li>
+
+</ul>
+</div>
+</div>
+<div id="block-menu-80" class="clear-block block block-menu">
+
+  <h2><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >People</span></h2>
+
+  <div class="content">
+<ul class="menu">
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/24"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Steering Committee</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/6"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Organizing Committee</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/20"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Theme Chairs</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/50"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/51"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Additional Reviewers</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/43"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >PSIVT2009 Office</span></span></li>
+
+</ul>
+</div>
+</div>
+<div id="block-menu-61" class="clear-block block block-menu">
+
+  <h2><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Previous PSIVTs</span></h2>
+
+  <div class="content">
+<ul class="menu">
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://146.155.13.7/psivt/psivt" title="The 2nd symposium held in Santiago, Chile"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >PSIVT2007</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://psivt2006.ee.nthu.edu.tw/" title="The 1st symposium held in Hsinchu, Taiwan"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >PSIVT2006</span></span></li>
+
+</ul>
+</div>
+</div>
+<div id="block-menu-82" class="clear-block block block-menu">
+
+  <h2><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Links</span></h2>
+
+  <div class="content">
+<ul class="menu">
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fiij.org/" title="Forum for Image Informatics in Japan"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >FIIJ</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.am.sanken.osaka-u.ac.jp/SIG-CVIM/" title="Computer Vision and Image Media"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >CVIM</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ieice.org/~prmu/jpn/" title="Pattern Recognition and Image Understanding"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >PRMU</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.nii.ac.jp/index.shtml.en" title="National Institute of Informatics"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >NII</span></span></li>
+
+</ul>
+</div>
+</div>
+<div id="block-menu-120" class="clear-block block block-menu">
+
+  <h2><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Archived Contents</span></h2>
+
+  <div class="content">
+<ul class="menu">
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/9"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/49"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Student Grants</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/54"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Student Grants (2nd round)</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/10"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/39"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Camera-ready Submission</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/40"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >VISA</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/53"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Presentation Instructions</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/41"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Call for Demos/Exhibits</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/44" class="active"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/32"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Author Instructions</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/30"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/22"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Paper Submission</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/15"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/42"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Call: PSIVT2010 Proposals</span></span></li>
+
+</ul>
+</div>
+</div>
+        </div>
+      
+      <div id="center"><div id="squeeze"><div class="right-corner"><div class="left-corner">
+          <div class="breadcrumb"><span onclick="return false" style="text-decoration:underline; color:blue" href="/"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></div>          
+                    <h2><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers</span></h2>          
+          
+                              
+<div id="node-44" class="node">
+
+
+
+  
+  <div class="content">
+    <style>
+<span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >p { text-align: justify; }
+
+h3 { background-color: #DDF; padding: .5em; }
+
+.paper_list
+{
+  border-collapse: collapse;
+  border: 1px gray solid;
+}
+
+.paper_list td,
+.paper_list th
+{
+  border: 1px gray solid;
+}
+
+.paper_list thead
+{
+  border: 2px gray solid;
+}</span>
+</style><p>
+<span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >This year, we received 247 submissions, and accepted 40 papers for oral presentations and 58 for poster presentations. The acceptance rate is slightly less than 40%.</span></p>
+<ul>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="#Oral"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Oral</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="#Poster"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Poster</span></span></li>
+</ul>
+<h3 id="Oral"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Oral</span></h3>
+<table class="paper_list">
+<thead>
+<tr>
+<th><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Paper ID</span></th>
+<th><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Title</span></th>
+<th><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Author(s)</span></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >14</span></td>
+<td><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >An Approach to Trajectory Estimation of Moving Objects in the H.264 Compressed Domain</span></td>
+<td><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Christian Kaes, Henri Nicolas</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >21</span></td>
+<td><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Image-based Rendering by Virtual 1D Cameras</span></td>
+<td><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Naoyuki Ichimura</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >23</span></td>
+<td><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Sensor Pose Estimation from Multi-Center Cylindrical Panoramas</span></td>
+<td><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Fay Huang, Reinhard Klette, Yun-Hao Xie</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >28</span></td>
+<td><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Compact Fundamental Matrix Computation</span></td>
+<td><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Kenichi Kanatani, Yasuyuki Sugaya</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >33</span></td>
+<td><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Image-Based Techniques for Shredded Document Reconstruction</span></td>
+<td><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Huei-Yung Lin</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >36</span></td>
+<td><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Implicit Surface Reconstruction with An Analogy of Polar Field Model</span></td>
+<td><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Yuxu Lin, Mingli Song</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >38</span></td>
+<td><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Inverse Halftoning Based on Bayesian Theorem</span></td>
+<td><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Jing-Ming Guo, Yun-Fu Liu, Jiann-Der Lee</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >44</span></td>
+<td><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Live Video Segmentation in Dynamic Backgrounds using Thermal Vision</span></td>
+<td><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Viet Pham, Keita Takahashi, Takeshi Naemura</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >50</span></td>
+<td><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >The Five Points Pose Problem : A New and Accurate Solution Adapted to any Geometric Configuration</span></td>
+<td><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Mahzad Kalantari, Franck Jung, JeanPierre Guedon, Nicolas Paparoditis</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >55</span></td>
+<td><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Detecting Incorrect Feature Tracking by Affine Space Fitting</span></td>
+<td><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Yasuyuki Sugaya, Chika Takada</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >61</span></td>
+<td><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Co-occurrence Histograms of Oriented Gradients for Pedestrian Detection</span></td>
+<td><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Tomoki Watanabe, Satoshi Ito, Kentaro Yokoi</span> </td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >69</span></td>
+<td><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Dense Stereo Correspondence with Contrast Context Histogram, Segmentation-based Two-pass Aggregation and Occlusion Handling</span> </td>
+<td><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Tianliang Liu, Pinzheng Zhang, Limin Luo</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >80</span></td>
+<td><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Watermarking of raw digital images in camera firmware: embedding and detection</span></td>
+<td><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Peter Meerwald, Andreas Uhl</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >85</span></td>
+<td><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Monocular 3D Reconstruction of Objects Based on Cylindrical Panoramas</span></td>
+<td><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Reinhard Klette, Ralf Haeusler, Fay Huang</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >90</span></td>
+<td><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Detecting Video Forgeries Based on Noise Characteristics</span></td>
+<td><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Michihiro Kobayashi, Takahiro Okabe, Yoichi Sato</span> </td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >92</span></td>
+<td><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >A Method for Visualizing Pedestrian Traffic Flow using SIFT Feature Point Tracking</span></td>
+<td><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Hironobu Fujiyoshi</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >96</span></td>
+<td><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Contour Grouping with Partial Shape Similarity</span></td>
+<td><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Chengqian Wu, Xiang Bai, Quannan Li, Xingwei Yang, Wenyu Liu</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >99</span></td>
+<td><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >A New Method for Moving Object Extraction and Tracking Based on the Exclusive Block Matching</span></td>
+<td><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Zhu Li, Kenichi Yabuta, Hitoshi Kitazawa</span> </td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >102</span></td>
+<td><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Can Geotags Help Image Recognition ?</span></td>
+<td><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Keita Yaegashi, Keiji Yanai</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >105</span></td>
+<td><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Estimating 3D Flow for Driver Assistance Applications</span></td>
+<td><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Reinhard Klette, Jorge Sanchez, Eduardo Destefanis</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >121</span></td>
+<td><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Using Face Quality Ratings to Improve Real-Time Face Recognition</span></td>
+<td><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Karl Axnick, Ray Jarvis, Kim Ng</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >144</span></td>
+<td><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >LazySOM: Image Compression Using An Enhanced Self-Organizing Map</span></td>
+<td><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Cheng-Fa Tsai, Yu-Jiun Lin</span> </td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >148</span></td>
+<td><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Local Image Descriptors Using Supervised Kernel ICA</span></td>
+<td><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Masaki Yamazaki, Sidney Fels</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >154</span></td>
+<td><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >An Advanced Least-Significant-Bit Embedding Scheme for Steganographic Encoding</span></td>
+<td><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Yeuan-Kuen Lee, Graeme Bell, Shih-Yu Huang, Ran-Zan Wang, Shyong Jian Shyu</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >162</span></td>
+<td><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >SPP: A New Point Primitive for Ray Tracing</span></td>
+<td><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Yong Quan</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >170</span></td>
+<td><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >A Self-Tuning People Identification System from Split Face Components</span></td>
+<td><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Riccio, Michele Nappi, Andrea Abate, Maria De Marsico</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >175</span></td>
+<td><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Ourlier removal by convex optimization for L-infinity approaches</span></td>
+<td><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Yongduek Seo, Hyun Jung Lee, Sang Lee</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >180</span></td>
+<td><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Image Inpainting Considering Brightness Change and Spatial Locality of Textures and Its Evaluation</span></td>
+<td><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Norihiko Kawai, Tomokazu Sato, Naokazu Yokoya</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >186</span></td>
+<td><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Vehicle Detection from Aerial Images using Local Shape Information</span></td>
+<td><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Jae-Young Choi, Young-Kyu Yang</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >188</span></td>
+<td><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Omnidirectional Image Stabilization by Computing Camera Trajectory</span></td>
+<td><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Akihiko Torii, Michal Havlena, Tomas Pajdla</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >199</span></td>
+<td><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Shape Reconstruction by Combination of Structured-Light Projection and Photometric Stereo Using a Projector-Camera System: High Quality Reproduction of a Virtual Reflectance Property on a Real Object Surface</span> </td>
+<td><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Tomoya Okazaki, Takayuki Okatani, Koichiro Deguchi</span> </td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >214</span></td>
+<td><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Novel approaches for exclusive and continuous fingerprint classification</span></td>
+<td><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Javier Montoya, João Papa, Neucimar Leite, Ricardo Torres, Alexandre Falcão</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >216</span></td>
+<td><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Principal Component Hashing: An Accelerated Approximate Nearest Neighbor Search</span></td>
+<td><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Yusuke Matsushita, Toshikazu Wada</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >232</span></td>
+<td><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >A Novel Visual Speech Representation and HMM Classification for Visual Speech Recognition</span></td>
+<td><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Dahai Yu, Ovidiu Ghita, Alistair Sutherland, Paul Whelan</span> </td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >242</span></td>
+<td><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Enhanced side information generator with accurate evaluations in block-based Wyner-Ziv video coding</span></td>
+<td><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Chang-Ming Lee, Jui-Chiu Chiang, Wen-Nung Lie</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >243</span></td>
+<td><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >A digital image denoising method with edge preservation</span></td>
+<td><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Teruya Minamoto, Satoshi Fujii</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >249</span></td>
+<td><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Fast Simplex Optimization for Active Appearance Model</span></td>
+<td><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Aidarous Yasser, Seguier Renaud</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >253</span></td>
+<td><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >A Self-Governing Hybrid Model for Noise Removal</span> </td>
+<td><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Mohammad Reza Haji Aboli</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >266</span></td>
+<td><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Visual Tracking Using Particle Filters with Gaussian Process Regression</span></td>
+<td><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Hongwei Li, Yi Wu, Hanqing Lu</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >270</span></td>
+<td><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Rotation and Scale Invariant Texture Analysis with Tunable Gabor Filter Banks</span> </td>
+<td><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Xinqi Chu, Kap Luk Chan</span></td>
+</tr>
+</tbody>
+</table>
+<h3 id="Poster"><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Poster</span></h3>
+<table class="paper_list">
+<thead>
+<tr>
+<th><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Paper ID</span></th>
+<th><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Title</span></th>
+<th><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Author(s)</span></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >4</span></td>
+<td><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >SUBSMELL : Multimedia With a Simple Olfactory Display</span></td>
+<td><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Chomtip Pornpanomchai, Arinchaya Threekhunp, Krit Pongrasamiroj, Phichate Sukklay</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >5</span></td>
+<td><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Fixed-Coefficient Iterative Bilateral Filters for Graph-Based Image Processing</span></td>
+<td><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Chang Jian, Kohei Inoue, Kenji Hara, Kiichi Urahama</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >6</span></td>
+<td><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Texture Retrieval Effectiveness Improvement By Multiple Representations Fusion</span></td>
+<td><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Noureddine Abbadeni</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >10</span></td>
+<td><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Combining invariant and corner-like features to optimize image matching</span></td>
+<td><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Jimmy Lee, Kin-Choong Yow</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >12</span></td>
+<td><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Active Contour Tracking of Moving Objects Using Edge Flows and Ant Colony Optimization in Video Sequences</span></td>
+<td><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Dong-Xian Lai, Yuan-Hsiang Chang, Zhi-He Zhong</span> </td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >19</span></td>
+<td><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >An Adaptive and Efficient Selective Multiple Reference Frame Motion Estimation for H.264 Video Coding</span></td>
+<td><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Yu-Ming Lee, Yong-Fu Wang, Jia-Ren Wang, Yinyi Lin</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >27</span></td>
+<td><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >A Framework for Suspicious Action Detection with Mixture Distributions of Action Primitives</span></td>
+<td><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >Yoshio Iwai</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >37</span></td>
+<td><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >Framework for Illumination Invariant Vehicular Traffic Density Estimation</span></td>
+<td><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Pranam Janney, Glenn Geers</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >40</span></td>
+<td><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Facial Feature Detection Using Entropy and SVM</span></td>
+<td><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Qiong Wang</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >41</span></td>
+<td><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Error-Diffused Image Security Improving Using Overall Minimal-Error Searching</span></td>
+<td><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Jing-Ming Guo, Yun-Fu Liu</span> </td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >43</span></td>
+<td><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >Automatic segmentation of non-rigid objects in image sequences using spatiotemporal information</span></td>
+<td><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Cheolkon Jung, Joongkyu Kim</span> </td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >47</span></td>
+<td><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Robust Simultaneous Low Rank Approximation of Tensors</span></td>
+<td><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Kohei Inoue, Kenji Hara, Kiichi Urahama</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >57</span></td>
+<td><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Video-Based Modeling of Dynamic Hair</span></td>
+<td><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Tatsuhisa Yamaguchi, Bennett Wilburn, Eyal Ofek</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >63</span></td>
+<td><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >Urban Models Texturation from Uncalibrated Photographs</span></td>
+<td><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Oussama Moslah, Mathieu Klee, Antoine Grolleau, Vincent Guitteny, Serge Couvet, Sylvie Philipp-Foliguet</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >65</span></td>
+<td><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Optimal Pixel Matching between Images</span></td>
+<td><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >Yuichi Yaguchi, Kenta Iseki, Ryuichi Oka</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >66</span></td>
+<td><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Moving Object Segmentation using Optical Flow and Depth Information</span></td>
+<td><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >Jens Klappstein, Tobi Vaudrey, Andreas Wedel, Clemens Rabe, Reinhard Klette</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >75</span></td>
+<td><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >Usefulness of Retina Codes in Biometrics</span></td>
+<td><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Andreas Uhl, Jutta Hämmerle-Uhl, Thomas Fuhrmann</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >81</span></td>
+<td><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >A Study on Parametrization and Preprocessing for Semi-Global Matching</span></td>
+<td><span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >Reinhard Klette, Simon Hermann, Eduardo Destefanis</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >83</span></td>
+<td><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >Object Detection under Varying Illumination based on Adaptive Background Modeling Considering Spatial Locality</span></td>
+<td><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >Tatsuya Tanaka, Atsushi Shimada, Daisaku Arita, Rin-ichiro Taniguchi</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >86</span></td>
+<td><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >A Stereo Self-adjustment Methodology for Resuming Active Camera Operation</span></td>
+<td><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >Masafumi Nakagawa, Yoshihiro Kawai, Fumiaki Tomita</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >94</span></td>
+<td><span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >Recognizing Multiple Objects via Regression Incorporating the Co-occurrence of Categories</span></td>
+<td><span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >Takahiro Okabe</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >104</span></td>
+<td><span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >Integrated Expression-Invariant Face Recognition with Constrained Optical Flow</span></td>
+<td><span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >Chao-Kuei Hsieh, Shang-Hong Lai, Yung-Chang Chen</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >108</span></td>
+<td><span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Eigentemplate Learning for Sparse Temlate Tracker</span></td>
+<td><span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >Keiji Sakabe, Tomoyuki Taguchi, Takeshi Shakunaga</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >114</span></td>
+<td><span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >Accelerating Face Detection by Using Depth Informatio</span></td>
+<td><span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >Haiyuan Wu, Kazumasa Suzuki, Toshikazu Wada, Qian Chen</span> </td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >119</span></td>
+<td><span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >Tracking without Background Model for Time-of-Flight Cameras</span></td>
+<td><span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >Luca Bianchi, Riccardo Gatti, Luca Lombardi, Paolo Lombardi</span> </td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >124</span></td>
+<td><span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >Medical Image Classification and Retrieval using Ensemble combination of MPEG-7 Visual Descriptors</span></td>
+<td><span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >Jeong-Hee Shim, Ki-Hee Park, ByoungChul Ko, JaeYeal Nam</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >125</span></td>
+<td><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >Video-based Motion Capturing for Skeleton-based 3D Models</span></td>
+<td><span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >Liang-Yu Shih, Bing-Yu Chen, Ja-Ling Wu</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >129</span></td>
+<td><span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >Player Detection and Tracking in Broadcast Tennis Video</span></td>
+<td><span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >Kuan-ting Lai, Chaur-Heh Hsieh</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >131</span></td>
+<td><span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >Unsupervised Pedestrian Re-identification for Loitering Detection</span></td>
+<td><span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >Chung-Hsien Huang, Yi-Ta Wu, Ming-Yu Shih</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >136</span></td>
+<td><span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >A Fast Macroblock Mode Decision Algorithm for the Baseline Profile in the H.264 Video Coding Standard</span></td>
+<td><span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >Chang-Hsing Lee, Cheng-Chang Lien, Jau-Ling Shih, Ping-Yu Lin</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >143</span></td>
+<td><span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >Video Coding using Spatially Varying Transform</span></td>
+<td><span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >Cixun Zhang, Kemal Ugur, Jani Lainema, Moncef Gabbouj</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="282" onmousedown="md(this)" onmouseup="mu(this)" >146</span></td>
+<td><span class="coloringspan" id="283" onmousedown="md(this)" onmouseup="mu(this)" >Comparison of Visible, Thermal Infra-Red and Range Images for Face Recognition</span></td>
+<td><span class="coloringspan" id="284" onmousedown="md(this)" onmouseup="mu(this)" >Ajmal Mian</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="285" onmousedown="md(this)" onmouseup="mu(this)" >155</span></td>
+<td><span class="coloringspan" id="286" onmousedown="md(this)" onmouseup="mu(this)" >Enhanced Sports Image Annotation and Retrieval Based upon Semantic Analysis of Multimodal Cues</span></td>
+<td><span class="coloringspan" id="287" onmousedown="md(this)" onmouseup="mu(this)" >Kraisak Kesorn, Stefan Poslad</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="288" onmousedown="md(this)" onmouseup="mu(this)" >157</span></td>
+<td><span class="coloringspan" id="289" onmousedown="md(this)" onmouseup="mu(this)" >Memory Efficient VLSI Architecture for QCIF to VGA Resolution Conversion</span></td>
+<td><span class="coloringspan" id="290" onmousedown="md(this)" onmouseup="mu(this)" >Asmar Khan</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="291" onmousedown="md(this)" onmouseup="mu(this)" >158</span></td>
+<td><span class="coloringspan" id="292" onmousedown="md(this)" onmouseup="mu(this)" >Towards an Interpretation of Intestinal Motility from Capsule Endoscopic Image Sequences</span></td>
+<td><span class="coloringspan" id="293" onmousedown="md(this)" onmouseup="mu(this)" >Hai Vu, Tomio Echigo, Ryusuke Sagawa, Keiko Yagi, Masatsugu Shiba, Kazuhide Higuchi, Tetsuo Arakawa, Yasushi Yagi</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="294" onmousedown="md(this)" onmouseup="mu(this)" >159</span></td>
+<td><span class="coloringspan" id="295" onmousedown="md(this)" onmouseup="mu(this)" >On JPEG2000 Error Concealment Attacks</span></td>
+<td><span class="coloringspan" id="296" onmousedown="md(this)" onmouseup="mu(this)" >Thomas Stütz, Andreas Uhl</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="297" onmousedown="md(this)" onmouseup="mu(this)" >169</span></td>
+<td><span class="coloringspan" id="298" onmousedown="md(this)" onmouseup="mu(this)" >Upper-body Contour Extraction Using Face and Body Shape Variance Information</span></td>
+<td><span class="coloringspan" id="299" onmousedown="md(this)" onmouseup="mu(this)" >Kazuki Hoshiai, Shinya Fujie, Tetsunori Kobayashi</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="300" onmousedown="md(this)" onmouseup="mu(this)" >172</span></td>
+<td><span class="coloringspan" id="301" onmousedown="md(this)" onmouseup="mu(this)" >Approximated Ground Truth for Stereo and Motion Analysis on Real-World Sequences</span></td>
+<td><span class="coloringspan" id="302" onmousedown="md(this)" onmouseup="mu(this)" >Zhifeng Liu, Reinhard Klette</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="303" onmousedown="md(this)" onmouseup="mu(this)" >178</span></td>
+<td><span class="coloringspan" id="304" onmousedown="md(this)" onmouseup="mu(this)" >Cooperative Surveillance System With Fixed Camera Object Localization and Mobile Robot Target Tracking</span></td>
+<td><span class="coloringspan" id="305" onmousedown="md(this)" onmouseup="mu(this)" >Chih-Chun Chia, Wei-Kai Chan, Shao-Yi Chien</span> </td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="306" onmousedown="md(this)" onmouseup="mu(this)" >187</span></td>
+<td><span class="coloringspan" id="307" onmousedown="md(this)" onmouseup="mu(this)" >On the Security of an MPEG-Video Encryption Scheme Based on Secret Huffman Tables</span></td>
+<td><span class="coloringspan" id="308" onmousedown="md(this)" onmouseup="mu(this)" >Shujun Li, Guanrong Chen, Albert Cheung, Kwok-Tung Lo, Mohan Kankanhalli</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="309" onmousedown="md(this)" onmouseup="mu(this)" >191</span></td>
+<td><span class="coloringspan" id="310" onmousedown="md(this)" onmouseup="mu(this)" >H.264/AVC Video Encoder Realization and Acceleration on TI DM642 DSP</span></td>
+<td><span class="coloringspan" id="311" onmousedown="md(this)" onmouseup="mu(this)" >Daw-Tung Lin, Zong Yang</span> </td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="312" onmousedown="md(this)" onmouseup="mu(this)" >196</span></td>
+<td><span class="coloringspan" id="313" onmousedown="md(this)" onmouseup="mu(this)" >Improved Two-Level Model Averaging Techniques in Drosophila Brain Modeling</span></td>
+<td><span class="coloringspan" id="314" onmousedown="md(this)" onmouseup="mu(this)" >Cheng-Chi Wu</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="315" onmousedown="md(this)" onmouseup="mu(this)" >204</span></td>
+<td><span class="coloringspan" id="316" onmousedown="md(this)" onmouseup="mu(this)" >Belief Propagation for Stereo Analysis of Night-Vision Sequences</span></td>
+<td><span class="coloringspan" id="317" onmousedown="md(this)" onmouseup="mu(this)" >Shushi Guan, Reinhard Klette, Young Woon Woo</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="318" onmousedown="md(this)" onmouseup="mu(this)" >210</span></td>
+<td><span class="coloringspan" id="319" onmousedown="md(this)" onmouseup="mu(this)" >Rotated Image Based Photomosaic using Combination of Principal Component Hashing</span></td>
+<td><span class="coloringspan" id="320" onmousedown="md(this)" onmouseup="mu(this)" >Hideaki Uchiyama, Hideo Saito</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="321" onmousedown="md(this)" onmouseup="mu(this)" >211</span></td>
+<td><span class="coloringspan" id="322" onmousedown="md(this)" onmouseup="mu(this)" >Region-Based Super Resolution for Video Sequences Considering Registration Error</span></td>
+<td><span class="coloringspan" id="323" onmousedown="md(this)" onmouseup="mu(this)" >Osama Omer, Toshihisa Tanaka</span> </td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="324" onmousedown="md(this)" onmouseup="mu(this)" >223</span></td>
+<td><span class="coloringspan" id="325" onmousedown="md(this)" onmouseup="mu(this)" >A high performance H.264 Deblocking Filter</span></td>
+<td><span class="coloringspan" id="326" onmousedown="md(this)" onmouseup="mu(this)" >Vagner Rosa, Altamiro Susin, Sergio Bampi</span> </td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="327" onmousedown="md(this)" onmouseup="mu(this)" >224</span></td>
+<td><span class="coloringspan" id="328" onmousedown="md(this)" onmouseup="mu(this)" >Steganalysis of JPEG Images with Joint Transform Features</span></td>
+<td><span class="coloringspan" id="329" onmousedown="md(this)" onmouseup="mu(this)" >Zohaib Khan, Atif Mansoor</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="330" onmousedown="md(this)" onmouseup="mu(this)" >234</span></td>
+<td><span class="coloringspan" id="331" onmousedown="md(this)" onmouseup="mu(this)" >Hardware Design of Shape-Preserving Contour Tracing for Object of Segmented Images</span></td>
+<td><span class="coloringspan" id="332" onmousedown="md(this)" onmouseup="mu(this)" >Roy Chaoming Hsu, Bin-Wen Kao, Yao-Yu Li, Dinyuen Chan</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="333" onmousedown="md(this)" onmouseup="mu(this)" >236</span></td>
+<td><span class="coloringspan" id="334" onmousedown="md(this)" onmouseup="mu(this)" >Weighted Threshold Secret Image Sharing</span></td>
+<td><span class="coloringspan" id="335" onmousedown="md(this)" onmouseup="mu(this)" >Shyong Jian Shyu</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="336" onmousedown="md(this)" onmouseup="mu(this)" >237</span></td>
+<td><span class="coloringspan" id="337" onmousedown="md(this)" onmouseup="mu(this)" >Removal of specular reflection component using multi-view images and 3D object model</span></td>
+<td><span class="coloringspan" id="338" onmousedown="md(this)" onmouseup="mu(this)" >Shu Chow, Kwok Chan</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="339" onmousedown="md(this)" onmouseup="mu(this)" >244</span></td>
+<td><span class="coloringspan" id="340" onmousedown="md(this)" onmouseup="mu(this)" >An ROI/xROI based Rate Control Algorithm in H.264|AVC for Video Telephony Applications</span></td>
+<td><span class="coloringspan" id="341" onmousedown="md(this)" onmouseup="mu(this)" >Changhee Kim, Munchurl Kim, Jeongyeon Lim, Youngho Joo, Kimun Kim, Jaewoan Byun</span> </td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="342" onmousedown="md(this)" onmouseup="mu(this)" >245</span></td>
+<td><span class="coloringspan" id="343" onmousedown="md(this)" onmouseup="mu(this)" >Simplifying the Rate Control Scheme for Distributed Video Coding by Flexible Slepian-Wolf Decoding</span></td>
+<td><span class="coloringspan" id="344" onmousedown="md(this)" onmouseup="mu(this)" >Ralph Hänsel, Erika Müller</span> </td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="345" onmousedown="md(this)" onmouseup="mu(this)" >255</span></td>
+<td><span class="coloringspan" id="346" onmousedown="md(this)" onmouseup="mu(this)" >Glass Partterns and Artistic Imaging</span></td>
+<td><span class="coloringspan" id="347" onmousedown="md(this)" onmouseup="mu(this)" >Giuseppe Papari, Nicolai Petkov</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="348" onmousedown="md(this)" onmouseup="mu(this)" >258</span></td>
+<td><span class="coloringspan" id="349" onmousedown="md(this)" onmouseup="mu(this)" >Classification of similar 3D objects with different types of features from multi-view images</span> </td>
+<td><span class="coloringspan" id="350" onmousedown="md(this)" onmouseup="mu(this)" >Hitoshi Niigaki, Kazuhiro Fukui</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="351" onmousedown="md(this)" onmouseup="mu(this)" >263</span></td>
+<td><span class="coloringspan" id="352" onmousedown="md(this)" onmouseup="mu(this)" >Recovery Rate of Clustering Algorithms</span></td>
+<td><span class="coloringspan" id="353" onmousedown="md(this)" onmouseup="mu(this)" >Reinhard Klette, Fajie Li</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="354" onmousedown="md(this)" onmouseup="mu(this)" >265</span></td>
+<td><span class="coloringspan" id="355" onmousedown="md(this)" onmouseup="mu(this)" >Multiple View Geometry of Projector-Camera Systems from Virtual Mutual Projection</span></td>
+<td><span class="coloringspan" id="356" onmousedown="md(this)" onmouseup="mu(this)" >Shuhei Kobayashi, Fumihiko Sakaue, Jun Sato</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="357" onmousedown="md(this)" onmouseup="mu(this)" >267</span></td>
+<td><span class="coloringspan" id="358" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Appropriate Segment Extraction from Shots Based on Learning from Example Videos</span></td>
+<td><span class="coloringspan" id="359" onmousedown="md(this)" onmouseup="mu(this)" >Yousuke Kurihara, Naoko Nitta, Noboru Babaguchi</span> </td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="360" onmousedown="md(this)" onmouseup="mu(this)" >272</span></td>
+<td><span class="coloringspan" id="361" onmousedown="md(this)" onmouseup="mu(this)" >Localization of Lesions in Dermoscopy Images Using Ensembles of Thresholding Methods</span></td>
+<td><span class="coloringspan" id="362" onmousedown="md(this)" onmouseup="mu(this)" >M. Emre Celebi, Hitoshi Iyatomi, Gerald Schaefer, William Stoecker</span></td>
+</tr>
+</tbody>
+</table>
+  </div>
+
+  <div class="clear-block clear">
+    <div class="meta">
+        </div>
+
+      </div>
+
+</div><div id="block-block-1" class="clear-block block block-block">
+
+
+  <div class="content"><div style="clear: both; font-size: 12px; text-align: center;"><span class="coloringspan" id="363" onmousedown="md(this)" onmouseup="mu(this)" >Contact Address:</span> <code style="color: #008"><span class="coloringspan" id="364" onmousedown="md(this)" onmouseup="mu(this)" >psivt2009 at nii.ac.jp</span></code> <span class="coloringspan" id="365" onmousedown="md(this)" onmouseup="mu(this)" >(replace &lsquo;</span><code><span class="coloringspan" id="366" onmousedown="md(this)" onmouseup="mu(this)" >at</span></code><span class="coloringspan" id="367" onmousedown="md(this)" onmouseup="mu(this)" >&rsquo; by &lsquo;</span><code><span class="coloringspan" id="368" onmousedown="md(this)" onmouseup="mu(this)" >@</span></code><span class="coloringspan" id="369" onmousedown="md(this)" onmouseup="mu(this)" >&rsquo;)</span></div>
+</div>
+</div>
+          <span class="clear"></span>
+                    <div id="footer"><span class="coloringspan" id="370" onmousedown="md(this)" onmouseup="mu(this)" >&copy; PSIVT 2009 Organizing Committee All rights reserved.</span>

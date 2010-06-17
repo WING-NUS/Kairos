@@ -1,0 +1,604 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html
+     PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+     "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="de" lang="de">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.ukp.tu-darmstadt.de^acl-ijcnlp-2009-workshop^_2009-08-05__14-45-52.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.ukp.tu-darmstadt.de^acl-ijcnlp-2009-workshop^_2009-08-05__14-45-52.yaml created on Wed Aug 05 17:32:33 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+
+<!-- 
+	This website is powered by TYPO3 - inspiring people to share!
+	TYPO3 is a free open source Content Management Framework initially created by Kasper Skaarhoj and licensed under GNU/GPL.
+	TYPO3 is copyright 1998-2009 of Kasper Skaarhoj. Extensions are copyright of their respective owners.
+	Information and contribution at http://typo3.com/ and http://typo3.org/
+-->
+
+	<base href="http://www.ukp.tu-darmstadt.de/" />
+	<link rel="shortcut icon" href="http://www.ukp.tu-darmstadt.de/fileadmin/template/proto1/img/favicon.ico" />
+	<link rel="icon" href="http://www.ukp.tu-darmstadt.de/fileadmin/template/proto1/img/favicon.ico" />
+	<link rel="stylesheet" type="text/css" href="typo3temp/stylesheet_becb4a75a7.css" />
+
+		
+		<link href="fileadmin/template/proto1/css/main.css" type="text/css" rel="stylesheet" />
+		<link href="fileadmin/template/proto1/css/header.css" type="text/css" rel="stylesheet" />
+		<link href="fileadmin/template/proto1/css/menu.css" type="text/css" rel="stylesheet" />
+		<link href="fileadmin/template/proto1/css/footer.css" type="text/css" rel="stylesheet" />
+		<link href="fileadmin/template/proto1/css/contentlayout.css" type="text/css" rel="stylesheet" />
+		<link href="fileadmin/template/proto1/css/news.css" type="text/css" rel="stylesheet" />
+	
+	
+	
+	<!-- Styles ONLY for local use in this template! 
+		Should be removed by the Template Auto-parser --> 
+	
+<link href="res/stylesheet.css" rel="stylesheet" />
+
+
+<link rel="schema.dc" href="http://purl.org/metadata/dublin_core_elements" />
+
+	<title>ACL-IJCNLP 2009 Workshop</title>
+	<meta name="generator" content="TYPO3 4.2 CMS" />
+	<script type="text/javascript" src="typo3temp/javascript_ee97913fc4.js"></script>
+
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+													<div class="header"><!--###header### begin -->
+			                				<!-- TUDLogo START -->
+			                				<div class="blueheaderLine"><!--###blueheaderLine### begin -->
+			                				<!--###blueheaderLine### end --></div>
+			                				<div class="TUDLogo"><!--###TUDLogo### begin -->
+			                					<span onclick="return false" style="text-decoration:underline; color:blue" class="noeffect" href="http://www.tu-darmstadt.de/"><!--###noeffect### begin --><img onmousedown="imd(this)" height="89" alt="TU Darmstadt" src="fileadmin/template/proto1/img/header_tudlogo_blau.gif" width="187" border="0" /><!--###noeffect### end --></span>
+			                			  <!--###TUDLogo### end --></div>
+			                			  <!-- TUDLogo ENDE -->
+			                    	  <!-- SCHRIFTZUG START -->
+			                        <div class="Schriftzug"><h3></h3></div>
+			                      	<!-- SCHRIFTZUG ENDE -->
+			                    	  <!-- DATUM START -->
+			                        <!--<div class="Datum">Mittwoch,  5. August 2009</div>-->
+			                      	<!-- DATUM ENDE -->
+															<!-- FBLOGO START-->
+					            				<div class="fblogo" id="fblogo"><!--###fblogo### begin -->
+			    		          					<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.informatik.tu-darmstadt.de/"><img onmousedown="imd(this)" src="/uploads/pics/fachbereich-logo.gif" border="0" width="64" height="64" alt="" /></span>
+															<!--###fblogo### end --></div>
+															<!-- FBLOGO ENDE-->
+															<!-- -LOGO START-->
+					            				<!-- <div class="logo" id="logo"><!--###logo### begin -->
+			    		          					<img onmousedown="imd(this)" src="/uploads/tx_headerpicture/fachbereich-logo.gif" border="0" width="64" height="64" alt="" />
+															<!--###logo### end --></div> <span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" ></span>//-->
+															<!-- LOGO ENDE-->
+			 												<!-- LANGUAGE START -->
+			                        <div class="LanguageSelector" id="LanguageSelector"><div class="tx-srlanguagemenu-pi1">
+		
+		
+				<div class="CUR"><img onmousedown="imd(this)" src="typo3/gfx/content_client.gif" alt="" style="width:7px; height:10px;" /><span onclick="return false" style="text-decoration:underline; color:blue" href="acl-ijcnlp-2009-workshop/"><img onmousedown="imd(this)" src="typo3conf/ext/sr_language_menu/flags/en.gif" title="English" alt="English" class="tx-srlanguagemenu-pi1-flag" /></span></div> 
+			
+	
+	</div>
+	</div>
+															<!-- LANGUAGE ENDE -->
+															<!-- QUICK START -->
+			                        <div class="quick"><!--###quick### begin -->
+			                           	<span onclick="return false" style="text-decoration:underline; color:blue" id="top_personen" href="fileadmin/template/proto1/index.php?id=42"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ukp.tu-darmstadt.de/de/people"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >People</span></span></span><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+			                            <span onclick="return false" style="text-decoration:underline; color:blue" id="top_kontakt" href="fileadmin/template/proto1/index.php?id=39"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ukp.tu-darmstadt.de/de/contact"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Contact</span></span></span><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+			                            <span onclick="return false" style="text-decoration:underline; color:blue" id="top_suche" href="fileadmin/template/proto1/index.php?id=40"></span><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+			                        <!--###quick### end --></div>
+			                        <!-- QUICK ENDE -->
+			                				<div class="TrennlinieHellOben"><!--###TrennlinieHellOben### begin --><!--###TrennlinieHellOben### end --></div>
+			                				<div class="TrennlinieDunkelOben"><!--###TrennlinieDunkelOben### begin --><!--###TrennlinieDunkelOben### end --></div>
+															<!-- -HEADERPIC START-->
+					            				<div class="headerpic"><img onmousedown="imd(this)" id="headerpic" src="uploads/tx_headerpicture/ukp_header_logo_02.jpg" height="120" width="337" alt="" /></div>
+															<!-- -HEADERPIC ENDE-->
+			                				<div class="header_pfeil"><!--###header_pfeil### begin --><img onmousedown="imd(this)" src="fileadmin/template/proto1/img/header_rahmenpfeil.jpg" border="0" height="120" alt="" /><!--###header_pfeil### end --></div>
+			                				<!-- TITEL START-->
+			                				<h1 style="FONT-SIZE: 22px"><div id="TITEL" class="TITEL"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >ACL-IJCNLP 2009 Workshop</span></div></h1>
+			                				<!-- TITEL ENDE-->
+			                				<!-- PATH START-->
+			                        <div id="PATH" class="PATH"><span onclick="return false" style="text-decoration:underline; color:blue" href="home/" onfocus="blurLink(this);"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >UKP Lab</span></span></div>
+			                        <!-- PATH Ende-->
+			                				<div class="TrennlinieHellUnten"><!--###TrennlinieHellUnten### begin --><!--###TrennlinieHellUnten### end --></div>
+			                				<div class="TrennlinieDunkelUnten"><!--###TrennlinieDunkelUnten### begin --><!--###TrennlinieDunkelUnten### end --></div>
+			             			<!--###header### end --></div>
+             			      <!-- Footer START-->
+                        <div class="footer"><!--###footer### begin -->
+				                      <!-- LEFTCOLUMN START-->
+	                						<div class="leftcolumn"><!--###leftcolumn### begin -->
+																<!-- MENU START-->
+						                    <div class="navigation_bg"><!--###navigation_bg### begin -->
+		                                <div class="NavBox" id="menu_1"><ul><li><span onclick="return false" style="text-decoration:underline; color:blue" href="home/" onfocus="blurLink(this);" class="menu1-level1-no"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span><ul><li><span onclick="return false" style="text-decoration:underline; color:blue" href="home/e-nlp/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >e-NLP</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="home/nlp4wikis/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >NLP4Wikis</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="home/sim/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >SIM</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="home/news/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >News</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="home/archive/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Archive</span></span></li></ul></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="people/" onfocus="blurLink(this);" class="menu1-level1-no"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >People</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="projects/" onfocus="blurLink(this);" class="menu1-level1-no"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Projects</span></span><ul><li><span onclick="return false" style="text-decoration:underline; color:blue" href="projects/asc/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >ASC</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="projects/aqua/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >AQUA</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="projects/dkpro/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >DKPro</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="projects/qa-el/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >QA-EL</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="projects/sental/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >SENTAL</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="projects/sigmund/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >SIGMUND</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="projects/sir/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >SIR</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="projects/wikulu/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Wikulu</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="projects/theseus/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >THESEUS</span></span></li></ul></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="publications/?no_cache=1" onfocus="blurLink(this);" class="menu1-level1-no"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Publications</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="data/" onfocus="blurLink(this);" class="menu1-level1-no"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Data</span></span><ul><li><span onclick="return false" style="text-decoration:underline; color:blue" href="data/question-paraphrases/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Question Paraphrases</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="data/forum-post-quality/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Forum Post Quality</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="data/semantic-relatedness/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Semantic Relatedness</span></span></li></ul></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="software/" onfocus="blurLink(this);" class="menu1-level1-no"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Software</span></span><ul><li><span onclick="return false" style="text-decoration:underline; color:blue" href="software/dkpro/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >DKPro</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="software/dextract/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Dextract</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="software/jwktl/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >JWKTL</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="software/jwpl/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >JWPL</span></span></li></ul></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="teaching/" onfocus="blurLink(this);" class="menu1-level1-no"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Teaching</span></span><ul><li><span onclick="return false" style="text-decoration:underline; color:blue" href="teaching/courses/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Courses</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="teaching/theses/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Theses</span></span></li></ul></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="scientific-community/" onfocus="blurLink(this);" class="menu1-level1-no"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Scientific community</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="public-relations/" onfocus="blurLink(this);" class="menu1-level1-no"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Public relations</span></span><ul><li><span onclick="return false" style="text-decoration:underline; color:blue" href="public-relations/events/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Events</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="public-relations/press-releases/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Press releases</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="public-relations/ukp-in-the-press/" onfocus="blurLink(this);" class="menu1-level2-no"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >UKP in the Press</span></span></li></ul></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="partners/" onfocus="blurLink(this);" class="menu1-level1-no"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Partners</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="jobs/" onfocus="blurLink(this);" class="menu1-level1-no"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Jobs</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="contact/" onfocus="blurLink(this);" class="menu1-level1-no"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Contact</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="imprint/" onfocus="blurLink(this);" class="menu1-level1-no"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Imprint</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="links/" onfocus="blurLink(this);" class="menu1-level1-no"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Links</span></span></li></ul></div>
+				                        <!--###navigation_bg### end --></div>
+																<div class="blueMenuUnderLine"><!--###blueMenuUnderLine### begin --><!--###blueMenuUnderLine### end --></div>
+																	<!-- MENU Ende-->
+				                      	<!-- UNDERMENU START-->
+	                							<div id="undermenu" class="undermenu"></div>
+	                							<!-- UNDERMENU ENDE-->
+	                						<!--###leftcolumn### end --></div>
+	                						<!-- LEFTCOLUMN ENDE-->
+							                <!-- Content START -->
+							                <div class="main"><!--###main### begin -->
+						                  <div id="content">
+	<div id="colNormal"><!--DMAILER_SECTION_BOUNDARY_--><span onclick="return false" style="text-decoration:underline; color:blue" name="3730"></span><div class="csc-header csc-header-n1"><h2 class="csc-firstHeader"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >ACL-IJCNLP 2009 Workshop on: The People’s Web Meets NLP: Collaboratively Constructed Semantic Resources</span></h2></div><!--DMAILER_SECTION_BOUNDARY_END--><!--DMAILER_SECTION_BOUNDARY_--><span onclick="return false" style="text-decoration:underline; color:blue" name="4710"></span><h3><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Program</span></h3>
+
+<table cellspacing="0" cellpadding="5" border="0">
+<tr><td colspan="2"><h4><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Friday, August 7, 2009</span></h4></td></tr>
+<tr><td valign="top"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >8:45&#8211;9:00</span></td><td valign="top"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Opening Remarks</span></td></tr>
+<tr><td valign="top"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >09:00&#8211;09:30</span></td><td valign="top" align="left"><i><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >A Novel Approach to Automatic Gazetteer Generation using Wikipedia</span></i><br />
+<span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Ziqi Zhang and Jose Iria</span></td></tr>
+<tr><td valign="top"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >09:30&#8211;10:00</span></td><td valign="top" align="left"><i><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Named Entity Recognition in Wikipedia</span></i><br />
+<span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Dominic Balasuriya, Nicky Ringland, Joel Nothman, Tara Murphy and James R. Curran</span></td></tr>
+<tr><td valign="top"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >10:00&#8211;10:30</span></td><td valign="top"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td></tr>
+<tr><td valign="top"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >10:30&#8211;11:00</span></td><td valign="top" align="left"><i><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Wiktionary for Natural Language Processing: Methodology and Limitations</span></i><br />
+<span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Emmanuel Navarro, Franck Sajous, Bruno Gaume, Laurent Pr&eacute;vot, ShuKai Hsieh, Ivy Kuo, Pierre Magistry and Chu-Ren Huang</span></td></tr>
+<tr><td valign="top"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >11:00&#8211;11:20</span></td><td valign="top" align="left"><i><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Using the Wiktionary Graph Structure for Synonym Detection</span></i><br />
+<span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Timothy Weale, Chris Brew and Eric Fosler-Lussier</span></td></tr>
+<tr><td valign="top"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >11:20&#8211;11:40</span></td><td valign="top" align="left"><i><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Content-Based Categorization of Wikipedia Articles</span></i><br />
+<span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Zeno Gantner and Lars Schmidt-Thieme</span></td></tr>
+<tr><td valign="top"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >11:40&#8211;12:00</span></td><td valign="top" align="left"><i><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Evaluating a Statistical CCG Parser on Wikipedia</span></i><br />
+<span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Matthew Honnibal, Joel Nothman and James R. Curran</span></td></tr>
+<tr><td valign="top"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >12:10&#8211;13:50</span></td><td valign="top"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Lunch Break</span></td></tr>
+<tr><td valign="top"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >13:50&#8211;14:50</span></td><td valign="top"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk by Rada Mihalcea</span></td></tr>
+<tr><td valign="top"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >15:00&#8211;15:30</span></td><td valign="top" align="left"><i><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Construction of Disambiguated Folksonomy Ontologies Using Wikipedia</span></i><br />
+<span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Noriko Tomuro and Andriy Shepitsen</span></td></tr>
+<tr><td valign="top"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >15:30&#8211;16:00</span></td><td valign="top"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td></tr>
+<tr><td valign="top"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >16:00&#8211;16:20</span></td><td valign="top" align="left"><i><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Acquiring High Quality Non-Expert Knowledge from On-Demand Workforce</span></i><br />
+<span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Donghui Feng, Sveva Besana and Remi Zajac</span></td></tr>
+<tr><td valign="top"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >16:20&#8211;16:40</span></td><td valign="top" align="left"><i><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Constructing an Anaphorically Annotated Corpus with Non-Experts: Assessing the Quality of Collaborative Annotations</span></i><br />
+<span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Jon Chamberlain, Udo Kruschwitz and Massimo Poesio</span></td></tr>
+<tr><td valign="top"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >16:40&#8211;17:00</span></td><td valign="top"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Discussion</span></td></tr>
+</table><p><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>
+<!--DMAILER_SECTION_BOUNDARY_END--><!--DMAILER_SECTION_BOUNDARY_--><span onclick="return false" style="text-decoration:underline; color:blue" name="3740"></span><h3><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers</span></h3>
+
+<h4><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Full papers</span></h4>
+<p>
+<span class="authors"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Ziqi Zhang and Jose Iria</span></span><br />
+<span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >A Novel Approach to Automatic Gazetteer Generation using Wikipedia</span>
+</p>
+
+<p>
+<span class="authors"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Noriko Tomuro and Andriy Shepitsen</span></span><br />
+<span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Construction of Disambiguated Folksonomy Ontologies Using Wikipedia</span>
+</p>
+
+<p>
+<span class="authors"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Dominic Balasuriya, Nicky Ringland, Joel Nothman, Tara Murphy and James R. Curran</span></span><br />
+<span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Named Entity Recognition in Wikipedia</span>
+</p>
+
+<p>
+<span class="authors"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Emmanuel Navarro, Franck Sajous, Bruno Gaume, Laurent Prévot, ShuKai Hsieh, Ivy Kuo, Pierre Magistry and Chu-Ren Huang</span></span><br />
+<span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Wiktionary for natural language processing: methodology and limitations</span>
+</p>
+
+<h4> <span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Short papers</span> </h4>
+
+<p>
+<span class="authors"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Donghui Feng, Sveva Besana and Remi Zajac</span></span><br />
+<span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Acquiring High Quality Non-Expert Knowledge from On-demand Workforce</span>
+</p>
+
+<p>
+<span class="authors"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Zeno Gantner and Lars Schmidt-Thieme</span></span><br />
+<span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Content-based Categorization of Wikipedia Articles</span>
+</p>
+
+<p>
+<span class="authors"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Jon Chamberlain, Udo Kruschwitz and Massimo Poesio</span></span><br />
+<span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Constructing An Anaphorically Annotated Corpus With Non-Experts: Assessing The Quality Of Collaborative Annotations</span>
+</p>
+
+<p>
+<span class="authors"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Matthew Honnibal, James Curran and Joel Nothman</span></span><br />
+<span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Evaluating a Statistical CCG Parser on Wikipedia</span>
+</p>
+
+<p>
+<span class="authors"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Timothy Weale, Chris Brew and Eric Fosler-Lussier</span></span><br />
+<span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Using the Wiktionary Graph Structure for Synonym Detection</span>
+</p>
+<!--DMAILER_SECTION_BOUNDARY_END--><!--DMAILER_SECTION_BOUNDARY_--><span onclick="return false" style="text-decoration:underline; color:blue" name="3741"></span><div class="csc-header csc-header-n4"><h3><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span></h3></div><p class="bodytext"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Rada Mihalcea, University of North Texas</span></p>
+<p class="bodytext"> <span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >&quot;Large Scale Semantic Annotations Using Encyclopedic Knowledge&quot;</span><br /><br /></p>
+<h4><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Abstract</span></h4>
+<p class="bodytext"><br /><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Wikipedia is an online encyclopedia that has grown to become one of the largest online repositories of encyclopedic knowledge, with millions of articles available for a large number of languages. In fact, Wikipedia editions are available for more than 200 languages, with a number of entries varying from a few pages to more than one million articles per language.</span><br /><br /><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >In this talk, I will describe the use of Wikipedia as a source of linguistic evidence for large scale semantic annotations. In particular, I will show how this online encyclopedia can be used to achieve state-of-the-art results on two text processing tasks: automatic keyword&nbsp; extraction and word sense disambiguation. I will also show how the two methods can be combined into a system able to automatically enrich a text with links to encyclopedic knowledge. Given an input document, the system identifies the important concepts in the text and automatically links these concepts to the corresponding Wikipedia pages. Evaluations of the system showed that the automatic annotations are reliable and&nbsp; hardly distinguishable from manual annotations. Additionally, an evaluation of the system in an educational environment showed that the availability of encyclopedic knowledge within easy reach of a learner can improve&nbsp; both the quality of the knowledge acquired and the time needed to obtain such knowledge.</span><br /><br /></p>
+<h4><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Short bio</span></h4>
+<p class="bodytext"><br /><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Rada Mihalcea is an Associate Professor of Computer Science at the University of North Texas. Her research interests are in lexical semantics, graph-based algorithms for natural language processing, and multilingual natural language processing. During 2004-2007, she acted as the president of the ACL Special Group on the Lexicon, and she serves or has served on the editorial boards of the Journals of Computational Linguistics, Language Resources and Evaluations, Natural Language Engineering, and Research in Language in Computation. She is the recipient of a National Science Foundation CAREER award.</span><br /><br /></p><!--DMAILER_SECTION_BOUNDARY_END--><!--DMAILER_SECTION_BOUNDARY_--><span onclick="return false" style="text-decoration:underline; color:blue" name="3731"></span><div class="csc-header csc-header-n5"><h3><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Introduction</span></h3></div><p class="bodytext"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >In recent years, online resources collaboratively constructed by ordinary users on the Web have considerably influenced the NLP community. In many works, they have been used as a substitute for conventional semantic resources and as semantically structured corpora with great success. While conventional resources such as WordNet are developed by trained linguists [1], online semantic resources can now be automatically extracted from the content collaboratively created by the users [2]. Thereby, the knowledge acquisition bottlenecks and coverage problems pertinent to conventional lexical semantic resources can be overcome.</span></p>
+<p class="bodytext"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+<p class="bodytext"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >The resource that has gained the greatest popularity in this respect so far is Wikipedia. However, other resources recently discovered in NLP, such as folksonomies, the multilingual collaboratively constructed dictionary Wiktionary, or Q&amp;A sites like WikiAnswers or Yahoo! Answers are also very promising. Moreover, new wiki-based platforms such as Citizendium or Knol have recently emerged that offer features distinct from Wikipedia and are of high potential in terms of their use in NLP.</span></p>
+<p class="bodytext"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+<p class="bodytext"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >The benefits of using Web-based resources come along with new challenges, such as the interoperability with existing resources and the quality of the knowledge represented. As collaboratively created resources lack editorial control, they are typically incomplete. For the interoperability with conventional resources, the mappings have to be investigated. The quality of collaboratively constructed resources is questioned in many cases, and the information extraction remains a complicated task due to the incompleteness and semi-structuredness of the content. Therefore, the research community has begun to develop and provide tools for accessing collaboratively constructed resources [2,5].</span></p>
+<p class="bodytext"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+<p class="bodytext"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >The above listed challenges actually present a chance for NLP techniques to improve the quality of Web-based semantic resources. Researchers have therefore proposed techniques for link prediction [3] or information extraction [4] that can be used to guide the &quot;crowds&quot; to construct resources that are better suited for being used in NLP in return.</span></p>
+<p class="bodytext"><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><table class="contenttable"> <tbody><tr><td><p class="bodytext"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >[1]</span></p></td><td><p class="bodytext"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Christiane Fellbaum. WordNet An Electronic Lexical Database. MIT press, 1998.</span></p></td></tr> <tr><td><p class="bodytext"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >[2]</span></p></td><td><p class="bodytext"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Torsten Zesch and Christof Müller and Iryna Gurevych. Extracting Lexical Semantic Knowledge from Wikipedia and Wiktionary. Proceedings of the Conference on Language Resources and Evaluation, 2008.</span><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="software/jwpl/"><span lang="en-US"><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >http://www.ukp.tu-darmstadt.de/software/jwpl/</span></span></span><br /> <span onclick="return false" style="text-decoration:underline; color:blue" href="software/jwktl/"><span lang="en-US"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >http://www.ukp.tu-darmstadt.de/software/jwktl/</span></span></span></p></td></tr> <tr><td><p class="bodytext"><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >[3]</span></p></td><td><p class="bodytext"><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Rada Mihalcea and Andras Csomai. Wikify!: Linking Documents to Encyclopedic Knowledge. Proceedings of the Sixteenth ACM Conference on Information and Knowledge Management, CIKM 2007.</span></p></td></tr> <tr><td><p class="bodytext"><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >[4]</span></p></td><td><p class="bodytext"><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Daniel S. Weld et al. Intelligence in Wikipedia. Twenty-Third Conference on Artificial Intelligence (AAAI-08), 2008</span></p></td></tr> <tr><td><p class="bodytext"><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >[5]</span></p></td><td><p class="bodytext"><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Kotaro Nakayama et al.  	Wikipedia Mining - Wikipedia as a Corpus for  Knowledge Extraction.  	Proceedings of the Annual Wikipedia Conference (Wikimania),  2008.</span><br /> 	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://wikipedia-lab.org/en/index.php"><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >http://wikipedia-lab.org/en/index.php</span></span> </p></td></tr></tbody></table><!--DMAILER_SECTION_BOUNDARY_END--><!--DMAILER_SECTION_BOUNDARY_--><span onclick="return false" style="text-decoration:underline; color:blue" name="3839"></span><div class="csc-header csc-header-n6"><h3><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Topics</span></h3></div><p class="bodytext"><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >The workshop will bring together researchers from both worlds: those using collaboratively created resources in NLP applications such as information retrieval, named entity recognition, or keyword extraction, and those using NLP applications for improving the resources or extracting different types of semantic information from them. Hopefully, this will turn into a feedback loop, where NLP techniques improved by collaboratively constructed resources are used to improve the resources in exchange.</span></p>
+<p class="bodytext"><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+<p class="bodytext"><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Specific topics include but are not limited to:</span> </p><ul><li><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Different types of collaboratively constructed resources, such as wiki-based platforms,  Q&amp;A sites or folksonomies;</span></li></ul><ul><li><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Using collaboratively constructed resources in NLP such as information 	retrieval, text categorization, information extraction, etc.;</span></li></ul><ul><li><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Analyzing the properties of collaboratively constructed resources related to their use in NLP;</span></li></ul><ul><li><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Interoperability of collaboratively constructed resources with conventional semantic resources and between themselves;</span></li></ul><ul><li><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Converting unstructured information into structured lexical semantic information; tools for mining social and collaborative content;</span></li></ul><ul><li><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Quality issues with respect to collaboratively constructed resources.</span></li></ul><p class="bodytext"><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >We also encourage the submission of short papers describing publicly available tools for accessing or analyzing collaboratively created resources.  During the breaks, tables can be provided for demonstrations.</span></p><!--DMAILER_SECTION_BOUNDARY_END--><!--DMAILER_SECTION_BOUNDARY_--><span onclick="return false" style="text-decoration:underline; color:blue" name="3738"></span><div class="csc-header csc-header-n7"><h3><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Chairs</span></h3></div><p class="bodytext"><span onclick="return false" style="text-decoration:underline; color:blue" href="people/prof-dr-iryna-gurevych/" class="internal-link">  <span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Iryna Gurevych</span></span> <span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >and</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="people/torsten-zesch/" class="internal-link"><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Torsten Zesch</span></span></p>
+<p class="bodytext"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Ubiquitous Knowledge Processing Lab</span></p>
+<p class="bodytext"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Technische Universität Darmstadt</span></p><!--DMAILER_SECTION_BOUNDARY_END--><!--DMAILER_SECTION_BOUNDARY_--><span onclick="return false" style="text-decoration:underline; color:blue" name="3739"></span><div class="csc-header csc-header-n8"><h3><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></h3></div><table class="contenttable"> <tbody><tr><td><p class="bodytext"><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Delphine Bernhard</span></p></td><td><p class="bodytext"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Technische Universiät Darmstadt</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Paul Buitelaar</span></p></td><td><p class="bodytext"><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >DERI, National University of Ireland, Galway</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Razvan Bunescu</span></p></td><td><p class="bodytext"><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >University of Texas at Austin</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Pablo Castells</span></p></td><td><p class="bodytext"><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Universidad Autónonoma de Madrid</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Philipp Cimiano</span></p></td><td><p class="bodytext"><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Delft University of Technology</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Irene Cramer</span></p></td><td><p class="bodytext"><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Dortmund University of Technology</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Andras Csomai</span></p></td><td><p class="bodytext"><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Google Inc.</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Ernesto De Luca</span></p></td><td><p class="bodytext"><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >University of Magdeburg</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Roxana Girju</span></p></td><td><p class="bodytext"><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >University of Illinois at Urbana-Champaign</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Andreas Hotho</span></p></td><td><p class="bodytext"><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >University of Kassel</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Graeme Hirst</span></p></td><td><p class="bodytext"><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >University of Toronto</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Ed Hovy</span></p></td><td><p class="bodytext"><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >University of Southern California</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Jussi Karlgren</span></p></td><td><p class="bodytext"><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Swedish Institute of Computer Science</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Boris Katz</span></p></td><td><p class="bodytext"><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Massachusetts Institute of Technology</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Adam Kilgarriff</span></p></td><td><p class="bodytext"><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Brighton, Lexical Computing Ltd, UK</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Chin-Yew Lin</span></p></td><td><p class="bodytext"><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Microsoft Research</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >James Martin</span></p></td><td><p class="bodytext"><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >University of Colorado Boulder</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Olena Medelyan</span></p></td><td><p class="bodytext"><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >University of Waikato</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >David Milne</span></p></td><td><p class="bodytext"><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >University of Waikato</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Saif Mohammad</span></p></td><td><p class="bodytext"><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >University of Maryland</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Dan Moldovan</span></p></td><td><p class="bodytext"><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >University of Texas at Dallas</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Kotaro Nakayama</span></p></td><td><p class="bodytext"><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >University of Tokyo</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Ani Nenkova</span></p></td><td><p class="bodytext"><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >University of Pennsylvania</span> </p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Guenter Neumann</span></p></td><td><p class="bodytext"><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >DFKI Saarbruecken</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >Maarten de Rijke</span></p></td><td><p class="bodytext"><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >University of Amsterdam</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >Magnus Sahlgren</span></p></td><td><p class="bodytext"><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >Swedish Institute of Computer Science</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Manfred Stede</span> </p></td><td><p class="bodytext"><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Potsdam University</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >Benno Stein</span></p></td><td><p class="bodytext"><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >Bauhaus University Weimar</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >Tonio Wandmacher</span></p></td><td><p class="bodytext"><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >University of Osnabrück</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >Rene Witte</span></p></td><td><p class="bodytext"><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >Concordia University Montréal</span></p></td></tr>
+<tr><td><p class="bodytext"><span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >Hans-Peter Zorn</span></p></td><td><p class="bodytext"><span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></p></td><td><p class="bodytext"><span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >European Media Lab, Heidelberg</span></p></td></tr>
+</tbody></table><!--DMAILER_SECTION_BOUNDARY_END--><!--DMAILER_SECTION_BOUNDARY_--><span onclick="return false" style="text-decoration:underline; color:blue" name="3732"></span><div class="csc-header csc-header-n9"><h3><span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></h3></div><table border="0" class="contenttable"> <tbody> <tr> <td><p class="bodytext"><b><span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >Extended submission deadline (full and short):</span></b></p></td> <td><p class="bodytext"><b><span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >May 8, 2009</span></b> </p></td></tr>  <tr> <td><p class="bodytext"><span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >Notification of acceptance of papers:</span> </p></td> <td><p class="bodytext"><span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >June 1, 2009</span></p></td></tr> <tr> <td><p class="bodytext"><span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >Camera-ready copy of papers due:</span> </p></td> <td><p class="bodytext"><span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >June 7, 2009</span></p></td></tr> <tr> <td><p class="bodytext"><span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >ACL-IJCNLP 2009 Workshops:</span> </p></td> <td><p class="bodytext"><span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >Aug 7, 2009</span></p></td></tr></tbody></table><!--DMAILER_SECTION_BOUNDARY_END--><!--DMAILER_SECTION_BOUNDARY_--><span onclick="return false" style="text-decoration:underline; color:blue" name="3742"></span><div class="csc-header csc-header-n10"><h3><span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >Submission</span></h3></div><p lang="en-US" class="bodytext"><span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >Full paper submissions should follow the two-column format of ACL-IJCNLP 2009 proceedings without exceeding eight (8) pages of content plus one extra page for references.  Short paper submissions should also follow the two-column format of ACL-IJCNLP 2009 proceedings, and should not exceed four (4) pages, including references. We strongly recommend the use of ACL LaTeX style files or Microsoft Word Style files tailored for this year's conference. The official style files for ACL/IJCNLP 2009 are available at:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.acl-ijcnlp-2009.org/main/authors/stylefiles/" target="http://www.acl-ijcnlp-2009.org/main/authors/stylefiles/" class="external-link-new-window"><span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >http://www.acl-ijcnlp-2009.org/main/authors/stylefiles/</span></span></p>
+<p class="bodytext"><span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >As the reviewing will be blind, the paper must not include the authors' names and affiliations. Furthermore, self-references that reveal the author's identity, e.g., &quot;We previously showed (Smith, 1991) ...&quot;, must be avoided. Instead, use citations such as &quot;Smith previously showed (Smith, 1991) ...&quot;. Papers that do not conform to these requirements will be rejected without review.</span></p>
+<p lang="en-US" class="bodytext"><span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+<p lang="en-US" class="bodytext"><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >All accepted papers will be presented orally and published in the workshop proceedings.</span></p>
+<p class="bodytext"><span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >The deadline for all papers is May 1st, 2009 (GMT-12). Submission is electronic using paper submission software at:</span></p><blockquote style="margin-bottom:0;margin-top:0;"></blockquote><p lang="en-US" class="bodytext"><span onclick="return false" style="text-decoration:underline; color:blue" href="https://www.softconf.com/acl-ijcnlp09/CCSR/" class="external-link-new-window"><span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >https://www.softconf.com/acl-ijcnlp09/CCSR/</span></span></p>
+<p lang="en-US" class="bodytext"><span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><!--DMAILER_SECTION_BOUNDARY_END--><!--DMAILER_SECTION_BOUNDARY_--><span onclick="return false" style="text-decoration:underline; color:blue" name="3736"></span><div class="csc-header csc-header-n11"><h3><span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></h3></div><p class="bodytext"><span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >Information on registration is provided at the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.acl-ijcnlp-2009.org/" class="external-link-new-window"><span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >ACL-IJCNLP 2009 website</span></span><span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >.</span></p><!--DMAILER_SECTION_BOUNDARY_END--><!--DMAILER_SECTION_BOUNDARY_--><span onclick="return false" style="text-decoration:underline; color:blue" name="3737"></span><div class="csc-header csc-header-n12"><h3><span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >Contact</span></h3></div><p class="bodytext"><span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >For further information about the workshop, please contact</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="people/torsten-zesch/" class="internal-link"><span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >Torsten Zesch</span></span><span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >.</span></p>
+<p class="bodytext"><span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+<p class="bodytext"><span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>

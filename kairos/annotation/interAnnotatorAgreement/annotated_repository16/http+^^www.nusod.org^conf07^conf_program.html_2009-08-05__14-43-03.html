@@ -1,0 +1,873 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+<HTML>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/8/annotation/annotated_repository/http+^^www.nusod.org^conf07^conf_program.html_2009-08-05__14-43-03.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/8/annotation/annotated_repository/http+^^www.nusod.org^conf07^conf_program.html_2009-08-05__14-43-03.yaml created on Thu Aug 13 13:57:32 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+<meta name="description" content="NUSOD Conference: Connecting Theory and Application of Optoelectronic Devices">
+<TITLE>NUSOD '07 Program</TITLE>
+<script language="JavaScript" type="text/JavaScript">
+<!--
+
+function MM_reloadPage(init) {  //reloads the window if Nav4 resized
+  if (init==true) with (navigator) {if ((appName=="Netscape")&&(parseInt(appVersion)==4)) {
+    document.MM_pgW=innerWidth; document.MM_pgH=innerHeight; onresize=MM_reloadPage; }}
+  else if (innerWidth!=document.MM_pgW || innerHeight!=document.MM_pgH) location.reload();
+}
+MM_reloadPage(true);
+//-->
+//-->
+// Open new window code
+function NewWin(page) {
+OpenWin = this.open(page, "CtrlWindow",
+"height=450,width=650,toolbar=no,menubar=no,location=no,scrollbars=yes,resizable=yes");
+}
+// End -->
+</script>
+<style type="text/css">
+<!--
+@import url("menu_off.css");
+body,td,th {
+	font-family: Georgia, Times New Roman, Times, serif;
+	font-size: small;
+	color: #FFFF00;
+}
+body {
+	background-color: #000099;
+}
+a:link {
+	text-decoration: none;
+}
+a:visited {
+	text-decoration: none;
+}
+a:hover {
+	text-decoration: underline;
+	color: #FF0000;
+}
+a:active {
+	text-decoration: none;
+}
+.style1 {
+	font-size: medium;
+	color: #000000;
+}
+.style5 {color: #000000}
+-->
+</style>
+<link href="menu_on.css" rel="stylesheet" type="text/css">
+<style type="text/css">
+<!--
+.style7 {
+	font-size: 20px;
+	font-weight: bold;
+}
+.style50 {font-size: xx-small}
+.style53 {font-size: 12px; color: #FFFF00; }
+.style12 {color: #FF0000}
+.style66 {font-size: 12px}
+.style67 {font-size: 12px; color: #000000; }
+.style70 {color: #0000FF}
+.style72 {font-size: 12px; color: #0000FF; }
+.style73 {font-size: 16px}
+.style74 {font-size: 12px; color: #000000; font-weight: bold; }
+.style76 {font-size: 12px; font-weight: bold; }
+.style77 {font-size: 12px; color: #000000; font-style: italic; }
+-->
+</style>
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<table width="800" border="0" align="left">
+  <tr valign="bottom">
+    <td width="180" align="left"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+    <td nowrap><strong><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Connecting Theory and Application of Optoelectronic Devices</span></strong>    </td>
+    <td><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+  </tr>
+  <tr valign="middle">
+    <td width="180" height="60" align="left" valign="top"><div align="left"><img onmousedown="imd(this)" src="top0.gif" width="180" height="60"></div></td>
+    <td height="60" valign="top" nowrap><img onmousedown="imd(this)" src="top2.jpg" width="90" height="60"><img onmousedown="imd(this)" src="top5.jpg" width="80" height="60"><img onmousedown="imd(this)" src="top3.jpg" width="98" height="60"><img onmousedown="imd(this)" src="top4.JPG" width="96" height="60"><img onmousedown="imd(this)" src="top1.jpg" width="122" height="60"><img onmousedown="imd(this)" src="top7.jpg" width="61" height="60"></td>
+    <td height="60" valign="bottom" ><table width="189" border="0">
+      <tr valign="top">
+        <td width="10"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+        <td width="160" align="left"><form action="/cgi-sys/entropysearch.cgi" target=searchwindow>
+            <div align="left">
+              <input type="text" name="query" value="NUSOD site query">
+              <input type="hidden" name="user" value="nusodorg">
+              <input type="hidden" name="basehref" value="http://nusod.org">
+              <input type="hidden" name="template" value="default">
+              <input type="submit" value="Search">
+            </div>
+          </form>
+    <span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+      </tr>
+    </table>
+    </td>
+  </tr>
+  <tr>
+    <td width="180" align="left"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+    <td align="left" nowrap>
+    <div align="left"><strong><span onclick="return false" style="text-decoration:underline; color:blue" class="menu_on"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Conference</span></span> <span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" class=menu_off href="/inst/software.html"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Software</span></span> <span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" class=menu_off href="/inst/"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Services</span></span> </strong></div></td>
+    <td width="180"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+  </tr>
+  <tr>
+    <td width="180" height="613" align="left" valign="top"><table border="0" align="left">
+        <tr>
+          <td align="left" valign="bottom">
+            <p align="left"><span class="style7"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >7th</span><br>
+              <span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >International</span><br>
+              <span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Conference</span> </span></p>
+          </td>
+        </tr>
+        <tr>
+          <td align="left" valign="top"><span class="style53"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >24-27 Sept. 2007</span> </span></td>
+        </tr>
+        <tr>
+          <td align="left" valign="top"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+        </tr>
+        <tr>
+          <td valign="top"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+        </tr>
+        <tr>
+          <td align="left" valign="top" class="menu_off"><p><span onclick="return false" style="text-decoration:underline; color:blue" class="menu_off" href="/index.html"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Frontpage</span></span></p></td>
+        </tr>
+        <tr>
+          <td align="left" valign="top" class="menu_off"><p><span onclick="return false" style="text-decoration:underline; color:blue" class="menu_off" href="index.html"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Scope and Topics</span></span></p></td>
+        </tr>
+        <tr>
+          <td align="left" valign="top" class="menu_on"><p><span onclick="return false" style="text-decoration:underline; color:blue" class="menu_off" href="conf_comm.html"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Committee</span></span></p></td>
+        </tr>
+        <tr>
+          <td align="left" valign="top" class="menu_off"><p><span onclick="return false" style="text-decoration:underline; color:blue" class="menu_off" href="conf_venue.html"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Venue</span></span></p>
+          </td>
+        </tr>
+				        <tr>
+          <td align="left" valign="top" class="menu_off"><p><span onclick="return false" style="text-decoration:underline; color:blue" class="menu_on" ><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span></p></td>
+        </tr>
+		        <tr>
+          <td align="left" valign="top" class="menu_off"><p><span onclick="return false" style="text-decoration:underline; color:blue" class="menu_off" href="conf_author.html"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Author Information</span></span></p></td>
+        </tr>
+        <tr>
+          <td align="left" valign="top" class="menu_off"><p><span onclick="return false" style="text-decoration:underline; color:blue" class="menu_off" href="conf_subm.html"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Paper Submission</span></span></p></td>
+        </tr>
+				 <tr>
+          <td align="left" valign="top" class="menu_off"><p><span onclick="return false" style="text-decoration:underline; color:blue" class="menu_off" href="conf_oqe.html"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Journal Issue</span></span></p></td>
+        </tr>
+				        <tr>
+          <td align="left" valign="top" class="menu_off"><p><span onclick="return false" style="text-decoration:underline; color:blue" class="menu_off" href="conf_invited.html"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talks</span></span></p></td>
+        </tr>
+				<tr>
+          <td align="left" valign="top" class="menu_off"><p><span onclick="return false" style="text-decoration:underline; color:blue" class="menu_off" href="conf_short.html"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Short Courses</span></span></p></td>
+        </tr>
+        <tr>
+          <td align="left" valign="top" class="menu_off"><p><span onclick="return false" style="text-decoration:underline; color:blue" class="menu_off" href="conf_exhib.html"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Software Exhibition</span></span></p></td>
+        </tr>
+        <tr>
+          <td align="left" valign="top" class="menu_off"><p><span onclick="return false" style="text-decoration:underline; color:blue" class="menu_off" href="conf_reg.html" ><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></p></td>
+        </tr>
+				        <tr>
+          <td align="left" valign="top" class="menu_off"><p><span onclick="return false" style="text-decoration:underline; color:blue" class="menu_off" href="conf_hotel.html"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Hotels</span></span></p></td>
+        </tr>
+        <tr>
+          <td align="left" valign="top" class="menu_off"><p><span onclick="return false" style="text-decoration:underline; color:blue" class="menu_off" href="conf_con.html"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Contact</span></span></p></td>
+        </tr>
+        <tr>
+          <td align="left" valign="top" class="menu_off"><p><span onclick="return false" style="text-decoration:underline; color:blue" href="javascript:NewWin('http://nusod.org/nusodmail/?p=subscribe')" class="menu_off"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Mailinglist</span></span></p></td>
+        </tr>
+        <tr>
+          <td align="left" valign="top" class="menu_off"><p><span onclick="return false" style="text-decoration:underline; color:blue" class="menu_off" href="conf_sights.html"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Sightseeing</span></span></p></td>
+        </tr>
+        <tr>
+          <td valign="top" nowrap><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+        </tr>
+        <tr>
+         <td align="left" valign="top" class="menu_off"><p><span onclick="return false" style="text-decoration:underline; color:blue" class="menu_off" href="conf_pics.html"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Pictures</span></span></p></td>
+        </tr>
+    </table></td>
+    <td align="left" valign="top" bgcolor="#FFFFCC"><blockquote>
+        <p align="left" ><br>
+          <span class="style12"><u><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Final Conference Program</span></u></span></p>
+        <p align="left" class="style67" ><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >(click on paper number to download PDF slides, if available)</span>   </p>
+        <center>
+          <div align="left">
+              <table width="462" height="336" border="2">
+                <tr>
+                  <td width="92" height="64"><p class="style67"><font face="Georgia"><span onclick="return false" style="text-decoration:underline; color:blue" href="#mon"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Monday</span><br>
+            <span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >September 24</span> </span> </font></p></td>
+                  <td width="105" class="style67"><font face="Georgia"> <span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >10:30-12:30</span><br>
+          <span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >13:30-15:25</span><br>
+          <span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >15:45-17:35</span><br>
+          <span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >18:00-20:00</span></font></td>
+                  <td width="33"><p class="style67"><font face="Georgia, Times New Roman, Times, serif"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >SC1</span></font><font face="Georgia, Times New Roman, Times, serif"><br>
+            <span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >MA</span><br>
+            <span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >MB</span></font><strong><br>
+            <br>
+        </strong></p></td>
+                  <td width="202" class="style67"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.nusod.org/conf07/conf_short.html" target="_self"><font face="Georgia"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Short Course 0701</span> </font></span><font face="Georgia"><br>
+          <span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Novel Materials</span> <br>
+          <span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Laser Diodes I</span> <br>
+          <span class="style5"><em><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Reception (Clayton Hall)</span> </em></span></font></td>
+                </tr>
+                <tr>
+                  <td height="79" class="style67"><font face="Georgia"><span onclick="return false" style="text-decoration:underline; color:blue" href="#tue"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday</span><br>
+          <span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >September 25</span> </span></font></td>
+                  <td class="style67"><p><font face="Georgia"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >09:00-10:10</span><br>
+            <span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >10:30-12:00</span><br>
+            <span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >13:30-14:00</span>
+                  </font><font face="Georgia"><br>
+                    <span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >14:00-15:40</span><br>
+                    <span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >16:00-18:00</span><br>
+                    </font></p>
+                  </td>
+                  <td class="style67"><font face="Georgia, Times New Roman, Times, serif"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >TuA</span><br>
+          <span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >TuB</span><br>
+          <span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >TuPP</span><br>
+          <span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >TuP</span><br>
+          <span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >SC2</span></font><strong><br>
+          </strong></td>
+                  <td class="style67"><font face="Georgia"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Light-Emitting Diodes</span> <br>
+          <span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Nanostructures I</span><br>
+          <span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Poster Preview Session</span>
+          <br>
+          <span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session</span> <br>
+          <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.nusod.org/conf07/conf_short.html" target="_self"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Short Course 0702</span> </span></font></td>
+                </tr>
+                <tr>
+                  <td class="style67"><font face="Georgia"><span onclick="return false" style="text-decoration:underline; color:blue" href="#wed"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday</span><br>
+          <span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >September 26</span> </span></font></td>
+                  <td class="style67"><font face="Georgia"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >09:30-10:10</span><br>
+          <span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >10:30-12:10</span><br>
+          <span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >13:50-15:40</span><br>
+          <span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >16:00-18:00</span><br>
+          <span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >18:30-20:30</span></font></td>
+                  <td><p class="style67"><font face="Georgia, Times New Roman, Times, serif"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >WA</span><br>
+            <span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >WB</span><br>
+            <span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >WC</span><br>
+            <span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >SC3</span><br>
+                  </font> <br>
+                  </p>
+                  </td>
+                  <td><p class="style67"><font face="Georgia"><font face="Georgia"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Novel Devices</span></font><br>
+                    <span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Laser Diodes II</span> </font><font face="Georgia"><br>
+                    <font face="Georgia"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Photodetectors and Solar Cells</span> </font><br>
+                    <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.nusod.org/conf07/conf_short.html" target="_self"><font face="Georgia"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Short Course 0703</span></font></span><font face="Georgia"><br>
+            <em> <span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Dinner
+(Blue &amp; Gold Club)</span>         </em> </font></font></p>
+                  </td>
+                </tr>
+                <tr>
+                  <td rowspan="2" class="style67"><font face="Georgia"><span onclick="return false" style="text-decoration:underline; color:blue" href="#thu"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Thursday</span><br>
+    <span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >September 27</span> </span></font></td>
+                  <td class="style67"><font face="Georgia"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >08:30-10:20</span><br>
+    <span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >10:40-12:40</span><br>
+    <span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >13:40-15:00</span><br>
+                  </font></td>
+                  <td class="style67"><font face="Georgia, Times New Roman, Times, serif"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >ThA</span><br>
+    <span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >ThB</span><br>
+    <span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >ThPD</span><br>
+    </font></td>
+                  <td><p class="style67"><font face="Georgia"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Nanostructures II</span> <br>
+      <span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Photonic Circuits and Fiber Optics</span> <br>
+      <span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Postdeadline Session</span> <br>
+      </font></p></td>
+                </tr>
+                <tr>
+                  <td height="34" colspan="3"><p class="style67"><font face="Georgia"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >15</span></font><font face="Georgia"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >:30-18:30</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="crosslight.html" target="_blank"> <span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Crosslight Software Workshop</span></span><br>
+                    </font></p>
+                  </td>
+                </tr>
+              </table>
+              <p align="left" class="style73"><span class="style5 style66"><strong><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Location:</span> </strong><span onclick="return false" style="text-decoration:underline; color:blue" href="http://chico.nss.udel.edu/buildings/NW22.html" target="_blank"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Trabant Center</span></span><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >, Multipurpose Room A&amp;B (</span><span onclick="return false" style="text-decoration:underline; color:blue" href="nusod07map.pdf" target="_blank"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >conference map</span></span><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >)</span></span> </p>
+              <hr WIDTH="100%">
+              <div align="center" class="style73">
+                <div align="center"><font color="#FF0000" face="Georgia"><strong><i><span onclick="return false" style="text-decoration:underline; color:blue" name="mon" id="mon"></span><span class="style12"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Monday, September 24</span> </span></i></strong></font><font color="#FF0000" face="Georgia"><strong><i><span class="style12"></span></i></strong></font></div>
+              </div>
+              <hr WIDTH="100%">
+              <p class="style67"><font face="Georgia"><strong><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Registration Desk open 10:00 - 14:00</span> </strong></font></p>
+              <p class="style67"><strong><font face="Georgia"><font face="Georgia"><strong><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >10:30</span></strong><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >-12:30</span></font> <u><span class="style70"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Short Course</span></span></u></font></strong><font face="Georgia"><span class="style5"> <span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.nusod.org/conf07/conf_short.html" target="_self"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >separate registration required</span></span><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >)</span></span> <strong><br>
+                </strong><br>
+              <strong><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >SC0701</span></strong> <span class="style70"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Introduction to Optoelectronic Device Simulation</span></span> <span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >[</span><span onclick="return false" style="text-decoration:underline; color:blue" href="SC0701_Piprek.pdf" target="_blank"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >abstract</span></span><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >]</span><br>
+      <span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Joachim Piprek (NUSOD Institute, USA)</span></font></p>
+              <p class="style67"><span class="style66"><font face="Georgia"><strong><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >12:30 - 13:30</span> <font face="Georgia"><strong><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Lunch Break</span></strong></font></strong></font></span>
+              <p class="style67"><span class="style66"><font face="Georgia"><strong><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >13:30 - 13:35</span><strong> <span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Opening Remarks</span> </strong></strong></font></span>              
+              <p class="style67"><span class="style66"><strong><font face="Georgia"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >13:35-15:25</span> <u><span class="style70"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Novel Materials</span></span></u></font></strong><font face="Georgia"> <font face="Georgia"><font face="Georgia"><span class="style5"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >(Chair:</span> <strong><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Ben Klein</span></strong><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >, Georgia Institute of Technology)</span></span></font></font></font>
+              </span>
+              <p class="style67"><span class="style66"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="MA1.pdf" target="_blank"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >MA1</span></span></strong> </font></span><font face="Georgia"><span class="style70"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Low refractive index films: A new class of optical thin film materials for optoelectronic applications</span></span> <span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span class="style12"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >invited</span></span><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >) Jong Kyu Kim and E. Fred Schubert, Rensselaer Polytech. Inst., Troy, NY</span> </font>
+              <p class="style67"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="MA2.pdf" target="_blank"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >MA2</span></span></strong> <span class="style70"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Hot Carrier Dynamics and Coherent Effects in GaN under Short Laser Pulse Excitation</span></span><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >; S. Rudin (1), E. Bellotti (2), G. A. Garrett (1), and M. Wraback (1); (1) US Army Research Laboratory, Adelphi, MD; (2) Electrical and Computer Engineering Department, Boston University, Boston, MA</span></font></p>
+              <p class="style67"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="MA3.pdf" target="_blank"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >MA3</span></span></strong> <font face="Georgia"><span class="style70"><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Simulations of 2D Maxwell-Bloch equations</span></span><br>
+  <span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Jingyi Xiong (1), Max Colice (1), Friso Schlottau (1), Kelvin Wagner (1) and Bengt Fornberg (2); (1) Optoelectronic Computing Systems Center, Dept of ECE, University of Colorado, Boulder, CO; (2) Department of Applied Mathematics, University of Colorado, Boulder, CO</span></font></p>
+              <p class="style67"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="MA4.pdf"><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >MA4</span></span></strong><span class="style70"> <span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Near and far field observation of optical confinement in non-destructive fabricated organic photonic dots</span></span><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >. 
+              Maik Langner, Robert Gehlhaar, Clemens Schriever, Hartmut Froeb, Vadim G. Lyssenko and Karl Leo; Institut for Applied Photophysics, Techn. Univ. Dresden, Germany</span></font></p>
+              <p class="style67"><font face="Georgia"><strong><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >MA5</span></strong> <span class="style70"><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >DNA-Wrapped Carbon Nanotubes as Potential Optoelectronic Materials</span></span><br>
+              <span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Stacy E. Snyder and</span> <font face="Georgia"><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Slava V. Rotkin</span></font><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >; Physics Department, Lehigh University, Bethlehem, PA</span> </font></p>
+              <p class="style67"><font face="Georgia"><strong><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >15:25-15:45</span><font face="Georgia"><strong> <font face="Georgia"><strong> <span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Afternoon Break</span> </strong></font></strong></font></strong></font></p>
+              <p class="style67"><strong><font face="Georgia"><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >15:45-17:35</span> <u><span class="style70"><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Laser Diodes I</span></span></u></font></strong> <font face="Georgia"><font face="Georgia"><span class="style5"><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >(Chair:</span> <strong><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Uwe Bandelow</span></strong><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >, WIAS Berlin, Germany)</span></span></font></font></p>
+              <p class="style67"><FONT face="Georgia, Times New Roman, Times, serif"><strong><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >MB1</span> </strong> <span class="style72"><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Simulation and optimization of high-power semiconductor lasers and modules</span></span><span class="style68"> <span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span class="style12"><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >invited</span></span><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >) ;</span> </span><span class="style67"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Nicolai Matuschek, Bookham, Switzerland</span></span></FONT></p>
+              <p class="style67"><FONT face="Georgia, Times New Roman, Times, serif"><span class="style67"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="MB2.pdf" target="_blank"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >MB2</span></span></strong> <span class="style70"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Thermal lensing in high&ndash;power ridge&ndash;waveguide lasers</span></span><br>
+              <span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Hans Wenzel, M. Dallmer and G. Erbert; 
+              Ferdinand&ndash;Braun&ndash;Inst.,  Berlin, 
+            Germany</span></span></FONT></p>
+              <p class="style67"><FONT face="Georgia, Times New Roman, Times, serif"><span class="style67"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="MB3.pdf" target="_blank"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >MB3</span></span></strong><span class="style70"> <span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Thermal Boundary Resistance in Optoelectronic Device</span></span><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >s</span><br>
+              <span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >R. MacKenzie, J.J. Lim, S. Bull, S. Sujecki and E.C. Larkins; 
+            School of Electrical and Electronic Engineering, University of Nottingham, U.K.</span> </span></FONT></p>
+              <p class="style67"><FONT face="Georgia, Times New Roman, Times, serif"><span class="style67"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="MB4.pdf" target="_blank"><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >MB4</span></span></strong> <span class="style70"><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Design and optimization of a GaAs-based sub-7-micron 
+              quantum cascade laser based on multivalley Monte 
+              Carlo simulation</span></span><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >; 
+              X. Gao, M. D&rsquo;Souza, D. Botez, and I. Knezevic; 
+              Department of Electrical and Computer Engineering, University of Wisconsin, Madison, WI</span><br>
+              <span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span class="style12"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Winner of the NUSOD 2007 BEST STUDENT PAPER AWARD</span></span><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >)</span></span></FONT></p>
+              <p class="style67"><FONT face="Georgia, Times New Roman, Times, serif"><span class="style67"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="MB5.pdf" target="_blank"><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >MB5</span></span></strong> <span class="style70"><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Thermal performance investigation of DQW GaInNAs laser diodes</span></span><br>
+              <span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >J.J. Lim (1), R. MacKenzie (1), S. Sujecki (1), M. Sadeghi (2), S.M. Wang (2), Y.Q. Wei (2) and A. Larsson (2), 
+            P. Melanen (3), P. Uusimaa (3), A.A. George (4), P.M. Smowton (4) and E.C. Larkins (1); (1) The University of Nottingham, University Park, Nottingham, U.K. ; (2) Photonics Laboratory, Chalmers University of Technology, G&ouml;teborg, Sweden; (3) Modulight Inc., Tampere, Finland; (4) Cardiff School of Physics and Astronomy, Cardiff University,  Cardiff, U.K.</span> </span></FONT></p>
+              <p class="style67"><strong><font face="Georgia"><strong><font face="Georgia"><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >18:00 - 20:00</span></font></strong> <span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Conference  Reception</span></font></strong><font face="Georgia"> <span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.udel.edu/conf/clayton_dir.htm" target="_blank"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Clayton Hall Lobby</span></span><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <strong><br>
+              </strong></font></p>
+          </div>
+        </center>
+          <hr WIDTH="100%">
+          <div align="center"><span class="style73"><font color="#FF0000" face="Georgia"><strong><i><span onclick="return false" style="text-decoration:underline; color:blue" name="tue" id="tue"></span><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday</span><span class="style12"><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >, September 2</span></span><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >5</span></i></strong></font></span>          </div>
+        <hr align="center" WIDTH="100%">
+          <p class="style67"><span class="style66"><font face="Georgia"><strong><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Registration Desk open 8:30 - 10:30</span> </strong></font></span>          
+          <p class="style67"><span class="style66"><font face="Georgia"><strong><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >09:00-10:10</span> <u><span class="style70"><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Light-Emitting Diodes</span></span></u></strong><span class="style70"> <font face="Georgia"><font face="Georgia"><span class="style5"><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >(Chair:</span><strong> <span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Doug Yoder</span></strong><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <font face="Georgia"><font face="Georgia"><font face="Georgia"><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Georgia Institute of Technology</span></font></font></font><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >)</span></span></font></font></span> </font></span>
+          <p class="style67"> <span class="style66"><font face="Georgia">  <strong><span onclick="return false" style="text-decoration:underline; color:blue" href="TuA1.pdf" target="_blank"><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >TuA1</span></span> </strong></font></span><span class="style71"><span class="style70"><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Quantitative modelling of resonant photoluminescence in InGaN single-quantum-well LED structures (</span><span class="style12"><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >invited</span></span><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >)</span></span></span><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >;</span> <span class="style69"><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Matthias Sabathil, A. Laubsch, and N. Linder, OSRAM, Germany</span></span>
+          <p class="style67"><span class="style66"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="TuA2.pdf" target="_blank"><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >TuA2</span></span></strong> <span class="style70"><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Coupled Modeling of Current Spreading, Thermal Effects, and Light Extraction in III-Nitride Light-Emitting Diodes</span></span><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >; M. V. Bogdanov, K. A. Bulashevich, I. Yu. Evstratov, and S. Yu. Karpov; STR, Inc.,  Richmond, VA</span></font></span>          
+          <p class="style67"><span class="style66"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="TuA3.pdf" target="_blank"><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >TuA3</span></span></strong> <span class="style70"><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Enhanced light extraction from textured surfaces with sub-wavelength size features: beyond the ray tracing approximation</span></span><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >; S. Riyopoulos, SAIC, McLean, VA</span></font></span>          
+          <p class="style67"><span class="style66"><font face="Georgia"><strong><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >10:10-10:30 Morning Break</span> </strong></font>
+          </span>
+          <p class="style67"><span class="style66"><strong><font face="Georgia"><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >10:30-12:00</span> <u><span class="style70"><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Nanostructures I</span></span></u></font></strong> <font face="Georgia"><font face="Georgia"><font face="Georgia"><span class="style5"><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >(Chair:</span><strong> <span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Stanko Tomic</span></strong><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >, CCLRC Daresbury Lab, U.K.</span> </span><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >)</span></font></font></font></span><span class="style66">
+          </span>
+        <p class="style67"><strong><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >TuB1</span></strong> <span class="style70"><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >Trends and Challenges in Silicon Nanophotonics (</span><span class="style12"><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >invited</span></span><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >)</span><span class="style5"><br>
+        <span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >Michael Hochberg, University of Washington and California Institute of Technology</span> </span></span>
+        <p class="style67"><span class="style66"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="TuB2.pdf" target="_blank"><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >TuB2</span></span></strong> <span class="style70"><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Design of unidirectional subwavelength slit coupler for THz surface plasmons</span></span><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >; Qiaoqiang Gan, Zhan Fu, Yujie J. Ding, Filbert J. Bartoli; Center for Optical Technologies, Electrical and Computer Engineering Department, Lehigh University, Bethlehem, PA</span></font>
+          </span>
+        <p class="style67"><span class="style66"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="TuB3.pdf" target="_blank"><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >TuB3</span></span></strong> <span class="style70"><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Optical Waves Transmission Raised by Localized Surface Plasmons</span></span><br>
+          <span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >S. C. Chen (1), K. P. Chiu (2) and D. P. Tsai (2); (1) Department of Electrical Engineering, Far East College, Taiwan, R.O.C.; (2) Dept. of Phys., Center of Nanostorage Research, National Taiwan University, R.O.C.</span> </font></span>
+        <p class="style67"><span class="style66"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="TuB4.pdf" target="_blank"><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >TuB4</span></span> </strong> <span class="style70"><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Intersubband Antipolariton: A New Quasiparticle</span></span><br>
+          <span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >M.F. Pereira, Materials and Engineering Research Institute, Sheffield Hallam University, U.K.</span> </font></span>
+        <p class="style67"><span class="style66"><font face="Georgia"><strong><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >12:00-13:30 Lunch Break</span></strong></font></span>        
+        <p class="style67"><strong><font face="Georgia"><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >1</span></font></strong><span class="style66"><strong><font face="Georgia"><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >3:30-14:00</span><u><span class="style70"> <span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Poster Preview Session</span></span></u></font></strong><font face="Georgia"> <font face="Georgia"><font face="Georgia"><font face="Georgia"><span class="style5"><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >(Chair:</span> <strong><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >Joachim Piprek,</span></strong> <span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >NUSOD Institute</span></span><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >)</span></font></font></font></font></span> 
+        <p class="style77"><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >2-minute 2-slide oral presentation by each poster author.</span>                
+        <p class="style67"><span class="style66"><strong><font face="Georgia"> <span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >14:00-15:40</span><u><span class="style70"> <span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session</span></span></u> </font></strong></span>
+        <p class="style67"><strong><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >TuP2</span></strong> <span class="style70"><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >White Organic Light-Emitting Diodes Based on Dual Partial Dye Doping</span></span><br>
+          <span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Jongwoon Park( a), Seounghwan Park (b), Bumho Choi (a), and Jongho Lee (a);</span><br>
+          <span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >(a) 
+          Korea Institute of Industrial Technology, Gwangju, South Korea; 
+        (b) Catholic University of Daegu, Gyeongsan, South Korea</span>        
+        
+        <p class="style67"><strong><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >TuP3</span></strong> <span class="style70"><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >Two-Dimension Simulation of Gallium Nitride-Based Laser Diode</span></span><br>
+        <span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >X. Jin (1), B. Zhang (2), S. Jobe (1), J. DeLeon (1), J. Flickinger (1), T. Dai (2) G. Zhang (2), E. Heller (3), and L. Chen (3); (1) California Polytechnic State University, San Luis Obispo, CA ; (2)  Peking University, Beijing, China; (3) RSoft Design Group, Inc,  Ossining, NY</span>        
+        <p class="style67"><strong><span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >TuP7</span></strong> <span class="style70"><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Gallium Arsenide Photodiode Simulation</span></span><br>
+          <span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >J. Flickinger (1), X. Jin (1), E. Heller (2) and L. Chen (2); (1) California Polytechnic State University, San Luis Obispo, CA ; (2) RSoft Design Group, Inc, Ossining, NY</span>
+        <p class="style67"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="TuP8.pdf" target="_blank"><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >TuP8</span></span></strong> <span class="style70"><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >Monte Carlo Simulation of Excess Noise in Heterojunction Avalanche Photodetector</span></span> <span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >; A. Gosh and K. K. Gosh, Centre for Sience Education and Research, Calcutta, India</span>
+        <p class="style67"><strong><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >TuP9</span></strong> <span class="style70"><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >Modeling and Simulation of GaN/AlGaN Laser and Temperature Dependent Analysis of Physical Parameters</span></span><span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >; S. A. Gaikwad, D. S. Patil and D. K. Gautam, North Maharashtra University, Jalgaon, India</span>        
+        <p class="style67"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="TuP11.pdf" target="_blank"><span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >TuP11</span></span></strong> <span class="style70"><span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >Three-Dimensional VCSEL Simulation Using Vector Finite Elements</span></span><br>
+        <span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >Peter Nyakas, Furukawa Electric Institute of Technology, Budapest, Hungary</span> 
+        <p class="style67"><strong><span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >TuP12</span></strong> <span class="style70"><span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >Simulation of quantum wells with &lsquo;spikes&rsquo; and &lsquo;dips</span></span><span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >&rsquo;</span><br>
+          <span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >Antti Laakso, Mihail Dumitrescu, Lauri Toikkanen, Antti Tukiainen, Ville Rimpil&auml;inen and Markus Pessa; 
+        ORC, Tampere University of Technology,  Tampere, Finland</span>
+        <p class="style67"><strong><span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >TuP13</span></strong><span class="style70"> <span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >Finite difference time domain analysis for measuring transmission and reflection coefficients in negative index materials</span></span><span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >; Jae-Hong Park and Iam-Choon Khoo; Department of Electrical Engineering, Pennsylvania State University, University Park, PA</span>
+        <p class="style67"><strong><span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >TuP14</span></strong> <span class="style70"><span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >Nitride Band-Structure Model in a Quantum Well Laser Simulator</span></span><br>
+          <span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >Anusha Venkatachalam, Paul. D. Yoder, Benjamin Klein and Aditya Kulkarni, Georgia Institute of Technology, Savannah, GA</span> 
+        <p class="style67"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="TuP15.pdf" target="_blank"><span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >TuP15</span></span></strong> <span class="style70"><span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >A Simple Iterative Model for Oxide-Confined VCSELs</span></span><br>
+          <span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >Hsueh-hua Chuang (1), James R. Biard (2), Jim Guenter (2), Ralph Johnson (2), and Gary A. Evans (1); 
+        (1) Southern Methodist University, Dallas, TX; (2) Finisar, Allen, TX</span>
+        <p class="style67"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="TuP16.pdf" target="_blank"><span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >TuP16</span></span></strong> <span class="style70"><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >Two Dimensional Modeling of Interdigitated Back Contact Silicon Heterojunction Solar Cells</span></span><span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >; Meijun Lu (1,2), Stuart Bowden (1) and Robert Birkmire (1,2); (1) Institute of Energy Conversion, University of Delaware, Newark, DE ; (2) Department of Physics and Astronomy, University of Delaware, Newark, DE</span>         
+        <p class="style67"><font face="Georgia"><strong><span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >TuP17</span></strong><span class="style70"> <span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >Stretched input-output characteristic in inhomogeneously broadened lasing system</span></span><span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >; S.I. Hintschich, M. Langner, H. Gothe, V.G. Lyssenko, H. Fr&ouml;b, and K. Leo; Institute of Applied Photophysics, Techn. Univ., Dresden, Germany</span></font>          
+        <p class="style67"><span class="style66"><font face="Georgia"><strong><span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >15:40-16:00</span> <font face="Georgia"><strong> <span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >Afternoon Break</span> </strong></font></strong></font></span>        
+        <p class="style67"><strong><font face="Georgia"><font face="Georgia"><strong><span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >16:00</span></strong><span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >-18:00</span></font> <u><span class="style70"><span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >Short Course</span> </span></u></font></strong><span class="style5"><font face="Georgia"><font face="Georgia"><span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >(</span><font face="Georgia"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.nusod.org/conf07/conf_short.html" target="_self"><span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >separate registration required</span></span></font><span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >)</span></font> </font></span><font face="Georgia"><strong></strong></font><font face="Georgia"><strong><br>
+                </strong><br>
+          <strong><span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >SC0702</span></strong> <span class="style71"><span class="style70"><span class="coloringspan" id="282" onmousedown="md(this)" onmouseup="mu(this)" >Semiconductor Laser Dynamics and Instabilities</span> </span></span><span class="coloringspan" id="283" onmousedown="md(this)" onmouseup="mu(this)" >[</span><span onclick="return false" style="text-decoration:underline; color:blue" href="SC0702_Bandelow.pdf" target="_blank"><span class="coloringspan" id="284" onmousedown="md(this)" onmouseup="mu(this)" >abstract</span></span><span class="coloringspan" id="285" onmousedown="md(this)" onmouseup="mu(this)" >]</span><br>
+          <font face="Georgia"><span class="style69"><span class="coloringspan" id="286" onmousedown="md(this)" onmouseup="mu(this)" >Uwe Bandelow, WIAS Institute, Germany</span></span></font></font>
+        
+        <hr WIDTH="100%">
+        <div align="center"><span class="style73"><font color="#FF0000" face="Georgia"><strong><i><span onclick="return false" style="text-decoration:underline; color:blue" name="wed" id="wed"></span><span class="coloringspan" id="287" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday</span><span class="style12"><span class="coloringspan" id="288" onmousedown="md(this)" onmouseup="mu(this)" >, September 2</span></span><span class="coloringspan" id="289" onmousedown="md(this)" onmouseup="mu(this)" >6</span></i></strong></font></span></div>
+        <hr align="center" WIDTH="100%">
+          <p class="style67"><span class="style66"><font face="Georgia"><strong><span class="coloringspan" id="290" onmousedown="md(this)" onmouseup="mu(this)" >Registration Desk open 9:00 -10:30</span></strong></font></span></p>
+          <p class="style67"><font face="Georgia"><strong><span class="coloringspan" id="291" onmousedown="md(this)" onmouseup="mu(this)" >09:30-10:10</span> <u><span class="style70"><span class="coloringspan" id="292" onmousedown="md(this)" onmouseup="mu(this)" >Novel Devices</span></span></u></strong> <span class="style66"><font face="Georgia"><font face="Georgia"><font face="Georgia"><span class="style5"><span class="coloringspan" id="293" onmousedown="md(this)" onmouseup="mu(this)" >(Chair:</span> <strong><span class="coloringspan" id="294" onmousedown="md(this)" onmouseup="mu(this)" >Mauro Pereira</span></strong><span class="coloringspan" id="295" onmousedown="md(this)" onmouseup="mu(this)" >, Sheffield Hallam University, U.K.</span> </span><span class="coloringspan" id="296" onmousedown="md(this)" onmouseup="mu(this)" >)</span></font></font></font></span></font></p>
+          <p class="style67"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="WA1.pdf" target="_blank"><span class="coloringspan" id="297" onmousedown="md(this)" onmouseup="mu(this)" >WA1</span></span></strong> <span class="style71"><span class="coloringspan" id="298" onmousedown="md(this)" onmouseup="mu(this)" >(</span><em><span class="coloringspan" id="299" onmousedown="md(this)" onmouseup="mu(this)" >moved to Thursday 8:30</span></em><span class="coloringspan" id="300" onmousedown="md(this)" onmouseup="mu(this)" >)</span> </span></font></p>
+          <p class="style67"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="WA3.pdf" target="_blank"><span class="coloringspan" id="301" onmousedown="md(this)" onmouseup="mu(this)" >WA3</span></span></strong><span class="style70"> <span class="coloringspan" id="302" onmousedown="md(this)" onmouseup="mu(this)" >Simulation of Photodetection Using FDTD Method with Application to Near-Field Subwavelength Imaging Based on Nanoscale Semiconductor Photodetector Array</span></span><span class="coloringspan" id="303" onmousedown="md(this)" onmouseup="mu(this)" >; Ki Young Kim, Yingyan Huang, Boyang Liu, and Seng-Tiong Ho; Northwestern University, Evanston, IL</span></font></p>
+          <p class="style67"><font face="Georgia"><strong><span class="coloringspan" id="304" onmousedown="md(this)" onmouseup="mu(this)" >WA4</span></strong> <span class="style70"><span class="coloringspan" id="305" onmousedown="md(this)" onmouseup="mu(this)" >Detailed Numerical Modeling of a Novel Infrared Single Photon Detector for &lambda; &gt; 1&mu;m</span></span><span class="coloringspan" id="306" onmousedown="md(this)" onmouseup="mu(this)" >; O.G. Memis, W. Wu, D. Dey, A. Katsnelson and H. Mohseni; Northwestern University, Evanston, IL</span></font></p>
+          <p class="style67"><font face="Georgia"><strong><span class="coloringspan" id="307" onmousedown="md(this)" onmouseup="mu(this)" >10:10-10:30 Morning Break</span></strong></font></p>
+          <p class="style67"><font face="Georgia"><strong><span class="coloringspan" id="308" onmousedown="md(this)" onmouseup="mu(this)" >10:30-12:10</span> <u><span class="style70"><span class="coloringspan" id="309" onmousedown="md(this)" onmouseup="mu(this)" >Laser Diodes II</span></span></u> </strong><span class="style5"><span class="coloringspan" id="310" onmousedown="md(this)" onmouseup="mu(this)" >(Chair:</span> <strong><span class="coloringspan" id="311" onmousedown="md(this)" onmouseup="mu(this)" >Hans Wenzel</span></strong><span class="coloringspan" id="312" onmousedown="md(this)" onmouseup="mu(this)" >, Ferdinand Braun Institute, Germany)</span></span></font></p>
+          <p class="style67"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="WB1.pdf" target="_blank"><span class="coloringspan" id="313" onmousedown="md(this)" onmouseup="mu(this)" >WB1</span></span> </strong><span class="style70"><span class="coloringspan" id="314" onmousedown="md(this)" onmouseup="mu(this)" >Full Wave Electromagnetics for Simulating Terahertz Quantum Well Laser Diode Modulation</span></span><span class="coloringspan" id="315" onmousedown="md(this)" onmouseup="mu(this)" >; Matt Grupen (1), Paul Sotirelis (1), Steve Wong (1),</span> <font face="Georgia"><span class="coloringspan" id="316" onmousedown="md(this)" onmouseup="mu(this)" >John Albrecht (2), Robert Bedford (2), Sarah Maley (2), 
+Tom Nelson (2), Bill Siskaninetz (2)</span> </font><span class="coloringspan" id="317" onmousedown="md(this)" onmouseup="mu(this)" >; (1) High Performance Technologies, Inc., 
+            Reston, VA; (2) 
+            US Air Force Research Lab, Wright-Patterson AFB, OH</span></font></p>
+          <p class="style67"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="WB2.pdf" target="_blank"><span class="coloringspan" id="318" onmousedown="md(this)" onmouseup="mu(this)" >WB2</span></span></strong> <span class="style70"><span class="coloringspan" id="319" onmousedown="md(this)" onmouseup="mu(this)" >Large-Signal Modeling on Device Level: Intermodulation Distortion and Eye-Diagrams of Semiconductor Lasers</span></span><span class="coloringspan" id="320" onmousedown="md(this)" onmouseup="mu(this)" >; Stefan Odermatt (1), Bernd Witzigmann (2), and Bernhard Schmithuesen (1); (1) Synopsys Switzerland LLC,  Zurich, Switzerland; (2) ETH Zurich,  Switzerland</span> </font></p>
+          <p class="style67"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="WB3.pdf" target="_blank"><span class="coloringspan" id="321" onmousedown="md(this)" onmouseup="mu(this)" >WB3</span></span></strong> <span class="style70"><span class="coloringspan" id="322" onmousedown="md(this)" onmouseup="mu(this)" >Optical Gain Analysis of Strain Compensated InGaN&ndash;AlGaN Quantum Well Active Regions for Lasers Emitting at 420-500 nm</span></span><span class="coloringspan" id="323" onmousedown="md(this)" onmouseup="mu(this)" >; 
+  Hongping Zhao, Ronald A. Arif, Yik-Khoon Ee, and Nelson Tansu; Lehigh University, Bethlehem, PA</span> </font></p>
+        <p class="style67"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="WB5.pdf" target="_blank"><span class="coloringspan" id="324" onmousedown="md(this)" onmouseup="mu(this)" >WB5</span></span></strong> <font face="Georgia"><span class="style70"><span class="coloringspan" id="325" onmousedown="md(this)" onmouseup="mu(this)" >The Effect of Gain-Coupling on Mode Beatings in Weakly Coupled Two-Section DFB Lasers;</span> <span class="style67"><font face="Georgia"><span class="coloringspan" id="326" onmousedown="md(this)" onmouseup="mu(this)" >M. Al-Mumin, College of Technological Studies, Shuwaikh, Kuwait</span></font></span></span></font></font></p>
+          <p class="style67"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="WB6.pdf"><span class="coloringspan" id="327" onmousedown="md(this)" onmouseup="mu(this)" >WB6</span></span></strong> <span class="style70"><span class="coloringspan" id="328" onmousedown="md(this)" onmouseup="mu(this)" >Time-domain simulation of semiconductor laser light with correlated amplitude and phase noise;</span> <span class="style5"><span class="coloringspan" id="329" onmousedown="md(this)" onmouseup="mu(this)" >D. Lasaosa, M. Vega-Leal, and C. Fananas; Public Univ. of Navarra, Pamplona, Spain</span> </span></span></font></p>
+          <p class="style67"><font face="Georgia"><strong><span class="coloringspan" id="330" onmousedown="md(this)" onmouseup="mu(this)" >12:10-13:50 Lunch Break</span> </strong></font></p>
+          <p class="style67"><strong><font face="Georgia"><span class="coloringspan" id="331" onmousedown="md(this)" onmouseup="mu(this)" >13:50-15:40</span> <u><span class="style70"><span class="coloringspan" id="332" onmousedown="md(this)" onmouseup="mu(this)" >Photodetectors and Solar Cells</span></span></u></font></strong><font face="Georgia"> <font face="Georgia"> <span class="style5"><span class="coloringspan" id="333" onmousedown="md(this)" onmouseup="mu(this)" >(Chair:</span><strong> <span class="coloringspan" id="334" onmousedown="md(this)" onmouseup="mu(this)" >Bernd Witzigmann</span></strong><span class="coloringspan" id="335" onmousedown="md(this)" onmouseup="mu(this)" >, ETH Zurich, Switzerland)</span> </span></font></font></p>
+          <p class="style67"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="WC1.pdf"><span class="coloringspan" id="336" onmousedown="md(this)" onmouseup="mu(this)" >WC1</span></span> </strong></font><span class="style71"><span class="style70"><span class="coloringspan" id="337" onmousedown="md(this)" onmouseup="mu(this)" >High-speed photodetection exploiting quasi-unipolar charge transport</span></span></span><span class="style68"> <span class="coloringspan" id="338" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span class="style12"><span class="coloringspan" id="339" onmousedown="md(this)" onmouseup="mu(this)" >invited</span></span><span class="coloringspan" id="340" onmousedown="md(this)" onmouseup="mu(this)" >) ;</span> </span><span class="style69"><span class="coloringspan" id="341" onmousedown="md(this)" onmouseup="mu(this)" >Douglas Yoder, Georgia Institute of Technology, Savannah, GA</span> </span></p>
+          <p class="style67"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="WC2.pdf"><span class="coloringspan" id="342" onmousedown="md(this)" onmouseup="mu(this)" >WC2</span></span></strong>  <span class="style70"><span class="coloringspan" id="343" onmousedown="md(this)" onmouseup="mu(this)" >Theory and Modelling of High-Field Carrier Transport in High-Speed Photodetectors</span></span><span class="coloringspan" id="344" onmousedown="md(this)" onmouseup="mu(this)" >; N.A. Zakhleniuk; ESE Department, University of Essex, Colchester, Essex, U.K.</span> </font></p>
+          <p class="style67"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="WC3.pdf" target="_blank"><span class="coloringspan" id="345" onmousedown="md(this)" onmouseup="mu(this)" >WC3</span></span></strong> <span class="style70"><span class="coloringspan" id="346" onmousedown="md(this)" onmouseup="mu(this)" >Characterization and Optimization of InGaAs/InP Photodiodes with High Saturation Current</span></span><span class="coloringspan" id="347" onmousedown="md(this)" onmouseup="mu(this)" >; Huapu Pan, Xin Wang, Andreas Beling, Hao Chen, and J. C. Campbell; Univ. of Virginia, Charlottesville, VA</span> </font></p>
+          <p class="style67"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="WC4.pdf" target="_blank"><span class="coloringspan" id="348" onmousedown="md(this)" onmouseup="mu(this)" >WC4</span></span></strong><span class="style70"> <span class="coloringspan" id="349" onmousedown="md(this)" onmouseup="mu(this)" >Electronic structure of QD arrays: Application to intermediate-band solar cells</span></span><span class="coloringspan" id="350" onmousedown="md(this)" onmouseup="mu(this)" >; S. Tomic (a), N. M. Harrison (a;b), and T.S. Jones (c); (a) STFC Daresbury Laboratory, Cheshire, U.K.; (b) Department of Chemistry, Imperial College, London, U.K.; (c) Department of Chemistry, University of Warwick, Coventry, U.K.</span></font></p>
+          <p class="style67"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="WC5.pdf" target="_blank"><span class="coloringspan" id="351" onmousedown="md(this)" onmouseup="mu(this)" >WC5</span></span></strong> <span class="style70"><span class="coloringspan" id="352" onmousedown="md(this)" onmouseup="mu(this)" >Existence of bounded discrete steady state solutions of the van Roosbroeck system on boundary conforming Delaunay grid</span></span><span class="coloringspan" id="353" onmousedown="md(this)" onmouseup="mu(this)" >s;  
+          K. Gaertner, WIAS Institute, Berlin, Germany</span> </font></p>
+          <p class="style67"><font face="Georgia"><strong><font face="Georgia"><strong><span class="coloringspan" id="354" onmousedown="md(this)" onmouseup="mu(this)" >15:40 - 16:00</span></strong></font><font face="Georgia"><strong> <span class="coloringspan" id="355" onmousedown="md(this)" onmouseup="mu(this)" >Afternoon Break</span> </strong></font></strong></font></p>
+          <p class="style67"><strong><strong><font face="Georgia"><font face="Georgia"><strong><span class="coloringspan" id="356" onmousedown="md(this)" onmouseup="mu(this)" >16:00</span></strong><span class="coloringspan" id="357" onmousedown="md(this)" onmouseup="mu(this)" >-18:00</span></font> <u><span class="style70"><span class="coloringspan" id="358" onmousedown="md(this)" onmouseup="mu(this)" >Short Course</span> </span></u></font></strong></strong><span class="style5"><font face="Georgia"><font face="Georgia"><span class="coloringspan" id="359" onmousedown="md(this)" onmouseup="mu(this)" >(</span><font face="Georgia"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.nusod.org/conf07/conf_short.html" target="_self"><span class="coloringspan" id="360" onmousedown="md(this)" onmouseup="mu(this)" >separate registration required</span></span></font><span class="coloringspan" id="361" onmousedown="md(this)" onmouseup="mu(this)" >)</span></font> </font></span><font face="Georgia"><strong><strong></strong></strong></font><font face="Georgia"><strong><strong><br>
+                              </strong><br>
+          <strong><span class="coloringspan" id="362" onmousedown="md(this)" onmouseup="mu(this)" >SC0703</span></strong> </strong></font><span class="style71"><span class="style70"><span class="coloringspan" id="363" onmousedown="md(this)" onmouseup="mu(this)" >Photonic Crystal Devices and Integrated Circuits [</span><span onclick="return false" style="text-decoration:underline; color:blue" href="SC0703_Prather.pdf" target="_blank"><span class="coloringspan" id="364" onmousedown="md(this)" onmouseup="mu(this)" >abstract</span></span><span class="coloringspan" id="365" onmousedown="md(this)" onmouseup="mu(this)" >]</span> </span></span><span class="style68"><br>
+                            </span><span class="style69"> <span class="coloringspan" id="366" onmousedown="md(this)" onmouseup="mu(this)" >Ahmed Sharkawy, EM Photonics, Newark, DE</span></span></p>
+          <p><span class="style74"><span class="coloringspan" id="367" onmousedown="md(this)" onmouseup="mu(this)" >18:30-20:30 Conference Dinner</span> </span><span class="style67"><span class="coloringspan" id="368" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.udel.edu/BGClub/" target="_blank"><span class="coloringspan" id="369" onmousedown="md(this)" onmouseup="mu(this)" >Blue &amp; Gold Club</span></span><span class="coloringspan" id="370" onmousedown="md(this)" onmouseup="mu(this)" >)</span> </span></p>
+          <hr WIDTH="100%">
+          <div align="center"><span class="style73"><font color="#FF0000" face="Georgia"><strong><i><span onclick="return false" style="text-decoration:underline; color:blue" name="thu" id="thu"></span><span class="coloringspan" id="371" onmousedown="md(this)" onmouseup="mu(this)" >Thursday</span><span class="style12"><span class="coloringspan" id="372" onmousedown="md(this)" onmouseup="mu(this)" >, September 2</span></span><span class="coloringspan" id="373" onmousedown="md(this)" onmouseup="mu(this)" >7</span></i></strong></font></span></div>
+          <hr align="center" WIDTH="100%">
+          <p class="style67"><span class="style66"><font face="Georgia"><strong><span class="coloringspan" id="374" onmousedown="md(this)" onmouseup="mu(this)" >Registration Desk open 8:00 - 8:30</span></strong></font></span>          
+          <p class="style67"><span class="style66"><font face="Georgia"><strong><span class="coloringspan" id="375" onmousedown="md(this)" onmouseup="mu(this)" >08:30-10:20</span> <u><span class="style70"><span class="coloringspan" id="376" onmousedown="md(this)" onmouseup="mu(this)" >Nanostructures II</span></span> </u></strong><span class="coloringspan" id="377" onmousedown="md(this)" onmouseup="mu(this)" >(Chair:</span> <strong><span class="coloringspan" id="378" onmousedown="md(this)" onmouseup="mu(this)" >Spilios Riyopoulos</span></strong><span class="coloringspan" id="379" onmousedown="md(this)" onmouseup="mu(this)" >, SAIC)</span></font></span>          
+          <p class="style67"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="WA1.pdf" target="_blank"><span class="coloringspan" id="380" onmousedown="md(this)" onmouseup="mu(this)" >WA1</span></span></strong> <span class="style71"><span class="style70"><span class="coloringspan" id="381" onmousedown="md(this)" onmouseup="mu(this)" >Features of light to current transformations in organic devices</span></span></span><span class="style68"> <span class="coloringspan" id="382" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span class="style12"><span class="coloringspan" id="383" onmousedown="md(this)" onmouseup="mu(this)" >invited</span></span><span class="coloringspan" id="384" onmousedown="md(this)" onmouseup="mu(this)" >)</span> <br>
+          </span><span class="style66 style5"><span class="coloringspan" id="385" onmousedown="md(this)" onmouseup="mu(this)" >Ajay K. Panday (1) and Jean-Michel Nunzi (2); (1) University of St. Andrews, U.K. , (2) Queen's University, Canada</span></span></font>          
+        <p class="style67"><span class="style76"><font face="Georgia"><span class="coloringspan" id="386" onmousedown="md(this)" onmouseup="mu(this)" >ThA1</span> </font></span><span class="style70"><span class="coloringspan" id="387" onmousedown="md(this)" onmouseup="mu(this)" >Design issues of 1.55 um emitting GaInNAs quantum dots</span></span><br>
+            <span class="coloringspan" id="388" onmousedown="md(this)" onmouseup="mu(this)" >Stanko Tomic; 
+            STFC Daresbury Laboratory, Cheshire, U.K.</span> 
+        <p class="style67"><span class="style66"><font face="Georgia"><strong><span class="coloringspan" id="389" onmousedown="md(this)" onmouseup="mu(this)" >ThA2</span></strong> <span class="style70"><span class="coloringspan" id="390" onmousedown="md(this)" onmouseup="mu(this)" >Dynamical Model for Coherent Optical Control of a Single Confined Spin</span></span><span class="coloringspan" id="391" onmousedown="md(this)" onmouseup="mu(this)" >; G. Slavcheva, University of Surrey, Guildford, U.K.</span> </font></span>
+        <p class="style67"><span class="style66"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="ThA3.pdf" target="_blank"><span class="coloringspan" id="392" onmousedown="md(this)" onmouseup="mu(this)" >ThA3</span></span></strong><span class="style70"> <span class="coloringspan" id="393" onmousedown="md(this)" onmouseup="mu(this)" >Simulation of Derivative Characteristics of Broadband Quantum Dot Lasers</span></span><span class="coloringspan" id="394" onmousedown="md(this)" onmouseup="mu(this)" >; C. L. Tan, Y. Wang, H. S. Djie, B. S. Ooi; Lehigh University, Bethlehem, PA</span></font></span>          
+        <p class="style67"><font face="Georgia"><strong><span class="coloringspan" id="395" onmousedown="md(this)" onmouseup="mu(this)" >ThA4</span></strong> <span class="style70"><span class="coloringspan" id="396" onmousedown="md(this)" onmouseup="mu(this)" >Dynamical Semiconductor Medium FDTD Simulation of Current-Injection Nanophotonic Devices</span></span><span class="coloringspan" id="397" onmousedown="md(this)" onmouseup="mu(this)" >; Yingyan Huang and Seng-Tiong Ho; Northwestern University, Evanston, IL</span></font>
+        <p class="style67"><span class="style66"><font face="Georgia"><strong><span class="coloringspan" id="398" onmousedown="md(this)" onmouseup="mu(this)" >10:20-10:40 Morning Break</span></strong></font></span>
+        <p class="style67"><span class="style66"><strong><font face="Georgia"><span class="coloringspan" id="399" onmousedown="md(this)" onmouseup="mu(this)" >10:40-12:40</span> <u><span class="style70"><span class="coloringspan" id="400" onmousedown="md(this)" onmouseup="mu(this)" >Photonic Circuits and Fiber Optics</span></span></u></font></strong><font face="Georgia"> <font face="Georgia"><span class="coloringspan" id="401" onmousedown="md(this)" onmouseup="mu(this)" >(Chair:</span> <strong><span class="coloringspan" id="402" onmousedown="md(this)" onmouseup="mu(this)" >Mohammed Al-Mumin,</span> </strong><span class="coloringspan" id="403" onmousedown="md(this)" onmouseup="mu(this)" >College of Technological Studies, Kuwait)</span></font> </font></span>
+        <p class="style67"><span class="style66"><font face="Georgia"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="ThB1.pdf" target="_blank"><span class="coloringspan" id="404" onmousedown="md(this)" onmouseup="mu(this)" >ThB1</span></span></strong> <span class="style70"><span class="coloringspan" id="405" onmousedown="md(this)" onmouseup="mu(this)" >Numerical Analysis of Four-Wave Mixing between 2 ps mode-locked laser pulses in a Tensile-Strained Bulk SOA</span></span><span class="coloringspan" id="406" onmousedown="md(this)" onmouseup="mu(this)" >; 
+            Michael J. Connelly (a), Liam P. Barry (b), Brendan F. Kennedy (c) and Douglas A. Reid (b); (a)  University of Limerick, Limerick, Ireland; (b)  Dublin City University, Dublin, Ireland; (c) Universidad de Santiago, Chile</span></font></span>
+        <p class="style67"><span class="style66"><font face="Georgia"><strong><span class="coloringspan" id="407" onmousedown="md(this)" onmouseup="mu(this)" >ThB2</span></strong> </font><span class="style70"><span class="coloringspan" id="408" onmousedown="md(this)" onmouseup="mu(this)" >Simulation of Static Optical XPM in Active MMI Couplers</span></span><br>
+            <span class="coloringspan" id="409" onmousedown="md(this)" onmouseup="mu(this)" >Salah Ibrahim, Xueliang Song, Masakazu Sugiyama and Yoshiaki Nakano; 
+            Research Center for Advanced Science and Technology,  University of Tokyo</span></span><span class="coloringspan" id="410" onmousedown="md(this)" onmouseup="mu(this)" >, Japan</span>
+        <p class="style67"><span class="style66"><font face="Georgia"><strong><span class="coloringspan" id="411" onmousedown="md(this)" onmouseup="mu(this)" >ThB3</span></strong> <span class="style70"><span class="coloringspan" id="412" onmousedown="md(this)" onmouseup="mu(this)" >Gain-Power Trade-Off in Low-Confinement Semiconductor Optical Amplifiers</span></span><span class="coloringspan" id="413" onmousedown="md(this)" onmouseup="mu(this)" >; Paul W. Juodawlkis and Jason J. Plant;Massachusetts Institute of Technology, Lexington, MA</span></font>
+          </span>
+        <p class="style67"><span class="style66"><font face="Georgia"><strong><span class="coloringspan" id="414" onmousedown="md(this)" onmouseup="mu(this)" >ThB4</span></strong> </font><span class="style70"><span class="coloringspan" id="415" onmousedown="md(this)" onmouseup="mu(this)" >Non-Raman redshift by pulse splitting</span></span><br>
+            <span class="coloringspan" id="416" onmousedown="md(this)" onmouseup="mu(this)" >Ayhan Demircan(1), Marcel Kroh (2), Monika Pietrzyk (1), Bernd Huttl (3) and Uwe Bandelow(1); (1) WIAS Institutes, Berlin, Germany; 
+            (2) u2t Photonics AG, Berlin, Germany; (3) Heinrich-Hertz-Institute, Berlin, Germany</span></span>
+        <p class="style67"><strong><span class="coloringspan" id="417" onmousedown="md(this)" onmouseup="mu(this)" >ThB5</span></strong> <span class="style70"><span class="coloringspan" id="418" onmousedown="md(this)" onmouseup="mu(this)" >Designing of EDFA with Inherently Low Transient Response for Optical Packet with Variable Condition of Traffic on WDM Environment</span></span><span class="coloringspan" id="419" onmousedown="md(this)" onmouseup="mu(this)" >; Yoshinari Awaji (1), Hideaki Furukawa (1), Naoya Wada (1), Eddie Kong (2), Peter Chan (2), Ray Man (2); (1) National Institute of Information and Communications Technology (NICT), Tokyo, Japan; (2) Amonics Ltd., Kowloon, Hong Kong</span>
+        <p class="style67"><span class="style66"><font face="Georgia"><strong><span class="coloringspan" id="420" onmousedown="md(this)" onmouseup="mu(this)" >ThB6</span></strong> <span class="style70"><span class="coloringspan" id="421" onmousedown="md(this)" onmouseup="mu(this)" >Accelerated Simulators for Nano-Photonic Devices</span></span><br>
+            <span class="coloringspan" id="422" onmousedown="md(this)" onmouseup="mu(this)" >Daniel K. Price, John R. Humphrey, and Eric J. Kelmelis; EM Photonics,  Newark, DE</span></font></span>
+        <p class="style67"><span class="style66"><font face="Georgia"><strong><span class="coloringspan" id="423" onmousedown="md(this)" onmouseup="mu(this)" >12:40-13:40 Lunch Break</span></strong></font>
+          </span>
+        <p class="style67"><span class="style66"><strong><font face="Georgia"><span class="coloringspan" id="424" onmousedown="md(this)" onmouseup="mu(this)" >13:40-14:40</span><u><span class="style70"><span class="coloringspan" id="425" onmousedown="md(this)" onmouseup="mu(this)" >Postdeadline Session</span></span></u></font></strong></span>
+          <span class="style66"><font face="Georgia"><span class="coloringspan" id="426" onmousedown="md(this)" onmouseup="mu(this)" >(Chair:</span> <font face="Georgia"><strong><span class="coloringspan" id="427" onmousedown="md(this)" onmouseup="mu(this)" >Michael Connelly</span></strong><span class="coloringspan" id="428" onmousedown="md(this)" onmouseup="mu(this)" >, University of Limerick, Ireland</span></font><span class="coloringspan" id="429" onmousedown="md(this)" onmouseup="mu(this)" >)</span></font></span>           
+        <p class="style67"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="ThPD1.pdf" target="_blank"><span class="coloringspan" id="430" onmousedown="md(this)" onmouseup="mu(this)" >ThPD1</span></span></strong> <span class="style70"><span class="coloringspan" id="431" onmousedown="md(this)" onmouseup="mu(this)" >Theoretical Simulation and Experimental Demonstration of Field Concentration in Gold Photonic Band Gap Materials</span></span><span class="coloringspan" id="432" onmousedown="md(this)" onmouseup="mu(this)" >; Shawn-Yu Lin and Allan S.P. Chang, 
+          Rensselaer Polytechnic Institute, Troy, NY</span>          
+        <p class="style67"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="ThPD2.pdf" target="_blank"><span class="coloringspan" id="433" onmousedown="md(this)" onmouseup="mu(this)" >ThPD2</span></span></strong> <span class="style70"><span class="coloringspan" id="434" onmousedown="md(this)" onmouseup="mu(this)" >A Comparison of Optical Modulator Structures Using a Matrix Simulation Approach</span></span><span class="coloringspan" id="435" onmousedown="md(this)" onmouseup="mu(this)" >;</span> <br>
+        <span class="coloringspan" id="436" onmousedown="md(this)" onmouseup="mu(this)" >Kjersti Kleven and Scott T. Dunham, University of Washington, Seattle, WA</span>          
+        <p class="style67"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="ThPD4.pdf" target="_blank"><span class="coloringspan" id="437" onmousedown="md(this)" onmouseup="mu(this)" >ThPD4</span></span></strong> <span class="style70"><span class="coloringspan" id="438" onmousedown="md(this)" onmouseup="mu(this)" >All-Optical Encryption System Employing XOR Logic Operations by Using XGM in SOAs</span></span><span class="coloringspan" id="439" onmousedown="md(this)" onmouseup="mu(this)" >; 
+            Young Jin Jung (1), Chang Wan Son (2), Seok Lee (2), Sang-Kun Gil (3), Hyung Seok Kim (4) and Namkyoo Park (1); (1)  Seoul Nati&rsquo;l Univ.  (2) Korea Institute of Science and Technology, (3)  Suwon University, (4) Sejong University; all: South Korea</span>
+        <p class="style67"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="ThPD5.pdf" target="_blank"><span class="coloringspan" id="440" onmousedown="md(this)" onmouseup="mu(this)" >ThPD5</span></span></strong> <span class="style70"><span class="coloringspan" id="441" onmousedown="md(this)" onmouseup="mu(this)" >Electro-optic Dendrimer based Terahertz Waveguide</span></span><br>
+          <span class="coloringspan" id="442" onmousedown="md(this)" onmouseup="mu(this)" >Anis Rahman; Applied Research &amp; Photonics Inc. , Harrisburg, PA</span>           
+        <p class="style67"><span class="style66"><font face="Georgia"><strong><span class="coloringspan" id="443" onmousedown="md(this)" onmouseup="mu(this)" >14:40 - 15:00</span><strong> <span class="coloringspan" id="444" onmousedown="md(this)" onmouseup="mu(this)" >Best Student Paper Award Presentation and Closing Remarks</span></strong></strong></font></span>          
+          
+        <p class="style77"><span class="coloringspan" id="445" onmousedown="md(this)" onmouseup="mu(this)" >The following post-conference software workshop is organized by an exhibiting company:</span>
+        <p class="style67"><strong><span class="coloringspan" id="446" onmousedown="md(this)" onmouseup="mu(this)" >15:30-18:30</span><span class="style70"> <span onclick="return false" style="text-decoration:underline; color:blue" href="crosslight.html" target="_blank"><span class="coloringspan" id="447" onmousedown="md(this)" onmouseup="mu(this)" >Crosslight Software Workshop</span></span></span></strong> <span class="coloringspan" id="448" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="crosslight.html" target="_blank"><span class="coloringspan" id="449" onmousedown="md(this)" onmouseup="mu(this)" >separate registration required</span></span><span class="coloringspan" id="450" onmousedown="md(this)" onmouseup="mu(this)" >)</span> 
+        <p class="style67"><span class="style66">
+          </span>
+        </blockquote>
+    </td>
+    <td align="left" valign="top" bgcolor="#000099"><table width="180" align="left">
+      <tr>
+        <td width="160"><p class="style50"><span class="coloringspan" id="451" onmousedown="md(this)" onmouseup="mu(this)" >supported by</span> </p></td>
+      </tr>
+      <tr>
+        <td width="160"><p><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ieee.org" target="_blank"><img onmousedown="imd(this)" src="ieee_logo.gif" width="150" height="53" border="0"></span></p></td>
+      </tr>
+      <tr>
+        <td width="160" ><p><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ieee.org/portal/site/leos/" target="_blank"><img onmousedown="imd(this)" src="leos_logo.jpg" width="150" height="35" border="0"></span></p></td>
+      </tr>
+      <tr>
+        <td width="160"><p><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.nextnano.de" target="_blank"><img onmousedown="imd(this)" src="logo_nextnano3_150x50.jpg" width="150" height="50" border="0"></span></p></td>
+      </tr>
+      <tr>
+        <td class="style50"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.photond.com" target="_blank"><img onmousedown="imd(this)" src="photondesign.gif" width="150" height="57" border="0"></span></td>
+      </tr>
+      <tr>
+        <td><span class="style50"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.crosslight.com" target="_blank"><img onmousedown="imd(this)" src="Crosslight_blue_blk_150x40_logo.jpg" width="150" height="40" border="0"></span></span></td>
+      </tr>
+      <tr>
+        <td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.rsoftdesign.com" target="_blank"><img onmousedown="imd(this)" src="rsoft_logo1.gif" width="150" height="57" border="0"></span></td>
+      </tr>
+      <tr>
+        <td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.semitech.us" target="_blank"><img onmousedown="imd(this)" src="STR_logo1.gif" width="150" height="51" border="0"></span></td>
+      </tr>
+      <tr>
+        <td width="160" class="style50"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.synopsys.com/products/tcad/sentaurus_devopto_ds.html" target="_blank"><img onmousedown="imd(this)" src="synopsys_logo1.gif" width="150" height="43" border="0"></span></td>
+      </tr>
+      <tr>
+        <td class="style50"><span class="coloringspan" id="452" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+      </tr>
+      <tr>
+        <td><span class="style50"><span class="coloringspan" id="453" onmousedown="md(this)" onmouseup="mu(this)" >past conferences</span></span><span class="coloringspan" id="454" onmousedown="md(this)" onmouseup="mu(this)" >:</span></td>
+      </tr>
+      <tr>
+        <td valign="top" align="left" class="menu_off"><span onclick="return false" style="text-decoration:underline; color:blue" href="/nusod06/" target="_blank" class="menu_off"><span class="coloringspan" id="455" onmousedown="md(this)" onmouseup="mu(this)" >2006 Singapore</span></span></td>
+      </tr>
+      <tr>
+        <td valign="top" align="left" class="menu_off"><span onclick="return false" style="text-decoration:underline; color:blue" href="/nusod05/" target="_blank" class="menu_off"><span class="coloringspan" id="456" onmousedown="md(this)" onmouseup="mu(this)" >2005 Berlin</span></span></td>
+      </tr>
+      <tr>
+        <td valign="top" align="left" class="menu_off"><span onclick="return false" style="text-decoration:underline; color:blue" href="/nusod04/" target="_blank" class="menu_off"><span class="coloringspan" id="457" onmousedown="md(this)" onmouseup="mu(this)" >2004 Santa Barbara</span></span></td>
+      </tr>
+      <tr>
+        <td valign="top" align="left" class="menu_off"><span onclick="return false" style="text-decoration:underline; color:blue" href="/nusod03/" target="_blank" class="menu_off"><span class="coloringspan" id="458" onmousedown="md(this)" onmouseup="mu(this)" >2003 Tokyo</span></span></td>
+      </tr>
+      <tr>
+        <td valign="top" align="left" class="menu_off"><span onclick="return false" style="text-decoration:underline; color:blue" href="/nusod02/" target="_blank" class="menu_off"><span class="coloringspan" id="459" onmousedown="md(this)" onmouseup="mu(this)" >2002 Zurich</span></span></td>
+      </tr>
+      <tr>
+        <td valign="top" align="left" class="menu_off"><span onclick="return false" style="text-decoration:underline; color:blue" href="/nusod01/" target="_blank" class="menu_off"><span class="coloringspan" id="460" onmousedown="md(this)" onmouseup="mu(this)" >2001 Santa Barbara</span></span></td>
+      </tr>
+      <tr>
+        <td><span class="coloringspan" id="461" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+      </tr>
+    </table></td>
+  </tr>
+  <tr>
+    <td width="180" height="22" align="left" valign="top"><span class="coloringspan" id="462" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>

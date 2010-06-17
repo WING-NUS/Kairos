@@ -1,0 +1,434 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^mis.sauder.ubc.ca^rigim2008^accpapers.htm_2009-08-05__14-27-33.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^mis.sauder.ubc.ca^rigim2008^accpapers.htm_2009-08-05__14-27-33.yaml created on Wed Aug 05 17:31:24 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+    <title>2nd International Workshop on Requirements, Intentions and Goals in Conceptual Modeling </title>
+    <link rel="stylesheet" href="estilo.css" type="text/css" />
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)" ><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+    <div id="mainstyle"> 
+        <table width="100%"  border="0" cellspacing="20">
+            <tr>
+                <td>
+                    <h2><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >2nd International Workshop on Requirements, Intentions</span> <br /><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >and Goals in Conceptual Modeling (RIGiM)</span> <br /><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Barcelona, Spain</span></h2>	     
+		            <span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >In conjunction with the 27th International Conference on Conceptual Modeling (ER 2008)</span><br/>
+		            <br/><img onmousedown="imd(this)"  src="ERlogo.png" border="0" />
+		            
+	            </td>
+                <td class="datestyle">
+	                <table width="100%"  border="0" cellspacing="0">
+                        <tr> 
+                            <td width="73%"><strong> <span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></strong></td>
+                            <td width="27%"></td>
+                        </tr>
+                        <tr> 
+                            <td width="73%"> <span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Paper submission:</span> </td>
+                            <td width="27%"> 
+                                <div align="right"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >May 9</span></div>
+                            </td>
+                        </tr>
+                        <tr> 
+                            <td width="73%"> <span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Author notification:</span> </td>
+                            <td width="27%"> <div align="right"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >June 6</span></div> </td>
+                        </tr>
+                        <tr> 
+                            <td width="73%"> <span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Camera-ready:</span> </td>
+                            <td width="27%"> 
+                                <div align="right"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >June 16</span></div>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+        <table width="95.6%"  border="0" bgcolor="white">
+            <tr>
+                <td valign="top" bgcolor="#F5f7f7" width="17%" >
+                        <div id="linkstyle"> 
+                            <div class="lnktstyle"> <span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Workshop</span> </div>  
+	  	                        <span onclick="return false" style="text-decoration:underline; color:blue" href="index.html"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span>  
+	  	                        <span onclick="return false" style="text-decoration:underline; color:blue" href="news.htm"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >News</span></span> 
+	                        	<span onclick="return false" style="text-decoration:underline; color:blue" href="workorg.htm"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Organizers</span></span> 
+	                        	<span onclick="return false" style="text-decoration:underline; color:blue" href="progcomm.htm"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></span>
+                            	<span onclick="return false" style="text-decoration:underline; color:blue" href="callpap.htm"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span> 
+                            	<span onclick="return false" style="text-decoration:underline; color:blue" href="impdates.htm"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span>
+	                        	<span onclick="return false" style="text-decoration:underline; color:blue" href="submission.htm"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Submission</span></span>
+	                        	<span onclick="return false" style="text-decoration:underline; color:blue" href="poster.pdf" target="_blank"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Poster (PDF)</span></span>
+	                        	<span onclick="return false" style="text-decoration:underline; color:blue" href="accpapers.htm"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers</span></span>
+	                        	<div class="lnktstyle"> <span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >ER 2008</span> </div>  
+	  	                        <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.upc.edu/ER2008/" target="_blank"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >ER Home Page</span></span>  
+                        </div>
+                </td>
+                <td valign="top" width="83%" >    
+                        <div class="maintext"> 
+                            <h1> <span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers</span></h1>
+                            <p> <b><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Session 1: Modeling:</span></b><br><br>
+                               <span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Reflective Analysis of the Syntax and Semantics of the i* Framework.</span><br>
+                               <i><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Jennifer Horkoff,Golnaz Elahi, Samer Abdulhadi, Eric Yu</span></i><br><br>
+                               <span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Modeling Strategic Alignment Using InStAl.</span><br>
+                               <i><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Laure-Hélène Jean-Baptiste Thevenet</span></i><br><br>
+                               <span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Requirements Engineering for Distributed Development Using Software Agents.</span><br>
+                               <i><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Miriam Sayão, Aluízio Haendchen Filho, Hércules Antonio do Prado</span></i>
+                            <p> <b><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Session 2: Elicitation Issues:</span></b><br><br>
+                               <span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Integrating Business Domain Ontologies with Early Requirements Modelling.</span><br>
+                               <i><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Frederik Gailly, Sergio España, Geert Poels, Oscar Pastor</span></i><br><br>
+                               <span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Goal-oriented authoring approach and design of learning systems.</span><br>
+                               <i><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Valérie Emin, Jean-Philippe Pernin, Viviane Guéraud</span></i><br><br>
+                               <span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Timing Nonfunctional Requirements .</span><br>
+                               <i><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Ivan J. Jureta, Stephane Faulkner</span></i>
+                            </p>
+                        </div>    
+                </td>
+            </tr>
+        </table>
+        <div align="right" id="bottomstyle"> <span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Web Master: Alan Krumholz /</span> <span onclick="return false" style="text-decoration:underline; color:blue" href=mailto:alan_krumholz@yahoo.com.mx><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Contact</span>

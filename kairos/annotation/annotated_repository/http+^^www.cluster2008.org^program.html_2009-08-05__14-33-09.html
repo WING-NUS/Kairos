@@ -1,0 +1,1002 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.cluster2008.org^program.html_2009-08-05__14-33-09.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.cluster2008.org^program.html_2009-08-05__14-33-09.yaml created on Wed Aug 05 17:31:43 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<META http-equiv="Content-Type" content="text/html; charset=Shift_JIS">
+<META name="GENERATOR" content="IBM WebSphere Studio Homepage Builder Version 11.0.0.0 for Windows">
+<META http-equiv="Content-Style-Type" content="text/css">
+
+<title>IEEE Cluster 2008</title>
+
+<script language="JavaScript1.2">
+
+function topMenuOn(tab){
+	if(document.getElementById||(document.all && !(document.getElementById))){
+		tab.style.backgroundColor="#D2D2C5";
+	}
+}
+
+function topMenuOut(tab){
+	if(document.getElementById||(document.all && !(document.getElementById))){
+		tab.style.backgroundColor="white";
+	}
+}
+
+function cOn(tab){
+	if(document.getElementById||(document.all && !(document.getElementById))){
+		tab.style.backgroundColor="#D2D2C5";
+	}
+}
+
+function cOut(tab){
+	if(document.getElementById||(document.all && !(document.getElementById))){
+		tab.style.backgroundColor="#AD934E";
+	}
+}
+</script>
+<link href="image/css_main.css" rel="stylesheet" type="text/css" />
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<!--#exec cmd="/bin/_wwwlog"-->
+<div id="main" align="center">
+  <div id="header"><img onmousedown="imd(this)" src="image/Cluster08_top.jpg" width="751" height="230" /></div>
+    <div id="tab"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="keynotes.html"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Keynotes</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="program.html"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="registration.html"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="https://act.jtbgmt.com/gmt/ssl/cluster-grid2008.asp"><SPAN lang="EN-US" style='font-size:10.5pt;mso-bidi-font-size:
+11.0pt;font-family:"Arial","sans-serif";mso-ascii-theme-font:minor-latin;
+mso-fareast-font-family:"ÇlÇr ÉSÉVÉbÉN";mso-fareast-theme-font:minor-fareast;
+mso-hansi-theme-font:minor-latin;mso-bidi-font-family:"Times New Roman";
+mso-bidi-theme-font:minor-bidi;mso-ansi-language:EN-US;mso-fareast-language:
+JA;mso-bidi-language:AR-SA'><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Hotel Accommodation</span></SPAN></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.epochal.or.jp/eng/"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >About Tsukuba</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="contact_us.html"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Contact Us</span></span></div>
+<TABLE width="751" border="1" cellpadding="0" cellspacing="0" bordercolor="#0F2D58" style="border-collapse:collapse">
+      <tr>
+        <td width="125" valign="top" bgcolor="#0F2D58"><div id="menu">
+          <table width="100%" border="0" cellspacing="0" cellpadding="3">
+            <tr>
+              <td onMouseOver="cOn(this);" onMouseOut="cOut(this);" nowrap><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></td>
+            </tr>
+            <tr>
+              <td onMouseOver="cOn(this);" onMouseOut="cOut(this);" nowrap><span onclick="return false" style="text-decoration:underline; color:blue" href="important_dates.html"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></td>
+            </tr>
+            <tr>
+              <td onMouseOver="cOn(this);" onMouseOut="cOut(this);" nowrap><span onclick="return false" style="text-decoration:underline; color:blue" href="cfp.html"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span></td>
+            </tr>
+            <tr>
+              <td onMouseOver="cOn(this);" onMouseOut="cOut(this);" nowrap><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="papersub.html"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Paper Submission</span></span></td>
+            </tr><tr>
+              <td onMouseOver="cOn(this);" onMouseOut="cOut(this);" nowrap><span onclick="return false" style="text-decoration:underline; color:blue" href="cfposters.html"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Posters</span></span></td>
+            </tr>
+            <tr>
+              <td onMouseOver="cOn(this);" onMouseOut="cOut(this);" nowrap><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="https://cluster2008.ccs.hpcc.jp/poster/openconf.php"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Poster Submission</span></span></td>
+            </tr>
+            <tr>
+              <td onMouseOver="cOn(this);" onMouseOut="cOut(this);" nowrap><span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.html"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></td>
+            </tr><tr>
+              <td onMouseOver="cOn(this);" onMouseOut="cOut(this);" nowrap><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Panels</span></td>
+            </tr>
+            <tr>
+              <td onMouseOver="cOn(this);" onMouseOut="cOut(this);" nowrap><span onclick="return false" style="text-decoration:underline; color:blue" href="committees.html"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></span></td>
+            </tr>
+            <tr>
+              <td onMouseOver="cOn(this);" onMouseOut="cOut(this);" nowrap><span onclick="return false" style="text-decoration:underline; color:blue" href="sponsers.html"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors &amp; Exhibitors</span></span></td>
+            </tr>
+            <tr>
+              <td onMouseOver="cOn(this);" onMouseOut="cOut(this);" nowrap><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="http://www.clustercomp.org/"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Cluster Series</span></span></td>
+            </tr>
+            <tr>
+              <td onMouseOver="cOn(this);" onMouseOut="cOut(this);" nowrap><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.grid2008.org/"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Grid 2008</span></span></td>
+            </tr><tr>
+        <td onMouseOver="cOn(this);" onMouseOut="cOut(this);" nowrap><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cluster2008.org/challenge/"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Data Analysis Challenge 2008</span></span></td>
+      </tr><tr>
+              <td onMouseOver="cOn(this);" onMouseOut="cOut(this);" nowrap><span onclick="return false" style="text-decoration:underline; color:blue" href="visainf.html"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Visa Information</span></span></td>
+            </tr>
+          </table>
+        </div></td>
+    <TD width="523" valign="top" align="left">
+    <H1><SPAN lang="EN-US"><BR>
+    <span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="Cluster2008ATaGlance.pdf"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Cluster 2008 At A Glance</span></span></SPAN><BR>
+    <span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><SPAN lang="EN-US"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >(PDF file)</span><BR>
+    </SPAN></H1>
+    <HR size="2" width="100%" align="center">
+    <H1><SPAN lang="EN-US"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;Cluster 2008</span> <BR>
+    <span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; Technical Program</span></SPAN></H1>
+    <TABLE class="MsoNormalTable" border="1" cellpadding="0" style="mso-cellspacing:1.5pt;
+ mso-yfti-tbllook:1184">
+      <TBODY>
+        <TR style="mso-yfti-irow:0;mso-yfti-firstrow:yes">
+          <TD colspan="4" style="padding:.75pt .75pt .75pt .75pt">
+  <P class="MsoNormal" align="center" style="text-align:center"><B><SPAN lang="EN-US"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Sep 28 (Sun)</span></SPAN></B></P>
+  </TD>
+        </TR>
+        <TR style="mso-yfti-irow:1">
+          <TD valign="top" style="padding:.75pt .75pt .75pt .75pt">
+  <P class="MsoNormal" align="center" style="text-align:center"><B><SPAN lang="EN-US"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >17:00 - 20:00</span></SPAN></B></P>
+  </TD>
+          <TD colspan="3" valign="top" style="padding:.75pt .75pt .75pt .75pt">
+  <P class="MsoNormal"><B><SPAN lang="EN-US"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></SPAN></B><SPAN lang="EN-US"> <span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >(1F Foyer)</span><BR>
+          </SPAN></P>
+  </TD>
+        </TR>
+        <TR style="mso-yfti-irow:2">
+          <TD valign="top" style="padding:.75pt .75pt .75pt .75pt" align="center"><B><SPAN lang="EN-US"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >18:00 - 20:00</span></SPAN></B></TD>
+          <TD colspan="3" valign="top" style="padding:.75pt .75pt .75pt .75pt">
+          <P class="MsoNormal"><B><SPAN lang="EN-US"></SPAN><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Reception</span></B><SPAN lang="EN-US"> <span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >(Restaurant Espoir, 1F,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.epochal.or.jp/eng/access/index.html" target="_blank"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Tsukuba International Congress Center, EPOCHAL TSUKUBA</span></span><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >)</span><BR>
+          <BR>
+          <span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Buses are the most convenient ground transportation between Tsukuba and
+          Narita Airport.</span></SPAN></P>
+          <UL>
+            <LI><span onclick="return false" style="text-decoration:underline; color:blue" href="http://pfiqst.kek.jp/users_info/access/busnrte.html" target="_blank"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Time table for airport bus between Narita and Tsukuba Center</span></span>
+            <LI><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.epochal.or.jp/eng/access/jikokuhyo.html" target="_blank"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Other ground transportations are available.</span></span> <SPAN lang="EN-US"></SPAN>
+          </UL>
+          </TD>
+        </TR>
+      </TBODY>
+    </TABLE>
+    <BR>
+    <BR>
+    <table class=MsoNormalTable border=1 cellpadding=0 style='mso-cellspacing:1.5pt;
+ mso-yfti-tbllook:1184'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes'>
+  <td colspan=4 style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal align=center style='text-align:center'><b><span
+  lang=EN-US><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Sep 29 (Mon)</span></span></b></p>
+  </td>
+ </tr>
+ <tr style='mso-yfti-irow:1'>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal align=center style='text-align:center'><b><span
+  lang=EN-US><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >9:30 - 9:45</span></span></b></p>
+  </td>
+  <td colspan=3 valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><b><span lang=EN-US><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Opening</span></span></b><span lang=EN-US>
+  <span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >(Hall 300)</span><br>
+  <span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >(including Award ceremony of Data Analysis Challenge)</span></span></p>
+  </td>
+ </tr>
+ <tr style='mso-yfti-irow:2'>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal align=center style='text-align:center'><b><span
+  lang=EN-US><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >9:45 - 10:45</span></span></b></p>
+  </td>
+  <td colspan=3 valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><b><span lang=EN-US><span onclick="return false" style="text-decoration:underline; color:blue" href="keynotes.html"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Keynote</span></span></span></b><span lang=EN-US>
+  <span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >(Hall 300)</span><br>
+  <em><span style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:"ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Clouds,
+  Clusters and ManyCore: The Revolution Ahead</span></span></em><br>
+  <span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Daniel A. Reed (Microsoft Research)</span> </span></p>
+  </td>
+ </tr>
+ <tr style='mso-yfti-irow:3'>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal align=center style='text-align:center'><b><span
+  lang=EN-US><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >11:00 - 12:30</span></span></b></p>
+  </td>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+        <p class=MsoNormal><b><span lang=EN-US><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Session 1: System Tools and
+  &quot;Green&quot; Computing</span></span></b><span lang=EN-US><BR>
+        <span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >(Room 303)</span><BR>
+        </span><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Chair:Hiroshi Nakashima, Kyoto Univ.</span><BR>
+        <span lang=EN-US><br>
+        <em><span style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:"ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Reliable
+  Adaptable Network RAM</span></span></em><br>
+        <span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Tia Newhall, Daniel Amato, Alexandr Pshenichkin (Swarthmore College)</span></span></p>
+        <p><em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Magnet: A Novel Scheduling Policy for Power Reduction in Cluster
+  with Virtual Machines</span></span></em><span lang=EN-US><br>
+  <span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Liting Hu, Hai Jin, Xiaofei Liao, Xianjie Xiong, Haikun Liu (Huazhong
+  University of Science and Technology)</span></span></p>
+  <p><em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Active CoordinaTion (ACT) - Toward Effectively Managing
+  Virtualized Multicore Clouds</span></span></em><span lang=EN-US><br>
+  <span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Mukil Kesavan, Adit Ranadive, Ada Gavrilovska, Karsten Schwan (CERCS, Georgia
+  Institute of Technology)</span></span></p>
+  </td>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><b><span lang=EN-US><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Session 2: Application Algorithms and
+  Scheduling</span></span></b><span lang=EN-US><BR>
+        <span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >(Room 304)</span><BR>
+        </span><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Chair:Serge Petiton, LIFL/CNRS</span><BR>
+        <span lang=EN-US><br>
+        <em><span style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:"ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Variable-grain
+  and Dynamic Work Generation for Minimal Unique Itemset Mining</span></span></em><br>
+        <span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Paraskevas Yiapanis (University of Manchester), David J. Haglin (Minnesota
+  State University, Mankato), Anna M. Manning, Ken Mayes, John Keane
+  (University of Manchester)</span></span></p>
+        <p><em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >A Large-Grained Parallel Algorithm for Nonlinear Eigenvalue
+  Problems and Its Implementation Using OmniRPC</span></span></em><span lang=EN-US><br>
+  <span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Takeshi Amako, Yusaku Yamamoto, Shao-Liao Zhang (Nagoya University)</span></span></p>
+  <p><em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Redistribution Aware Two-Step Scheduling for Mixed-Parallel
+  Applications</span></span></em><span lang=EN-US><br>
+  <span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Sascha Hunold, Thomas Rauber (University of Bayreuth), Frederic Suter (Nancy
+  University)</span></span></p>
+  </td>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><b><span lang=EN-US><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Data Analysis Challenge:</span> <BR>
+        <span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Winner's Presentation and Technical Background in Info-plosion</span><BR>
+        </span></b><span lang=EN-US> <span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >(Hall 300)</span><BR>
+        </span></p>
+  </td>
+ </tr>
+ <tr style='mso-yfti-irow:4'>
+  <td style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal align=center style='text-align:center'><b><span
+  lang=EN-US><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >12:30 - 13:45</span></span></b></p>
+  </td>
+  <td colspan=3 style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><span lang=EN-US><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></span></p>
+  </td>
+ </tr>
+ <tr style='mso-yfti-irow:5'>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal align=center style='text-align:center'><b><span
+  lang=EN-US><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >13:45 - 15:15</span></span></b></p>
+  </td>
+<!-- Technical Session -->
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><b><span lang=EN-US><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Session 3: Profiling and Tuning</span></span></b><span
+  lang=EN-US><BR>
+        <span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >(Room 303)</span><BR>
+        <SPAN lang="EN-US"></SPAN></span><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Daniel Katz, LSU</span><BR>
+        <span
+  lang=EN-US><br>
+        <em><span style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:"ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Implications
+  of non-constant clock drifts for the timestamps of concurrent events</span></span></em><br>
+        <span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Becker (Forschungszentrum Juelich), Rolf Rabenseifner (University of
+  Stuttgart), Felix Wolf (Forschungszentrum Juelich)</span></span></p>
+        <p><em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >In Search of Sweet-Spots in Parallel Performance Monitoring</span></span></em><span
+  lang=EN-US><br>
+  <span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Aroon Nataraj, Allen Malony, Alan Morris (University Of Oregon), Dorian C.
+  Arnold, Barton P. Miller (University Of Wisconsin)</span></span></p>
+  <p><em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Workflows for Performance Evaluation and Tuning</span></span></em><span
+  lang=EN-US><br>
+  <span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Jeffrey L. Tilson, Mark S.C. Reed, Robert J. Fowler (Renaissance Computing
+  Institute, University of North Carolina at Chapel Hill)</span></span></p>
+  </td>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><b><span lang=EN-US><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Session 4: Virtualization Technology</span></span></b><span
+  lang=EN-US><BR>
+        <span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >(Room 304)</span><BR>
+        <span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Franck Cappello, INRIA</span><BR>
+        <br>
+  <em><span style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:"ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Combining
+  Virtual Machine Migration with Process Migration for HPC on Multi-Clusters
+  and Grids</span></span></em><br>
+  <span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Tal Maoz, Amnon Barak, Lior Amar (Department of Computer Science, The Hebrew
+  University of Jerusalem)</span></span></p>
+  <p><em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Live and Incremental Whole-System Migration of Virtual Machines
+  Using Block-Bitmap</span></span></em><span lang=EN-US><br>
+  <span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Yingwei Luo, Binbin Zhang, Xiaolin Wang (Peking University), Zhenlin Wang
+  (Michigan Technological University), Yifeng Sun (Peking University)</span></span></p>
+        <FONT color="#ff0000"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >(Best Paper Award)</span></FONT><BR>
+        <em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Efficient One-Copy MPI Shared Memory Communication in Virtual
+  Machines</span></span></em><span lang=EN-US><br>
+        <span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Wei Huang, Matthew Koop, Dhabaleswar K. Panda (The Ohio State University)</span></span></td>
+  <td valign=top style='border:none;padding:.75pt .75pt .75pt .75pt'></td>
+ </tr>
+ <tr style='mso-yfti-irow:6'>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal align=center style='text-align:center'><b><span
+  lang=EN-US><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >15:15 - 15:30</span></span></b></p>
+  </td>
+  <td colspan=3 valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><span lang=EN-US><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break (15min)</span></span></p>
+  </td>
+ </tr>
+ <tr style='mso-yfti-irow:7'>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal align=center style='text-align:center'><b><span
+  lang=EN-US><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >15:30 - 17:00</span></span></b></p>
+  </td>
+<!-- Technical Session -->
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><b><span lang=EN-US><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Session 5: Cluster Networking</span></span></b><span
+  lang=EN-US><BR>
+        <span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >(Room 303)</span><BR>
+        <span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Markus Fischer, HPC Cluster Solutions</span><BR>
+        <br>
+  <em><span style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:"ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Multistage
+  Switches are not Crossbars: Effects of Static Routing in High-Performance
+  Networks</span></span></em><br>
+  <span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Torsten Hoefler (Indiana University), Timo Schneider (Technical University of
+  Chemnitz), Andrew Lumsdaine (Indiana University)</span></span></p>
+  <p><em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >A HyperTransport-Based Personal Parallel Computer Architecture</span></span></em><span
+  lang=EN-US><br>
+  <span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Xiaojun Yang, ninghui Sun, Xiaofang Zhao (Institute of Computing Technology,
+  Chinese Academy of Sciences), Fei Chen, Hailiang Cheng (Graduate University
+  of Chinese Academy of Sciences)</span></span></p>
+  <p><em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >High Message Rate, NIC-Based Atomics: Design and Performance
+  Considerations</span></span></em><span lang=EN-US><br>
+  <span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Keith Underwood (Intel Corporation), Michael Levenhagen, Scott Hemmert, Ron
+  Brightwell (Sandia National Labs)</span></span></p>
+  </td>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><b><span lang=EN-US><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Session 6: Adaptation to Multi-Core</span></span></b><span
+  lang=EN-US><BR>
+        <span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >(Room 304)</span><BR>
+        </span><SPAN lang="EN-US"></SPAN><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Raymond Namyst, LaBRI/CNRS</span><BR>
+        <span
+  lang=EN-US><br>
+        <em><span style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:"ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >A
+  dependency-aware task-based programming environment for multi-core
+  architectures</span></span></em><br>
+        <span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Josep M. Perez, Rosa M. Badia, Jesus Labarta (Barcelona Supercomputing
+  Center)</span></span></p>
+        <FONT color="#ff0000"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >(Best Paper Award)</span></FONT><BR>
+        <em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Are Non-Blocking Networks Really Needed for High-End-Computing
+  Workloads?</span></span></em><span lang=EN-US><br>
+        <span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Pavan Balaji, Narayan Desai (Argonne National Laboratory), P. Sadayappan,
+  Mohammed Islam (Ohio State University)</span></span>
+        <p><em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >OpenMP-centric Performance Analysis of Hybrid Applications</span></span></em><span
+  lang=EN-US><br>
+  <span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Karl Fuerlinger, Shirley Moore (University of Tennessee)</span></span></p>
+  </td>
+  <td valign=top style='border:none;padding:.75pt .75pt .75pt .75pt'></td>
+ </tr>
+ <tr style='mso-yfti-irow:8;mso-yfti-lastrow:yes'>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal align=center style='text-align:center'><b><span
+  lang=EN-US><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >17:00 -</span></span></b></p>
+  </td>
+  <td colspan=3 valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><b><span onclick="return false" style="text-decoration:underline; color:blue" href="Cluster2008-excursion.pdf"><span lang=EN-US><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Excursion to University of Tsukuba</span></span></span></b></p>
+  </td>
+ </tr>
+
+    </table>
+
+<p style='margin:0mm;margin-bottom:.0001pt'></p>
+    <table class=MsoNormalTable border=1 cellpadding=0 style='mso-cellspacing:1.5pt;
+ mso-yfti-tbllook:1184'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes'>
+  <td colspan=3 valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal align=center style='text-align:center'><b><span
+  lang=EN-US><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Sep. 30 (Tue)</span></span></b></p>
+  </td>
+ </tr>
+ <tr style='mso-yfti-irow:1'>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal align=center style='text-align:center'><b><span
+  lang=EN-US><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >9:00 - 11:00</span></span></b></p>
+  </td>
+<!-- Technical Session and Poster & work-in-progress Presentations -->
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><b><span lang=EN-US></span></b><B><SPAN lang="EN-US"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Session 7: Parallel File Systems and
+  I/O Libraries</span></SPAN></B><SPAN lang="EN-US"><BR>
+        <span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >(Room 303)</span><BR>
+        </SPAN><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Gabriel Antoniu, IRISA/INRIA</span><BR>
+        <SPAN lang="EN-US"><BR>
+        <EM><SPAN style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:"ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >DWC^2:
+  A Dynamic Weight-based Cooperative Caching Scheme for Object-based Storage
+  Cluster</span></SPAN></EM><BR>
+        <span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Qingsong Wei (Data Storage Institute), Bharadwaj Veeravalli, Lingfang Zeng
+  (National University of Singapore)</span></SPAN></p>
+        <p><em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >An OSD-based Approach to Managing Directory Operations in
+  Parallel File Systems</span></span></em><span lang=EN-US><br>
+  <span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Nawab Ali (The Ohio State University), Ananth Devulapalli, Dennis Dalessandro,
+  Pete Wyckoff (Ohio Supercomputer Center), P Sadayappan (The Ohio State
+  University)</span></span></p>
+        <p><em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >DifferStore: A Differentiated Storage Service in Object-based
+  Storage System</span></span></em><span lang=EN-US><br>
+  <span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Qingsong Wei (Data Storage Institute)</span></span></p>
+        <p><em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >A Novel Hint-based I/O Mechanism for Centralized File Server in
+  cluster</span></span></em><span lang=EN-US><br>
+  <span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Huan Chen, Jin Xiong, Ninghui Sun (Institute of Computing Technology, Chinese
+  Academy of Sciences)</span></span></p>
+        </td>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><b><span lang=EN-US></span></b><B><SPAN lang="EN-US"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Work-in-progress presentation</span> </SPAN></B><BR>
+        <span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >(Room 304)</span><BR>
+        <span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Takeshi Iwashita, Kyoto Univ.</span><BR>
+        <SPAN lang="EN-US"></SPAN><BR>
+        <span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >WP-1</span><I><BR>
+        <span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Divisible Load Scheduling with Improved Asymptotic Optimality</span> </I><BR>
+        <span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Reiji Suda (The University of Tokyo / JST)</span><BR>
+        <BR>
+        <span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >WP-2</span><BR>
+        <I><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >DLM: A Distributed Large Memory System using Remote Memory Swapping over Cluster Nodes</span> </I><BR>
+        <span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Hiroko Midorikawa (Seikei University), Motoyoshi Kurokawa (RIKEN), Ryutaro Himeno (RIKEN), Mitsuhisa Sato (University of Tsukuba)</span><BR>
+        <BR>
+        <span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >WP-3</span><BR>
+        <I><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >RI2N: High-Bandwidth and Fault-Tolerant Network with Multi-link Ethernet for PC Clusters</span> </I><BR>
+        <span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >ShinÅfichi Miura (University of Tsukuba), Takayuki Okamoto (Fujitsu Ltd.), Taisuke Boku (University of Tsukuba), Toshihiro Hanawa (University of Tsukuba), Mitsuhisa Sato (University of Tsukuba)</span><BR>
+        <BR>
+        <span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >WP-4</span><BR>
+        <I><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >The Impact of Topoloy and Link Aggregation on PC Cluster with Ethernet</span> </I><BR>
+        <span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Takafumi Watanabe (Doshisha University), Masahiro Nakao (Doshisha University), Tomoyuki Hiroyasu (Doshisha University), Tomohiro Otsuka (Keio University), Michihiro Koibuchi (National Institute of Informatics/The Graduate University of Advanced Studies/JST)</span><BR>
+        <BR>
+        <span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >WP-5</span><BR>
+        <I><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Predictive models for bandwidth sharing in high performance clusters</span> </I><BR>
+        <span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Vienne Jerome (LIG-MESCAL/BULL), Martinasso Maxime (LIG-MESCAL/BULL), Vincent Jean-Marc (LIG-MESCAL), Mehaut Jean-Francois (LIG-MESCAL)</span><BR>
+        <BR>
+        <span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >WP-6</span> <BR>
+        <I><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Context-Aware Address Translation for High Performance SMP Cluster System</span></I><BR>
+        <span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Moon-Sang Lee (Samsung Electronics), Joonwon Lee (KAIST), Seungryoul Maeng (KAIST)</span><BR>
+        <BR>
+        <span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >WP-7</span><BR>
+        <I><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Parallel Multistage Preconditioners by Hierarchical Interface Decomposition on ÅgT2K Open Super Computer (Todai Combined Cluster)Åh with Hybrid Parallel Programming Models</span> </I><BR>
+        <span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Kengo Nakajima (The University of Tokyo)</span><BR>
+        <BR>
+        <B><SPAN lang="EN-US"><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Poster indexing</span></SPAN></B><BR>
+        <span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Takeshi Iwashita, Kyoto Univ.</span><BR>
+        <BR>
+        <span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >P-1</span><BR>
+        <I><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Load-Balancing Methods for Parallel and Distributed Constraint Solving</span></I><BR>
+        <span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Carl Christian Rolf(Lund University), Krzysztof Kuchcinski(Lund University)</span><BR>
+        <BR>
+        <span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >P-2</span><BR>
+        <I><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Enabling Lock-Free Concurrent Fine-Grain Access to Massive Distributed
+        Data: Application to Supernovae Detection</span></I><BR>
+        <span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Bogdan Nicolae(University of Rennes 1/IRISA), Gabriel Antoniu(INRIA/IRISA),
+        Luc Bouge(ENS Cachan, Brittany Extension/IRISA)</span><BR>
+        <BR>
+        <span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >P-3</span><BR>
+        <I><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >A multicore-enabled multirail communication engine</span></I><BR>
+        <span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Elisabeth Brunet(University of Bordeaux), Francois Trahay(University of
+        Bordeaux), Alexandre Denis(University of Bordeaux)</span><BR>
+        <BR>
+        <span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >P-4</span><BR>
+        <I><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Multi-core Aware Optimization for MPI Collectives</span></I><BR>
+        <span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Bibo Tu(Institute of Computing Technology, Chinese Academy of Sciences)</span><BR>
+        <BR>
+        <span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >P-5</span><BR>
+        <I><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Environmental-Aware Optimization of MPI Checkpointing Intervals</span></I><BR>
+        <span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Hideyuki Jitsumoto(Tokyo Institute of Technology), Toshio Endo(Tokyo Institute
+        of Technology), Satoshi Matsuoka(Tokyo Institute of Technology)</span><BR>
+        <BR>
+        <span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >P-6</span><BR>
+        <I><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Towards an Understanding of the Performance of MPI-IO in Lustre File Systems</span></I><BR>
+        <span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Phillip Dickens(University of Maine), Jeremy Logan(University of Maine)</span><BR>
+        <BR>
+        <span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >P-7</span><BR>
+        <I><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Gather-Arrange-Scatter: Node-Level Request Reordering for Parallel File Systems on Multi-Core Clusters</span></I><BR>
+        <span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Kazuki Ohta(The University of Tokyo), Hiroya Matsuba(The University of
+        Tokyo), Yutaka Ishikawa(The University of Tokyo)</span><BR>
+        <BR>
+        <span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >P-8</span><BR>
+        <I><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Empirical-based Probabilistic Upper Bounds for Urgent Computing Applications</span></I><BR>
+        <span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Nick Trebon(University of Chicago), Pete Beckman(Argonne National Laboratory)</span><BR>
+        <BR>
+        <span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >P-9</span><BR>
+        <I><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Supporting Storage Resources in Urgent Computing Environments</span></I><BR>
+        <span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Jason Cope(University of Colorado at Boulder), Henry Tufo(University of
+        Colorado at Boulder, National Center for Atmospheric Research)</span><BR>
+        <BR>
+        <span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >P-10</span><BR>
+        <I><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Runtime DVFS Control with instrumented code in Power-scalable Cluster System</span></I><BR>
+        <span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Hideaki Kimura(University of Tsukuba), Mitsuhisa Sato(University of Tsukuba),
+        Takayuki Imada(University of Tsukuba), Yoshihiko Hotta(University of Tsukuba)</span><BR>
+        <BR>
+        </p>
+        </td>
+ </tr>
+ <tr style='mso-yfti-irow:2'>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal align=center style='text-align:center'><b><span
+  lang=EN-US><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >11:00 - 12:00</span></span></b></p>
+  </td>
+  <td colspan=2 valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><b><span lang=EN-US><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Poster session (core time)</span></span></b></p>
+  </td>
+ </tr>
+ <tr style='mso-yfti-irow:3'>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal align=center style='text-align:center'><FONT color="#ff0000"><b><span
+  lang=EN-US><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >13:00 - 14:45</span></span></b></FONT></p>
+  </td>
+  <td colspan=2 valign=top style='padding:.75pt .75pt .75pt .75pt'><B><SPAN lang="EN-US"><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Panel Session</span></SPAN></B><span
+  lang=EN-US> <span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >(105min)</span><BR>
+        <span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >(Hall 300)</span><br>
+  <em><span style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:"ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Will the First Exascale Machine be a Commodity Cluster, or Something Else?</span></span></em><br>
+  <b><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Moderator:</span></b> <span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Satoshi Matsuoka (Tokyo Institute of Technology)</span><br>
+  <b><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Panelists:</span></b> <span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Dhabaleswar K. Panda (The Ohio State University), Pete
+  Beckman (Argonne National Laboratory), Jesus Labarta (Barcelona
+  Supercomputing Center), Frank Cappello (INRIA), Hiroshi Nakashima (Kyoto
+  University)</span></span></td>
+ </tr>
+ <tr style='mso-yfti-irow:4'>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal align=center style='text-align:center'><b><FONT color="#ff0000"><span
+  lang=EN-US><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >15:00 - 16:30</span></span></FONT></b></p>
+  </td>
+<!-- Technical Session -->
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><b><span lang=EN-US><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Session 8: High Performance Message
+  Passing Libraries</span></span></b><span lang=EN-US><BR>
+        <span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >(Room 303)</span><BR>
+        </span><span lang=EN-US><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Thilo Kielmann, Vrije Universiteit</span><BR>
+        <br>
+        <em><span style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:"ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Scalable
+  MPI Design over InfiniBand using eXtended Reliable Connection</span></span></em><br>
+        <span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Matthew Koop, Jaidev Sridhar, Dhabaleswar K. Panda (The Ohio State
+  University)</span></span></p>
+        <p><em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Message Progression in Parallel Computing - To Thread or not to
+  Thread?</span></span></em><span lang=EN-US><br>
+  <span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Torsten Hoefler, Andrew Lumsdaine (Indiana University)</span></span></p>
+  <p><em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Improving Message Passing over Ethernet with I/O AT Copy Offload
+  in Open-MX</span></span></em><span lang=EN-US><br>
+  <span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >Brice Goglin (INRIA - Bordeaux - Sud-Ouest)</span></span></p>
+  </td>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><b><span lang=EN-US><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Session 9: Performance Prediction
+  &amp; Modeling</span></span></b><span lang=EN-US><br>
+        <span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >(Room 304)</span><BR>
+        </span><span lang=EN-US><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Kenjiro Taura, University of Tokyo</span><BR>
+        <BR>
+        <em><span style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:"ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >A
+  Trace-driven Emulation Framework to Predict Scalability of Large Clusters in
+  Presence of OS Jitter</span></span></em><br>
+        <span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >Pradipta De, Ravi Kothari, Vijay Mann (IBM India Reasearch Laboratory)</span></span></p>
+        <p><em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Prediction of Behavior of MPI Applications</span></span></em><span
+  lang=EN-US><br>
+  <span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Marc Casas, Rosa Badia, Jesus Labarta (Technical University of Catalonia)</span></span></p>
+  <p><em><span lang=EN-US style='font-family:"ÇlÇr ÇoÉSÉVÉbÉN";mso-bidi-font-family:
+  "ÇlÇr ÇoÉSÉVÉbÉN"'><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >A Novel Model for Synthesizing Parallel I/O Workloads in Scientific
+  Applications</span></span></em><span lang=EN-US><br>
+  <span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Dan Feng, Qiang Zou (School of Computer, Huazhong University of Science and
+  Technology), Hong Jiang (University of Nebraska-Lincoln), Yifeng Zhu
+  (University of Maine)</span></span></p>
+  </td>
+ </tr>
+ <tr style='mso-yfti-irow:5'>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal align=center style='text-align:center'><FONT color="#ff0000"><b><span
+  lang=EN-US><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >16:30 - 16:45</span></span></b></FONT></p>
+  </td>
+  <td colspan=2 valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><span lang=EN-US><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break (15min)</span></span></p>
+  </td>
+ </tr>
+ <tr style='mso-yfti-irow:6'>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal align=center style='text-align:center'><FONT color="#ff0000"><b><span
+  lang=EN-US><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >16:45 - 17:45</span></span></b></FONT></p>
+  </td>
+  <td colspan=2 valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><b><span lang=EN-US></span></b><BR>
+        <B><SPAN lang="EN-US"><span onclick="return false" style="text-decoration:underline; color:blue" href="keynotes.html#InvitedSpeaker"><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span></span></SPAN></B><span
+  lang=EN-US><BR>
+        <span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >(Hall 300)</span><BR>
+        <I><span onclick="return false" style="text-decoration:underline; color:blue" href="DK-panda-cluster_v4.pdf"><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Designing Next Generation Clusters with InfiniBand and 10GE/iWARP: Opportunities
+        and Challenges</span></span></I><br>
+  <span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >Dhabaleswar K. Panda (The Ohio State University)</span></span><BR>
+        </p>
+  </td>
+ </tr>
+ <tr style='mso-yfti-irow:7;mso-yfti-lastrow:yes'>
+  <td valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal align=center style='text-align:center'><b><span
+  lang=EN-US><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >18:30 -</span></span></b></p>
+  </td>
+  <td colspan=2 valign=top style='padding:.75pt .75pt .75pt .75pt'>
+  <p class=MsoNormal><b><span lang=EN-US><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Banquet</span></span></b><span lang=EN-US>
+  <span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >(Sansui-tei)</span></span></p>
+        </td>
+ </tr></table>
+    <B><FONT color="#ff0000"><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >The time-schedule was changed.</span></FONT></B><BR>
+    <BR>
+    <BR>
+    <div class=MsoNormal align=center style='text-align:center'>
+    <TABLE class="MsoNormalTable" border="1" cellpadding="0" style="mso-cellspacing:1.5pt;
+ mso-yfti-tbllook:1184">
+      <TBODY>
+        <TR style="mso-yfti-irow:0;mso-yfti-firstrow:yes">
+          <TD colspan="4" valign="top" style="padding:.75pt .75pt .75pt .75pt">
+          <P class="MsoNormal" align="center" style="text-align:center"><B><SPAN lang="EN-US"><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Oct. 1 (Wed)</span></SPAN></B></P>
+  </TD>
+        </TR>
+        <TR style="mso-yfti-irow:1">
+          <TD valign="top" style="padding:.75pt .75pt .75pt .75pt">
+  <P class="MsoNormal" align="center" style="text-align:center"><B><SPAN lang="EN-US"><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >9:00 - 17:00</span></SPAN></B></P>
+  </TD>
+          <TD valign="top" style="padding:.75pt .75pt .75pt .75pt">
+  <P class="MsoNormal"><B><SPAN lang="EN-US"><SPAN lang="EN-US"><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Workshop 1</span><BR>
+          </SPAN></SPAN></B><SPAN lang="EN-US"><SPAN lang="EN-US"><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >(Room 202)</span></SPAN><BR>
+          <BR>
+          <span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="http://iwapt.org/"><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >iWAPT2008</span><BR>
+          </span></SPAN></P>
+  </TD>
+          <TD valign="top" style="padding:.75pt .75pt .75pt .75pt">
+  <P class="MsoNormal"><B><SPAN lang="EN-US"><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Workshop 2</span><BR>
+          </SPAN></B><SPAN lang="EN-US"><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >(Room 303)</span></SPAN><BR>
+          <BR>
+          <span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="http://www.arcos.inf.uc3m.es/~jdaniel/hiperio08/"><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >HiperIO2008</span></span></P>
+          </TD>
+          <TD valign="top" style="padding:.75pt .75pt .75pt .75pt"><B><SPAN lang="EN-US"><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >Workshop 3</span></SPAN></B><BR>
+          <span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >(Room 304)</span><BR>
+          <BR>
+          <span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="http://www.ccs.tsukuba.ac.jp/people/hac2008/"><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >HAC2008</span></span></TD>
+        </TR>
+      </TBODY>
+    </TABLE>
+    <span lang=EN-US></span><BR>
+    <HR size="2" width="100%" align="center">
+    <span lang=EN-US></span></div>
+    <address><span lang=EN-US><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cluster2008.org/"><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Cluster 2008</span></span></span></address>
+    <p class=MsoNormal><span lang=EN-US><span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >Last modified: Mon Oct. 5 2008</span> </span><BR>
+    </p>
+    </TD>
+    <td width="95" valign="top" bgcolor="#D2D2C5"><table width="100%" border="0" cellpadding="6" cellspacing="0" id="news">
+          <tr>
+            <td align="center" class="smallMenuTitle"><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >News</span><br />
+			<hr size="1" /></td>
+          </tr>
+          <tr>
+            <td><b><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="registration.html"><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></b> <BR>
+        </td>
+          </tr><tr>
+            <td><div style="background: white; border: 1px solid black; padding: 5px;">
+              <div style="display: inline; white-space: normal; font-weight: bold;">
+                <div style="white-space: nowrap;"><img onmousedown="imd(this)" src="image/bright_star.gif" width="14" height="14" /><span onclick="return false" style="text-decoration:underline; color:blue" href="program.html"><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >Technical</span></span></div>
+        <span onclick="return false" style="text-decoration:underline; color:blue" href="program.html"><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span></div>
+            </div></td>
+          </tr>
+        </table></td>
+      </tr>
+      <tr>
+        <td colspan="3"><div id="footer"><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >Hosted by Information Technology Center, The University of Tokyo, Japan</span>

@@ -1,0 +1,747 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/3/annotation/annotated_repository/http+^^www.engr.washington.edu^epp^iwaenc2008^schedule.html_2009-08-05__14-35-55.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/3/annotation/annotated_repository/http+^^www.engr.washington.edu^epp^iwaenc2008^schedule.html_2009-08-05__14-35-55.yaml created on Thu Aug 13 13:56:06 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<meta http-equiv="Content-Type" content="text/html;charset=iso-8859-1"/>
+<title>IWAENC 2008 Papers</title>
+<link rel="stylesheet" type="text/css" href="proceedings/contents/css_nav_template/proceedings.css"/>
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<div id="wrapper">
+  <img onmousedown="imd(this)" src="proceedings/contents/css_nav_template/images/background_gradient_vec_edit.gif" alt="IWAENC 2008 Banner" />
+  <div id="subheading">
+		<div id="flashObject">
+			<object codebase="http://download.macromedia.com/pub/shockwave/cabs/flash/swflash.cab#version=7,0,19,0" classid="clsid:D27CDB6E-AE6D-11cf-96B8-444553540000" width="176" height="67" >
+				<param value="proceedings/contents/css_nav_template/flash/IWAENClogo.swf" name="movie" />
+				<param value="high" name="quality" />
+				<embed type="application/x-shockwave-flash" pluginspage="http://www.macromedia.com/go/getflashplayer" quality="high" src="proceedings/contents/css_nav_template/flash/IWAENClogo.swf" width="176" height="67" />
+			</object>
+		</div><!--flashObject-->
+		<div id="subheadingText">
+		<h3><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >11th International Workshop on Acoustic Echo and Noise Control</span></h3>
+		<h5><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Seattle, Washington USA &bull; 14&ndash;17 September 2008</span></h5>
+		</div><!--subheadingText-->
+  </div><!--subheading-->
+	<div id="navigation">
+		<ul>
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >HOME</span></span></li>
+			<li> <span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </li>
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="program.html"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >WORKSHOP OVERVIEW</span> </span></li>
+			<li> <span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </li>
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="schedule.html"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >ABSTRACTS BY SESSION</span></span> <span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </li>
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="topic.html"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >ABSTRACTS BY TOPIC</span></span></li>
+			<li> <span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </li>
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/index.html"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >PROCEEDINGS</span></span></li>
+			<li></li>
+			<li></li></ul>
+  </div><!--navigation-->
+	<div id="mainContent">
+	<h3><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Schedule</span></h3>
+	<p><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >with links to abstracts</span> </p>
+	<table width="100%" cellpadding="8px" border="1" style="text-align: left">
+		<tr style="color: #ffffff; background-color: #006699">
+			<td colspan="2"><strong><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >MONDAY, 15 September 2008</span></strong></td>
+		</tr>
+		<tr>
+          <td colspan="2"><strong><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Plenary Talk 1, 9:00&ndash;10:00</span></strong></td>
+	  </tr>
+		<tr>
+          <td><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Speech Enhancement by Conditional Estimation: Noise Reduction, Error   Concealment &amp; Bandwidth Extension, what makes the difference?</span></td>
+		  <td><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Peter Vary, RWTH Aachen University</span></td>
+	  </tr>
+		<tr>
+			<td colspan="2"><strong><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Lecture Session 1, 10:30&ndash;12:30</span></strong></td>
+		</tr>
+		<tr>
+			<td width="49%"><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9013"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >NLMS&ndash;Type System Identification of Miso Systems with Shifted Perfect Sequences</span></span></td>
+			<td width="50%"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Christiane Antweiler, RWTH Aachen University; Aulis Telle, RWTH Aachen University; Peter Vary, RWTH Aachen University</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9024"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Coefficient Pruning for Higher&ndash;Order Diagonals of Volterra Filters Representing Wiener&ndash;Hammerstein Models</span></span></td>
+			<td><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Marcus Zeller, University of Erlangen&ndash;Nuremberg; Walter Kellermann, University of Erlangen&ndash;Nuremberg</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9026"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Model&ndash;Based Vs. Traditional Frequency&ndash;Domain Adaptive Filtering in the Presence of Continuous Double&ndash;Talk and Acoustic Echo Path Variability</span></span></td>
+			<td><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Sarmad Malik, Ruhr&ndash;University Bochum; Gerald Enzner, Ruhr&ndash;University Bochum</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9059"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Multichannel Acoustic Echo Cancelation in Multiparty Spatial Audio Conferening with Constrained Kalman Filtering</span></span></td>
+			<td><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Zhengyou Zhang, Microsoft Corporation; Qin Cai, Microsoft Corporation; Jack Stokes, Microsoft Corporation</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9071"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Multichannel Transform Domain Adaptive Filtering: a Two Stage Approach and Illustration for Acoustic Echo Cancelation</span></span></td>
+			<td><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Sascha Spors, Deutsche Telekom Laboratories; Herbert Buchner, Deutsche Telekom Laboratories</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9055"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >A Weighted Overlap&ndash;Add Based Wave Domain Adaptive Filtering Algorithm</span></span></td>
+			<td><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Paolo Peretti, Universita Politecnica delle Marche; Laura Romoli, Universita Politecnica delle Marche; Stefania Cecchi, Universita Politecnica delle Marche; Lorenzo Palestini, Universita Politecnica delle Marche; Francesco Piazza, Universita Politecnica delle Marche</span></td>
+		</tr>
+		<tr>
+			<td colspan="2"><strong><span onclick="return false" style="text-decoration:underline; color:blue" name="p1"></span><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session 1, 14:00&ndash;16:00</span></strong></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9005"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Acoustic Echo Cancellation on the Adaptive Multi&ndash;Rate Speech Codec Parameters</span></span></td>
+			<td><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Daniele Giacobello, Aalborg University; Danilo Neri, Nokia Siemens Networks; Luca Prati, Nokia Siemens Networks; Sergio Brofferio, Politecnico di Milano</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9006"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Voice Activity Detection Based on the Adaptive Multi&ndash;Rate Speech Codec Parameters</span></span></td>
+			<td><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Daniele Giacobello, Aalborg University; Matteo Semmoloni, Nokia Siemens Networks; Danilo Neri, Nokia Siemens Networks; Luca Prati, Nokia Siemens Networks; Sergio Brofferio, Politecnico di Milano</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9007"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Optimal Azimuthal Steering of a First&ndash;Order Superdirectional Microphone Response</span></span></td>
+			<td><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Rene Derkx, Philips Research Laboratories</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9008"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Binaural Distance Perception Based on Direct&ndash;to&ndash;Reverberant Energy Ratio</span></span></td>
+			<td><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Yan&ndash;Chen Lu, University of Sheffield; Martin Cooke, University of Sheffield</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9011"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Acoustic&ndash;Coupling Level Estimation for Performance Improvement of Echo Reduction</span></span></td>
+			<td><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Masahio Fukui, NTT Cyber Space Laboratories, NTT Corporation; Suehiro Shimauchi, NTT Cyber Space Laboratories, NTT Corporation; Akira Nakagawa, NTT Cyber Space Laboratories, NTT Corporation; Yoichi Haneda, NTT Cyber Space Laboratories, NTT Corporation; Akitoshi Kataoka, Ryukoku University</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9014"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Multi&ndash;Channel Echo Control by Model Learning</span></span></td>
+			<td><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Majid Fozunbal, Hewlett&ndash;Packard Laboratories; Ton Kalker, Hewlett&ndash;Packard Laboratories; Ronald Schafer, Hewlett&ndash;Packard Laboratories</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9015"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >An Echo Canceller Using Smoothed&ndash;Coefficient Filter with Adaptive Time Constant Controlled by High&ndash;Pass Errors</span></span></td>
+			<td><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Osamu Hoshuyama, NEC Corporation</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9017"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Speech Recognizer with Improved Detection Performance in an Automotive Environment</span></span></td>
+			<td><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Ashtosh Sapru, Aricent Communications Pvt Ltd; Ravi Lakkundi, Aricent Communications Pvt Ltd; Nisar Ahmed, Aricent Communications Pvt Ltd</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9018"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Robust Hands&ndash;Free Voice Control for Medical Applications</span></span></td>
+			<td><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Bahaa Eddine Sarroukh, Philips Research Laboratories; L C A van Stuivenberg, Philips Research Laboratories; C P Janse, Philips Research Laboratories</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9020"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >A Simplified Decoding Method for a Robust Distant&ndash;Talking ASR Concept Based on Feature&ndash;Domain Dereverberation</span></span></td>
+			<td><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Armin Sehr, University of Erlangen&ndash;Nuremberg; Walter Kellermann, University of Erlangen&ndash;Nuremberg</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9022"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >A New Approach to Digital Directivity Control of Loudspeakers Line Arrays Using Wave Field Synthesis Theory</span></span></td>
+			<td><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Laura Romoli, Universita Politecnica delle Marche; Paolo Peretti, Universita Politecnica delle Marche; Lorenzo Palestini, Universita Politecnica delle Marche; Stefania Cecchi, Universita Politecnica delle Marche; Francesco Piazza, Universita Politecnica delle Marche</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9027"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >A New Cost Function for Direction&ndash;of&ndash;Arrival Estimation of Multiple Sound Sources Using Two Microphones</span></span></td>
+			<td><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Minh The Dang, Paichai University; Seung&ndash;Hyon Nam, Paichai University</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9028"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Generalized Eigenvector Blind Speech Separation Under Coherent Noise in a GSC Configuration</span></span></td>
+			<td><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Dang Hai Tran Vu, University of Paderborn; Alexander Krueger, University of Paderborn; Reinhold Haeb&ndash;Umbach, University of Paderborn</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9029"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Techniques for Estimating the Ideal Binary Mask</span></span></td>
+			<td><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Yi Hu, University of Texas at Dallas; Philipos C Loizou, University of Texas at Dallas</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9030"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Sound Source Separation with Distributed Microphone Arrays in the Presence of Clock Synchronization Errors</span></span></td>
+			<td><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Zicheng Liu, Microsoft Corporation</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9031"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >A Decoupled Filtered&ndash;X LMS Algorithm for Listening&ndash;Room Compensation</span></span></td>
+			<td><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Stefan Goetze, University of Bremen; Markus Kallinger, University of Oldenburg; Alfred Mertins, University of Luebeck; Karl&ndash;Dirk Kammeyer, University of Bremen</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9037"> <span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Interpolation Methods for the SRP&ndash;Phat Algorithm</span></span></td>
+			<td><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Sakari Tervo, Helsinki University of Technology; Tapio Lokki, Helsinki University of Technology</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9041"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Instantaneous Blind Signal Extraction Using Second Order Statistics</span></span></td>
+			<td><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Brian Bloemendal, Eindhoven University of Technology; Jakob van de Laar, Philips Research Laboratories; Piet Sommen, Eindhoven University of Technology</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9058"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Conventional and Distributed Mode Loudspeaker Arrays for the Application of Wave&ndash;Field Synthesis to Videoconference</span></span></td>
+			<td><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Jose Javier Lopez, Technical University of Valencia; Basilio Pueo, University of Alicante; Maximo Cobos, Technical University of Valencia</span></td>
+		</tr>
+		<tr>
+			<td colspan="2"><strong><span onclick="return false" style="text-decoration:underline; color:blue" name="p2"></span><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session 2, 16:30&ndash;18:30</span></strong></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9004"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >An Improved Proportionate Affine Projection Algorithm for Network Echo Cancellation</span></span></td>
+			<td><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Kirill Sakhnov, Czech Technical University in Prague</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9012"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Multiple Position Room Response Equalization with Frequency Domain Fuzzy C&ndash;Means Prototype Design</span></span></td>
+			<td><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Ivan Omiciuolo, University of Trieste; Alberto Carini, University of Urbino; Giovanni L Sicuranza, University of Trieste</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9019"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Multi&ndash;Decision Sub&ndash;Band Voice Activity Detection for Speech Enhancement</span></span></td>
+			<td><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Alan Davis, Curtin University / Western Australian Telecommunications Research Institute; Siow Yong Low, Western Australian Telecommunications Research Institute; Sven Nordholm, Curtin University / Western Australian Telecommunications Research Institute</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9021"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Variable Speech Distortion Weighted Multichannel Wiener Filter Based on Soft Output Voice Activity Detection for Noise Reduction in Hearing Aids</span></span></td>
+			<td><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Kim Ngo, Katholieke Universiteit Leuven; Ann Spriet, Katholieke Universiteit Leuven; Marc Moonen, Katholieke Universiteit Leuven; Jan Wouters, Katholieke Universiteit Leuven; S&oslash;ren Holdt Jensen, Aalborg University</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9025"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Combined Active Noise Control and Noise Reduction in Hearing Aids</span></span></td>
+			<td><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Romain Serizel, Katholieke Universiteit Leuven; Marc Moonen, Katholieke Universiteit Leuven; Jan Wouters, Katholieke Universiteit Leuven; Soren Holdt Jensen, Aalborg University</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9034"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Robust Early Echo Cancellation and Late Echo Suppression in the STFT Domain</span></span></td>
+			<td><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Emanu&euml;l Habets, Technion &ndash; Israel Institute of Technology; Sharon Gannot, Bar&ndash;Ilan University; Israel Cohen, Technion &ndash; Israel Institute of Technology</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9035"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Nonlinear Acoustic Echo Cancellation Based on a Multiplicative Transfer Function Approximation</span></span></td>
+			<td><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Yekutiel Avargel, Technion &ndash; Israel Institute of Technology; Israel Cohen, Technion &ndash; Israel Institute of Technology</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9038"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Acoustic Localization Using Reverberation with Virtual Microphones</span></span></td>
+			<td><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Teemu Korhonen, Tampere University of Technology</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9043"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Acoustic Echo Suppression Based on Separation of Stationary and Non&ndash;Stationary Echo Components</span></span></td>
+			<td><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Fabian Kuech, Fraunhofer IIS; Markus Kallinger, Fraunhofer IIS; Markus Schmidt, Fraunhofer IIS; Christof Faller, Illusonic; Alexis Favrot, Illusonic</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9044"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Challenges and Solutions for Designing Software AEC on Personal Computers</span></span></td>
+			<td><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Qin Li, Microsoft Corporation; Chao He, Microsoft Corporation; Wei&ndash;Ge Chen, Microsoft Corporation</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9045"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Enhancement of Noisy Reverberant Speech by Linear Filtering Followed by Nonlinear Noise Suppression</span></span></td>
+			<td><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Takuya Yoshioka, NTT Communication Science Laboratories; Tomohiro Nakatani, NTT Communication Science Laboratories; Masato Miyoshi, NTT Communication Science Laboratories</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9047"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Handling Speaker Position Changes in a Meeting Diarization System by Combining DOA Clustering and Speaker Identification</span></span></td>
+			<td><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Tobias Hager, NTT Communication Science Laboratories; Shoko Araki, NTT Communication Science Laboratories; Kentaro Ishizuka, NTT Communication Science Laboratories; Masakiyo Fujimoto, NTT Communication Science Laboratories; Tomohiro Nakatani, NTT Communication Science Laboratories; Shoji Makino, NTT Communication Science Laboratories</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9048"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >A Source Reassignment Technique for Time&ndash;Frequency Masking Audio Separation</span></span></td>
+			<td><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Maximo Cobos, Technical University of Valencia; Jose Javier Lopez, Technical University of Valencia; Jan Oliver Hinz, Technical University of Valencia</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9052"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >A Scalable Framework for Multiple Speaker Localization and Tracking</span></span></td>
+			<td><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Nilesh Madhu, Ruhr&ndash;University Bochum; Rainer Martin, Ruhr&ndash;University Bochum</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9057"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Improving Quality Prediction Accuracy of P.563 for Noise Suppression</span></span></td>
+			<td><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Anders Ekman, Royal Institute of Technology; Bastiaan Kleijn, Royal Institute of Technology</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9061"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >A New Model&ndash;Based Underdetermined Speech Separation</span></span></td>
+			<td><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Zaher El Chami, Orange Labs; Antoine Dinh&ndash;Tuan Pham, Laboratory of Modeling and Computation; Christine Servi&egrave;re, GIPSA Lab; Alexandre Guerin, Orange Labs</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9062"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Estimation of the Ideal Binary Mask Using Directional Systems</span></span></td>
+			<td><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Jesper Boldt, Oticon A/S; Ulrik Kjems, Oticon A/S; Michael Pedersen, Oticon A/S; Thomas Lunner, Oticon Research Centre Eriksholm; Deliang Wang, Ohio State University</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9069"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >A Combined Approach for Estimating a Feature&ndash;Domain Reverberation Model in Non&ndash;Diffuse Environments</span></span></td>
+			<td><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Armin Sehr, University of Erlangen&ndash;Nuremberg; Jimi Y C Wen, Imperial College London; Walter Kellermann, University of Erlangen&ndash;Nuremberg; Patrick A Naylor, Imperial College London</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9072"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Non&ndash;Spherical Microphone Array Structures for 3D Beamforming and Spherical Harmonic Analysis</span></span></td>
+			<td><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Thushara Abhayapala, Australian National University; Aastha Gupta, Australian National University</span></td>
+		</tr>
+		<tr style="color: #ffffff; background-color: #006699">
+			<td colspan="2"><strong><span onclick="return false" style="text-decoration:underline; color:blue" name="l2"></span><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >TUESDAY, 16 September 2008</span></strong></td>
+		</tr>
+		<tr>
+          <td colspan="2"><strong><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Plenary Talk 2, 9:00&ndash;10:00</span></strong></td>
+	  </tr>
+		<tr>
+          <td><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Cortical Spectrotemporal Modulations in Audio and Speech Processing</span></td>
+		  <td><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Shihab Shamma,  University of Maryland</span></td>
+	  </tr>
+		<tr>
+			<td colspan="2"><strong><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Lecture Session 2, 10:30&ndash;12:30</span></strong></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9051"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Score: a Low Complexity, Robust Algorithm for the Detection of Corrupt Sensors and Self&ndash;Calibration of Microphone Arrays</span></span></td>
+			<td><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Nilesh Madhu, Ruhr&ndash;University Bochum; Rainer Martin, Ruhr&ndash;University Bochum</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9053"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Maximum&ndash;Likelihood Sound Source Localization with a Multivariate Complex LAPLACIAN Distribution</span></span></td>
+			<td><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Bowon Lee, Hewlett&ndash;Packard Laboratories; Ton Kalker, Hewlett&ndash;Packard Laboratories; Ronald Schafer, Hewlett&ndash;Packard Laboratories</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9081"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >A Log&ndash;MMSE Adaptive Beamformer Using a Nonlinear Spatial Filter</span></span></td>
+			<td><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Michael Seltzer, Microsoft Corporation; Ivan Tashev, Microsoft Corporation</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9083"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >On Hidden Markov Model Maximum Negentropy Beamforming</span></span></td>
+			<td><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Barbara Rauch, Spoken Language Systems; Kenichi Kumatani, Saarland University; Friedrich Faubel, Saarland University; John McDonough, Saarland University; Dietrich Klakow, Saarland University</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9065"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Scale Factor Ambiguity Correction for Subband Blind Multichannel Identification</span></span></td>
+			<td><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Nikolay Gaubitch, Imperial College London; Xiang Lin, Imperial College London; Patrick Naylor, Imperial College London</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9046"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >On the Reconstruction of Undersampled Wireless Acoustic Sensor Signals</span></span></td>
+			<td><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Piet Sommen, Eindhoven University of Technology; Kees Janse, Philips Research Laboratories</span></td>
+		</tr>
+		<tr style="color: #ffffff; background-color: #006699">
+			<td colspan="2"><strong><span onclick="return false" style="text-decoration:underline; color:blue" name="l3"></span><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >WEDNESDAY, 17 September 2008</span></strong></td>
+		</tr>
+		<tr>
+			<td colspan="2"><strong><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Lecture Session 3, 9:00&ndash;10:00</span></strong></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9016"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Source Number Estimation and Clustering for Underdetermined Blind Source Separation</span></span></td>
+			<td><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Benedikt Loesch, University of Stuttgart; Bin Yang, University of Stuttgart</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9023"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >A Novel Robust Solution to the Permutation Problem Based on a Joint Multiple TDOA Estimation</span></span></td>
+			<td><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Francesco Nesta, Fondazione Bruno Kessler; Maurizio Omologo, Fondazione Bruno Kessler; Piergiorgio Svaizer, Fondazione Bruno Kessler</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9040"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Using Phase Linearity to Tackle the Permutation Problem in Audio Source Separation</span></span></td>
+			<td><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Keisuke Toyama, Queen Mary University of London; Andrew Nesbit, Queen Mary University of London; Maria Jafari, Queen Mary University of London; Mark Plumbley, Queen Mary University of London</span></td>
+		</tr>
+		<tr>
+			<td colspan="2"><strong><span onclick="return false" style="text-decoration:underline; color:blue" name="l4"></span><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Lecture Session 4, 10:30&ndash;12:30</span></strong></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9009"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >A Non&ndash;Intrusive Quality Measure of Dereverberated Speech</span></span></td>
+			<td><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Tiago Falk, Queen's University; Wai&ndash;Yip Chan, Queen's University</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9033"><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Estimation of the Reverberation Time in Noisy Environments</span></span></td>
+			<td><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Heinrich L&ouml;llmann, RWTH Aachen University; Peter Vary, RWTH Aachen University</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9036"><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Modified Kalman Filter Exploiting Interframe Correlation of Speech and Noise Magnitudes</span></span></td>
+			<td><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Thomas Esch, RWTH Aachen University; Peter Vary, RWTH Aachen University</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9039"><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >An Analysis of Quefrency Selective Temporal Smoothing of the Cepstrum in Speech Enhancement</span></span></td>
+			<td><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Dirk Mauler, Ruhr&ndash;University Bochum; Timo Gerkmann, Ruhr&ndash;University Bochum; Rainer Martin, Ruhr&ndash;University Bochum</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9056"> <span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Incremental Estimation of Reverberation with Uncertainty Using Prior Knowledge of Room Acoustics for Speech Dereverberation</span></span></td>
+			<td><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Tomohiro Nakatani, NTT Communication Science Laboratories; Takuya Yoshioka, NTT Communication Science Laboratories; Keisuke Kinoshita, NTT Communication Science Laboratories; Masato Miyoshi, NTT Communication Science Laboratories; Biing&ndash;Hwang Juang, Georgia Institute of Technology</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9060"><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Coherent Modulation Comb Filtering for Enhancing Speech in Wind Noise</span></span></td>
+			<td><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Brian King, University of Washington; Les Atlas, University of Washington</span></td>
+		</tr>
+		<tr>
+			<td colspan="2"><strong><span onclick="return false" style="text-decoration:underline; color:blue" name="p3"></span><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session 3, 14:00&ndash;16:00</span></strong></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9032"><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Multichannel Cross&ndash;Talk Cancellation in a Call&ndash;Center Scenario Using Frequency&ndash;Domain Adaptive Filtering</span></span></td>
+			<td><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Anthony Lombard, University of Erlangen&ndash;Nuremberg; Walter Kellermann, University of Erlangen&ndash;Nuremberg</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9049"><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Acoustic Echo Control Based on Temporal Fluctuations of Short&ndash;Time Spectra</span></span></td>
+			<td><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Alexis Favrot, Illusonic; Christof Faller, Illusonic; Markus Kallinger, Fraunhofer IIS; Fabian K&uuml;ch, Fraunhofer IIS; Markus Schmidt, Fraunhofer IIS</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9050"><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Instrumental Speech Distortion Assessment of Black Box Speech Enhancement Systems</span></span></td>
+			<td><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Kai Steinert, Siemens AG, Corporate Technology; Suhadi Suhadi, Braunschweig Technical University, Institute for Communications Technology; Tim Fingscheidt, Braunschweig Technical University; Martin Sch&ouml;nle, Siemens AG, Corporate Technology</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9054"><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Noise Suppression with Adaptive Adjustment of the Maximum Attenuation</span></span></td>
+			<td><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Mohamed Krini, Harman/Becker Automotive Systems; Gerhard Schmidt, Harman/Becker Automotive Systems</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9063"><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Low Distortion Decoupled Crosstalk Resistant Adaptive Noise Canceller</span></span></td>
+			<td><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Ludovick Lepauloux, Orange Labs; Pascal Scalart, IRISA/CAIRN; Claude Marro, Orange Labs</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9064"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Development and Evaluation of Pocket&ndash;Size Blind Source Separation Microphone</span></span></td>
+			<td><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Takashi Hiekata, Kobe Steel, Ltd; Y Ikeda, Kobe Steel, Ltd; T Yamashita, Kobe Steel, Ltd; T Morita, Kobe Steel, Ltd; R Zhang, Feng Co, Ltd; Y Mori, Nara Institute of Science and Technology; Hiroshi Saruwatari, Nara Institute of Science and Technology; Kiyohiro Shikano, Nara Institute of Science and Technology</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9067"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Wideband Echo Perception</span></span></td>
+			<td><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Silvia Poschen, HEAD Acoustics; Frank Kettler, HEAD Acoustics; Alexander Raake, Deutsche Telekom Laboratories; Sascha Spors, Deutsche Telekom Laboratories</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9073"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Nonlinear Active Noise Control Using VOLTERRA Filtering with a Variable Step&ndash;Size Gs&ndash;Pap Algorithm</span></span></td>
+			<td><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >J B Seo, Hanyang University; K J Kim, Hanyang University; D W Kim, Dasan Cousultants Co, Ltd; M O Oh, Dasan Cousultants Co, Ltd; W H Cho, Dasan Cousultants Co, Ltd; H K Lee, Dasan Cousultants Co, Ltd; W Y Kim, Hanyang University; Sang Won Nam, Hanynag University</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9075"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Particle Filter Based Soft&ndash;Mask Estimation for Missing Feature Reconstruction</span></span></td>
+			<td><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Friedrich Faubel, Saarland University; Humza Raja, Saarland University; John McDonough, Saarland University; Dietrich Klakow, Saarland University</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9076"><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >New Architecture Combining Blind Signal Extraction and Modified Spectral Subtraction for Suppression of Background Noise</span></span></td>
+			<td><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Jani Even, Nara Institute of Science and Technology; Hiroshi Saruwatari, Nara Institute of Science and Technology; Kiyohiro Shikano, Nara Institute of Science and Technology</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9077"><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Performance Improvement of Higher&ndash;Order ICA Using Learning Period Detection Based on Closed&ndash;Form Second&ndash;Order ICA and Kurtosis</span></span></td>
+			<td><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Yuuki Fujihara, Nara Institute of Science and Technology; Yu Takahashi, Nara Institute of Science and Technology; Shigeki Miyabe, Nara Institute of Science and Technology; Hiroshi Saruwatari, Nara Institute of Science and Technology; Kiyohiro Shikano, Nara Institute of Science and Technology; Akira Tanaka, Hokkaido University</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9079"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >A Study on Blind Source Separation for Preprocessing of an Acoustic Echo Canceller</span></span></td>
+			<td><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Yoshihiro Sakai, University of Electro&ndash;Communications; Wataru Mitsuhashi, University of Electro&ndash;Communications</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9080"><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Optimization Scheme of Spectral Subtraction Based on Musical Noise Assessment via Higher&ndash;Order Statistics</span></span></td>
+			<td><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Yoshihisa Uemura, Nara Institute of Science and Technology; Yu Takahashi, Nara Institute of Science and Technology; Hiroshi Saruwatari, Nara Institute of Science and Technology; Kiyohiro Shikano, Nara Institute of Science and Technology; Kazunobu Kondo, YAMAHA Corp</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9084"><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Analytical Solution of Nonlinear Microphone Array Based on Complementary Beamforming</span></span></td>
+			<td><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Shigeki Miyabe, Nara Institute of Science and Technology; Biing&ndash;Hwang Juang, Georgia Institute of Technology; Hiroshi Saruwatari, Nara Institute of Science and Technology; Kiyohiro Shikano, Nara Institute of Science and Technology</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9085"><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Frequency&ndash;Domain Blind Source Separation with Permutation Control</span></span></td>
+			<td><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Peng Xie, Missouri University of Science and Technology; Steven Grant, Missouri University of Science and Technology</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9086"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Use of Decorrelation Procedure for Source and Echo Suppression</span></span></td>
+			<td><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Ted Wada, Georgia Institute of Technology; Shigeki Miyabe, Nara Institute of Science and Technology; Biing&ndash;Hwang Juang, Georgia Institute of Technology</span></td>
+		</tr>
+		<tr>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank"  href="http://www.epapers.org/iwaenc2008/ESR/paper_details.php?PHPSESSID=e1e34237f8d72599afb14a5a8e0e992f&paper_id=9087"><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Data Driven Beamformer Design for Binaural Headset</span></span></td>
+			<td><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Ivan Tashev, Microsoft Corporation; Michael Seltzer, Microsoft Corporation</span></td>
+		</tr>
+		<tr>
+		  <td colspan="2"><strong><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Final Panel and Closing Remarks , 16:30&ndash;18:30</span></strong></td>
+	  </tr>
+	</table>
+	<h6><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >2008 IWAENC &bull; 14&ndash;17 September 2008  &bull; Seattle, Washington USA</span>

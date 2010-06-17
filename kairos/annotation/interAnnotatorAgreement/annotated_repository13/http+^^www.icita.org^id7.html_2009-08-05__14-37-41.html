@@ -1,0 +1,545 @@
+<html>
+   <head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/4/annotation/annotated_repository/http+^^www.icita.org^id7.html_2009-08-05__14-37-41.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/4/annotation/annotated_repository/http+^^www.icita.org^id7.html_2009-08-05__14-37-41.yaml created on Thu Aug 13 13:57:07 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+      <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+   
+      <title>Link to Past ICITA Events</title>
+      <META http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+      <META http-equiv="Expires" content="0">
+      <META name="generator" content="Trellix Site Builder">
+      <META name="TRELLIX_BUILDER_VER" content="1.0"><META name="TRELLIX_OPEN_SITE_COMMAND" content="http://sitebuilder.myregisteredsite.com:80SiteBuilderServlet?fUrl=f_error.html&sUrl=f_edit_page.html&Command=OpenSite&FileName=894986885482191627/site.xml"></META>
+      <!--base href="http://www.icita.org/"-->
+      <!--/base--><script language="Javascript"><!--
+		document.isTrellix = 1;
+//						--></script></HEAD>
+   <body onload="on_load()" onkeyup="on_key_up(event)" leftmargin="0" topmargin="0" marginwidth="0" marginheight="0" bgcolor="ffffcc" background="http://webhosting.web.com/imagelib/sitebuilder/layout/spacer.gif" link="#006600" vlink="#009900" alink="#006600"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+      <table border="0" cellspacing="0" cellpadding="0">
+         <tr valign="top">
+            <td width="760"><img onmousedown="imd(this)" src="http://webhosting.web.com/imagelib/sitebuilder/layout/spacer.gif" width="760" height="15" alt=""></td>
+         </tr>
+      </table>
+      <table cellpadding="0" cellspacing="0" border="0">
+         <tr valign="top">
+            <td width="200" align="center"><img onmousedown="imd(this)" src="sitebuildercontent/sitebuilderpictures/banner.JPG" border="0" alt="" width="200"><img onmousedown="imd(this)" src="http://webhosting.web.com/imagelib/sitebuilder/layout/spacer.gif" width="200" height="1" alt=""></td>
+            <td width="7"><img onmousedown="imd(this)" src="http://webhosting.web.com/imagelib/sitebuilder/layout/spacer.gif" width="7" height="10" alt=""></td>
+            <td width="2"><img onmousedown="imd(this)" src="http://webhosting.web.com/imagelib/sitebuilder/layout/spacer.gif" width="2" height="1" alt=""></td>
+            <td width="7"><img onmousedown="imd(this)" src="http://webhosting.web.com/imagelib/sitebuilder/layout/spacer.gif" width="7" height="10" alt=""></td>
+            <td width="553">
+               <table cellpadding="5" cellspacing="0" border="0">
+                  <tr valign="top">
+                     <td width="542">
+                        <table cellpadding="0" cellspacing="0" border="0">
+                           <tr>
+                              <td width="541" colspan="2">
+                                 <p><font face="Book Antiqua,times new roman,serif" size="5" color="000099"><b><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >The 6th International Conference on Information Technology and Applications</span></b></font></p>
+                              </td>
+                           </tr>
+                           <tr>
+                              <td width="541" colspan="2"><img onmousedown="imd(this)" src="http://webhosting.web.com/imagelib/sitebuilder/layout/spacer.gif" height="3" width="1" alt=""></td>
+                           </tr>
+                           <tr>
+                              <td width="541" colspan="2">
+                                 <p align="left"><font face="Verdana,Arial,Helvetica,sans-serif" size="4" color="ff6600"><b><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Link to Past ICITA Events</span></b></font></p>
+                              </td>
+                           </tr>
+                           <tr>
+                              <td width="541" colspan="2"><img onmousedown="imd(this)" src="http://webhosting.web.com/imagelib/sitebuilder/layout/spacer.gif" height="3" width="1" alt=""></td>
+                           </tr>
+                           <tr>
+                              <td>
+                                 <table cellpadding="0" cellspacing="0" border="0">
+                                    <tr>
+                                       <td></td>
+                                    </tr>
+                                    <tr>
+                                       <td><img onmousedown="imd(this)" src="http://webhosting.web.com/imagelib/sitebuilder/layout/spacer.gif" height="5" width="1" alt=""></td>
+                                    </tr>
+                                    <tr>
+                                       <td>
+                                          <!--navbar Type="horiz" uses-text="Y" face="Verdana,Arial,Helvetica,sans-serif" size="2" color="006600" style="0"--><font face="Verdana,Arial,Helvetica,sans-serif" size="2" color="006600"><span onclick="return false" style="text-decoration:underline; color:blue" class="NavBar" href="index.html"><font color="006600"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></font></span></font><font color="006600"> <span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </font><font face="Verdana,Arial,Helvetica,sans-serif" size="2" color="006600"><span onclick="return false" style="text-decoration:underline; color:blue" class="NavBar" href="id1.html"><font color="006600"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></font></span></font><font color="006600"> <span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </font><font face="Verdana,Arial,Helvetica,sans-serif" size="2" color="006600"><span onclick="return false" style="text-decoration:underline; color:blue" class="NavBar" href="id6.html"><font color="006600"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></font></span></font><font color="006600"> <span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </font><font face="Verdana,Arial,Helvetica,sans-serif" size="2" color="006600"><span onclick="return false" style="text-decoration:underline; color:blue" class="NavBar" href="id5.html"><font color="006600"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Conference Committee</span></font></span></font><font color="006600"> <span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </font><font face="Verdana,Arial,Helvetica,sans-serif" size="2" color="006600"><span onclick="return false" style="text-decoration:underline; color:blue" class="NavBar" href="id11.html"><font color="006600"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Technical Programme</span></font></span></font><font color="006600"> <span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </font><font face="Verdana,Arial,Helvetica,sans-serif" size="2" color="006600"><span onclick="return false" style="text-decoration:underline; color:blue" class="NavBar" href="id4.html"><font color="006600"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Conference Venue</span></font></span></font><font color="006600"> <span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </font><font face="Verdana,Arial,Helvetica,sans-serif" size="2" color="006600"><span onclick="return false" style="text-decoration:underline; color:blue" class="NavBar" href="id2.html"><font color="006600"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Conference Registration</span></font></span></font><font color="006600"> <span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </font><font face="Verdana,Arial,Helvetica,sans-serif" size="2" color="006600"><span onclick="return false" style="text-decoration:underline; color:blue" class="NavBar" href="id10.html"><font color="006600"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Visa Information</span></font></span></font><font color="006600"> <span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </font><font face="Verdana,Arial,Helvetica,sans-serif" size="2" color="006600"><span onclick="return false" style="text-decoration:underline; color:blue" class="NavBar" href="id8.html"><font color="006600"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Hotel Accommodation</span></font></span></font><font color="006600"> <span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </font><font face="Verdana,Arial,Helvetica,sans-serif" size="2" color="006600"><span onclick="return false" style="text-decoration:underline; color:blue" class="NavBar" href="id7.html" style="text-decoration: none;"><font color="006600"><b><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Link to past ICITA events</span></b></font></span></font><font color="006600"> <span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </font><font face="Verdana,Arial,Helvetica,sans-serif" size="2" color="006600"><span onclick="return false" style="text-decoration:underline; color:blue" class="NavBar" href="id3.html"><font color="006600"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Contact ICITA</span></font></span></font>
+                                          <!--/navbar-->
+                                       </td>
+                                    </tr>
+                                 </table>
+                              </td>
+                           </tr>
+                           <tr>
+                              <td width="541" colspan="2"><img onmousedown="imd(this)" src="http://webhosting.web.com/imagelib/sitebuilder/layout/spacer.gif" height="12" width="1" alt=""></td>
+                           </tr>
+                           <tr>
+                              <td width="541" colspan="2">
+                                 <!--area Type="subhead" face="Verdana,Arial,Helvetica,sans-serif" size="2" color="000000" style="1" password_protection="basic"-->
+                                 <!--/area Type="subhead"-->
+                              </td>
+                           </tr>
+                        </table>
+                     </td>
+                  </tr>
+                  <tr valign="top">
+                     <td width="542" colspan="2">
+                        <table cellpadding="3" cellspacing="0" border="0">
+                           <tr>
+                              <td width="535">
+                                 <!--area Type="main" face="Verdana,Arial,Helvetica,sans-serif" size="2" color="000000" style="0" password_protection="basic"-->
+                                 
+                                 
+                                 <div><font face="Verdana,Arial,Helvetica,sans-serif" size="2" color="000000"><div><font face="times new roman,times" size="4"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >The&nbsp;web link to ICITA 2008&nbsp;conference information can be found&nbsp;</span></font><span onclick="return false" style="text-decoration:underline; color:blue" href="http://icita2009.webs.com/"><font  color="000000"><font face="times new roman,times" size="4" color="#0000ff"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >here</span></font></font></span><font face="times new roman,times" size="4"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >.</span></font></div><div><font face="Times New Roman" size="4"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></font></div><div><font
+                                    face="Times New Roman" size="4"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >The&nbsp;web link to ICITA 2007 conference information can be found</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://210.46.97.51/show_call4papers.asp"><font  color="000000"><font color="#0000ff"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >here</span></font><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >.</span></font></span></font></div><div><font face="Times New Roman" size="4"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></font></div><div><font face="Times New Roman" size="4"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >The&nbsp;web
+                                    link to ICITA 2005 conference information can be found</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://attend.it.uts.edu.au/icita05/papers.htm"><font  color="000000"><font color="#0000ff"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >here</span></font><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >.</span></font></span></font><!--"''"--></div></font>
+                                 </div>
+                                 <!--/area Type="main"-->
+                              </td>
+                           </tr>
+                           <tr>
+                              <td><img onmousedown="imd(this)" src="http://webhosting.web.com/imagelib/sitebuilder/layout/spacer.gif" width="1" height="10" alt=""></td>
+                           </tr>
+                           <tr>
+                              <td width="535" height="1"><img onmousedown="imd(this)" src="http://webhosting.web.com/imagelib/sitebuilder/layout/spacer.gif" width="1" height="1" alt=""></td>
+                           </tr>
+                           <tr>
+                              <td><img onmousedown="imd(this)" src="http://webhosting.web.com/imagelib/sitebuilder/layout/spacer.gif" width="1" height="5" alt=""></td>
+                           </tr>
+                           <tr>
+                              <td width="535">
+                                 <!--area Type="area_a" face="Verdana,Arial,Helvetica,sans-serif" size="2" color="000000" style="0" password_protection="basic"-->
+                                 
+                                 
+                                 <p><font face="Verdana,Arial,Helvetica,sans-serif" size="2" color="000000"><div><p><font face="times new roman,times" size="4" color="#000000"><strong><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >The following papers were selected from the ICITA
+                                    2008 conference proceedings and published in the special issues on the</span> <font color="#ff3300"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >International Journal of Information
+                                    Technology and Management</span></font><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >, and the</span> <font color="#ff3300"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >International Journal of Computer Applications in Technology</span></font><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >:</span></strong></font></p><p><!--StartFragment
+                                    --><font size="3"><font face="times new roman,times"><strong><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Modelling service levels in a call centre with an agent-based
+                                    model</span></strong><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br /><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Bruce Lewis, Ric. D. Herbert, William J. Chivers</span><br /><br /><strong><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >An Automated
+                                    Image Analysis Approach for Classification and Mapping of Woody Vegetation from Digital Aerial Photograph</span></strong><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span><br
+                                    /><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Xihua Yang, David Tien</span><br /><br /></font><font face="times new roman,times"><strong><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >A Library Catalogue System Using Soundex
+                                    Retrieval&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br /></strong><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Zhenghui Pan, Yan Zhang, Jiansheng Huang</span><br /><br /><strong><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >MidField
+                                    System: Configuration of Media Processing Modules for Multipoint Communication</span></strong><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br /><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Koji Hashimoto, Yoshitaka
+                                    Shibata</span><br /><br /></font><font face="times new roman,times"><strong><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >PANDA: A Virtual Breeding Environment for SMEs in the
+                                    ERP/CRM industry using a Service Oriented Approach&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br /></strong><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Ioannis Ignatiadis,
+                                    Katriou Stamatia-Anna, Adamantios Koumpis, Dimitrios Tektonidis</span><br /><br /></font><font face="times new roman,times"><strong><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >CSET
+                                    Automated Negotiation Model for Optimal Supply Chain Formation</span><br /></strong><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Yang Hang, Simon Fong, Zhuang Yan</span><br /><br /></font><font
+                                    face="times new roman,times"><strong><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Proactive Information Service through User Participation in Context-aware Application&nbsp;&nbsp;&nbsp;</span><br
+                                    /></strong><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Joonhee Kwon, Sungrim Kim</span><br /><br /></font><font face="times new roman,times"><strong><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Discriminant Based Analysis
+                                    of Unplanned 14 Days Readmission Patients of Hospital&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br /></strong><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Telung Pan,
+                                    Kwoting Fang, Yuchun Tsai</span><br /><br /></font><font face="times new roman,times"><strong><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Properties of Series Feature Aggregation
+                                    Schemes&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br /></strong><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Jun Zhang, Lei Ye</span><br /><br /></font><font face="times
+                                    new roman,times"><strong><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >A secure coverage area expansion scheme for public wireless LAN services&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br
+                                    /></strong><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Ryu Watanabe, Toshiaki Tanaka</span><br /><br /><strong><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Causal-effect structure transformation based on hierarchical representation
+                                    for biomedical sensing</span></strong><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br /><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Naoki Tsuchiya, Mitsuhiro Yoneda, Hiroshi Nakajima</span>
+                                    <br /><br /></font><font face="times new roman,times"><strong><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Design Strategy Selection of AV Remote UI Based on System Structure
+                                    and User Level&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br /></strong><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Takako Nonaka, Yuta Uesugi, Tomohiro Hase</span><br /><br /></font><font
+                                    face="times new roman,times"><strong><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Echo Cancellation in VoIP with Improved Least Square Lattice Method&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br
+                                    /></strong><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Supachai Tangwongsan, Ittipon Rassameeroj</span><br /><br /><strong><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Business Process Modelling in the context of SOA -
+                                    An empirical study of the acceptance between EPC and BPMN</span></strong><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span><br /><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Klaus Kruczynski</span><br /><br
+                                    /></font><font face="times new roman,times"><strong><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Behavioral equivalence for a graph rewriting model of concurrent programs&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br
+                                    /></strong><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Masaki Murakami</span><br /><br /></font><font face="times new roman,times"><strong><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Automatic tracking of impact fragments&nbsp;&nbsp;</span><br
+                                    /></strong><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Noriaki Asada, Naoto Miura, Hirohide Demura, Naru Hirata</span></font></font></p><p><font face="times new roman,times"
+                                    size="3"></font></p><p><!--StartFragment --><font size="3"><font face="times new roman,times"><strong><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Implementing an Agent
+                                    Based Auction Model on a Cluster of Re-used Workstations&nbsp;&nbsp;</span><br /></strong><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Timothy M. Lynar, Ric D. Herbert, William
+                                    J. Chivers</span><br /><br /><strong><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >An adaptive segmentation method using MRF model for suburban aerial images</span></strong><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br
+                                    /><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Mansuo Zhao, David Tien</span><br /><br /><strong><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Development of Power Facility Management Services using RFID/USN</span></strong><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br
+                                    /><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Young-Il Kim, Jae-Ju Song, Jin-Ho Shin, Bong-Jae Yi, Hoon Choi</span><br /><br /></font><font face="times new roman,times"><strong><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Joint
+                                    Source-Cryptographic-Channel Coding for Dependable Systems&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br /></strong><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Haruhiko
+                                    Kaneko, Eiji Fujiwara</span><br /><br /></font><font face="times new roman,times"><strong><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >An Ultrasonic Thickness and Wave Speed
+                                    Determination System Aided by Fuzzy Logic&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br /></strong><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Yutaka HATA, Syoji
+                                    KOBASHI, Seturo IMAWAKI</span><br /><br /></font><font face="times new roman,times"><strong><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Improvement of redundancy principle for
+                                    multimedia technical foreign-language learning&nbsp;&nbsp;</span><br /></strong><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Jin-Hua She, Hui Wang, Lifang Chen, Sumei Chen</span><br
+                                    /><br /></font><font face="times new roman,times"><strong><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Effect of Human Interaction on Fingerprint Matching Performance,
+                                    Image Quality, and Minutiae Count&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br /></strong><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Eric P. Kukula, Christine R. Blomeke,
+                                    Shimon K. Modi, Stephen J. Elliott</span><br /><br /></font><font face="times new roman,times"><strong><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Analysis and classification
+                                    of three-dimensional trunk shape of women by using the human body shape model&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br
+                                    /></strong><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Kensuke Nakamura, Takao Kurokawa</span><br /><br /></font><font face="times new roman,times"><strong><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >An evaluation of
+                                    interactive stacked bar charts&nbsp;</span><br /></strong><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Walt Abell, Jason Lee, Clare Churcher</span><br /><br /></font><font face="times
+                                    new roman,times"><strong><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Towards computer-human interaction in natural language&nbsp;&nbsp;</span><br /></strong><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Mare Koit, M. Koit,
+                                    O. Gerassimenko, R. Kasterpalu, A. R&#65533;&#65533;bis, K. Strandson</span><br /><br /></font><font face="times new roman,times"><strong><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Fractal
+                                    Terrain Generation for SIMD Architectures&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br /></strong><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Meghashyam Boyapati, John
+                                    R Rankin</span><br /><br /></font><font face="times new roman,times"><strong><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >A robust inverse kinematics algorithm for animating
+                                    a joint chain&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br /></strong><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >R. Mukundan</span></font></font></p><p><font size="+0"><font
+                                    face="times new roman,times"><font size="3"><strong><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Growth maximization and downside protection using power-log utility functions
+                                    for optimizing portfolios with derivatives&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><br /></strong><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Jivendra K. Kale</span><br
+                                    /><br /></font></font><font face="times new roman,times"><font size="3"><strong><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Differential Convolution for Medical Diagnosis&nbsp;&nbsp;</span><br
+                                    /></strong><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Charles R. Watson, Catherine A. Millis</span><br /><br /></font></font><font face="times new roman,times"><font size="3"><strong><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Search
+                                    in the Mood: the Information Filter Based on Ambiguous Queries&nbsp;&nbsp;&nbsp;</span><br /></strong><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Sayaka Akioka, Hideo Fukumori,
+                                    Yoichi Muraoka</span><br /></font></font><font face="times new roman,times"><br /><font size="3"><strong><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >A Pervasive Tele-health
+                                    System for continual and low intrusive monitoring using Peer-to-Peer Networks</span></strong><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;</span><br /><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Hanh Le, Nina
+                                    Schiff, Johan du Plessis, Doan Hoang</span><br /><br /></font></font><font face="times new roman,times"><font size="3"><strong><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Skin
+                                    diagnosis algorithm for analysis of skin images captured from a fingerprint sensor&nbsp;</span><br /></strong><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Hideyo Takeuchi, Masahiro
+                                    Hoguro, Tatsuki Yoshimine, Taizo Umezaki</span></font></font></font><!--"''"--></p></div></font>
+                                 </p>
+                                 <!--/area Type="area_a"-->
+                              </td>
+                           </tr>
+                        </table>
+                     </td>
+                  </tr>
+               </table>
+            </td>
+         </tr>
+      </table>
+      <table border="0" cellspacing="0" cellpadding="0">
+         <tr>
+            <td colspan="2"><img onmousedown="imd(this)" src="http://webhosting.web.com/imagelib/sitebuilder/layout/spacer.gif" width="10" height="20" alt=""></td>
+         </tr>
+         <tr valign="top">
+            <td width="10"><img onmousedown="imd(this)" src="http://webhosting.web.com/imagelib/sitebuilder/layout/spacer.gif" width="10" height="20" alt=""></td>
+            <td width="740">
+               <!--area Type="runner" face="Verdana,Arial,Helvetica,sans-serif" size="2" color="006600" style="0" password_protection="basic"-->
+               
+               
+               	
+               <!--area Type="footer" face="Verdana,Arial,Helvetica,sans-serif" size="2" color="006600" style="0" password_protection="basic"-->
+               <p align="right"><img onmousedown="imd(this)" alt="banner-7.JPG" border="" src="sitebuildercontent/sitebuilderpictures/banner-7.JPG" vspace="0" hspace="5"></p>
+               <p><font face="Verdana,Arial,Helvetica,sans-serif" size="2" color="006600"><div align="right"><strong><font color="#0000ff"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >(c) International Conference on Information Technology and Applications 2009</span>

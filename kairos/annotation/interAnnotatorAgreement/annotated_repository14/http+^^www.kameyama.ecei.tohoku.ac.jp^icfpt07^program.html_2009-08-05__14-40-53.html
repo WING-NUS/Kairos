@@ -1,0 +1,694 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<HTML>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/6/annotation/annotated_repository/http+^^www.kameyama.ecei.tohoku.ac.jp^icfpt07^program.html_2009-08-05__14-40-53.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/6/annotation/annotated_repository/http+^^www.kameyama.ecei.tohoku.ac.jp^icfpt07^program.html_2009-08-05__14-40-53.yaml created on Thu Aug 13 13:58:39 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html;charset=iso-8859-1">
+<META NAME="Author" CONTENT="Masanori Hariyama">
+<META NAME="Keyword" CONTENT="porgram">
+<META NAME="Description" CONTENT="Advanced Program">
+<META NAME="Generator" CONTENT="Dicre Sitehina">
+<TITLE>AdvancedProgram</TITLE>
+<LINK REL="stylesheet" TYPE="text/css" HREF="style/mono.css">
+</HEAD>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<DIV CLASS="htmlblock">
+<H1 CLASS="btitle"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >AdvancedProgram</span></H1>
+</DIV>
+<TABLE WIDTH="100%" BORDER="0" CELLPADDING="5" CELLSPACING="0" CLASS="main" ALIGN="center">
+<TR>
+<TD ALIGN="left" VALIGN="top" CLASS="left">
+<DIV CLASS="menublock">
+<H4 CLASS="btitle"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >FPT07 Links:</span> </H4>
+<UL CLASS="menu">
+<LI CLASS="linkitem"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="index.html"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >ICFPT07 Home</span></span></LI>
+<LI CLASS="linkitem"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="Registration.html" TARGET="_blank"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></LI>
+<LI CLASS="linkitem"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="TravelInformation.html"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Travel Information</span></span></LI>
+<LI CLASS="linkitem"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="program.html"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >AdvancedProgram</span></span></LI>
+<LI CLASS="linkitem"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="https://entry.jtb.ne.jp/me/registrye/registrye.asp?id=0922" TARGET="_blank"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Hotel Reservation</span></span></LI>
+<LI CLASS="linkitem"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="PaperSubmissionGuideLine.html"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Guideline for Camera-Ready Paper</span></span></LI>
+<LI CLASS="linkitem"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="http://www.softconf.com/start/ICFPT07/final.html"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Paper Submission</span></span></LI>
+<LI CLASS="linkitem"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="CFP.html"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span></LI>
+<LI CLASS="linkitem"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="Committee.html"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Committee</span></span></LI>
+</UL>
+</DIV>
+
+</TD>
+
+<TD ALIGN="left" VALIGN="top" CLASS="center">
+<DIV CLASS="menublock2">
+<span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >[</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="program.html#block11"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >12/12(1st day)</span></span> <span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >|</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" HREF="program.html#block12"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >12/13(2nd day)</span></span> <span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >|</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" HREF="program.html#block13"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >12/14(Fri.) 3rd day</span></span> <span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >|</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" HREF="program.html#block14"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Poster session detail</span></span> <span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >]</span>
+</DIV>
+
+<DIV CLASS="textblock" ID="block10">
+<H3 CLASS="btitle"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >12/11(Tue.) Pre-conference</span></H3>
+<H4><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >12:30-15:30 Tutorial 1	Chair: M.Taiji (Riken)</span></H4>
+<span onclick="return false" style="text-decoration:underline; color:blue" HREF="presentationfiles/0HPC.pdf"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >High-Performance Reconfigurable Computing</span></span><BR>
+<span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Tarek El-Ghazawi (George Washington Univ.)</span><BR>
+<BR>
+<H4><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >coffee break</span></H4>
+<BR>
+<H4><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >15:45-17:45 Tutorial 2  Chair: H.Amano (Keio Univ.)</span></H4>
+<span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Dynamically reconfigurable processors in Japan</span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" HREF="presentationfiles/1toshiba.pdf"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >1. A dynamically reconfigurable architecture for stream processing</span></span><BR>
+<span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Takashi Yoshikawa (Toshiba Corporation)</span><BR>
+<BR>
+<span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >2. Trade off considerations of the DAPDNA devices over</span> <BR>
+<span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >the last 5 years and a look into their future.</span><BR>
+<span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Tomoyoshi Sato (IPFlex Inc.)</span><BR>
+<BR>
+<span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >3.FE-GA: A Dynamically Reconfigurable Processor with High</span><BR>
+<span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Performance and Low Power Consumption</span><BR>
+<span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Makoto Satoh (Hitachi, Ltd.)</span><BR>
+<BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" HREF="presentationfiles/4ICFPT07_20071211WebUpSANYOOzone.pdf"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >4.Reconfigurable Architecture for Car Tuners</span></span><BR>
+<span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Makoto Ozone (SANYO Electric Co., Ltd.)</span><BR>
+<BR>
+<span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >5.MX1: Multi matrix-processor core architecture and</span><BR>
+<span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >real-time image processing application</span><BR>
+<span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Katsuya Mizumoto (Renesas Technology Corp.)</span><BR>
+<BR>
+<H4><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >18:00 Reception</span></H4>
+</DIV>
+
+<DIV CLASS="textblock" ID="block11">
+<H3 CLASS="btitle"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >12/12(Wed.) 1st day</span></H3>
+<H4><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >8:30-8:45 Welcome Address: T.Nakamura (Tohoku Univ.)</span></H4>
+<BR>
+<H4><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >8:45-9:45 Key note  Chair: H.Yasuura (Kyushu Univ.)</span></H4>
+<span onclick="return false" style="text-decoration:underline; color:blue" HREF="presentationfiles/fpt2007_keynote.pps"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Power and the Future FPGA Architectures</span></span><BR>
+<span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Sinan Kaptanoglu (Actel Corporation)</span><BR>
+<BR>
+<H4><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >9:45-10:45 Poster 1 & Coffee</span></H4>
+<BR>
+<H4><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >10:45-12:15 Session 1: Tools I  Chair:	W.-K. Mak (National Tsing Hua Univ.)</span></H4>
+<span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Memory Footprint Reduction For FPGA Routing Algorithms</span><BR>
+<span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Scott Chin and Steve Wilton</span><BR>
+<BR>
+<span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >SOC implementation of wave-pipelined circuits</span><BR>
+<span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Seetharaman Gopalakrishnan and Venkataramani Balasubramanian</span><BR>
+<BR>
+<span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Self-characterization of Combinatorial Circuit Delays in FPGAs</span><BR>
+<span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Justin S. J. Wong, Pete Sedcole and Peter Y. K. Cheung</span><BR>
+<BR>
+<H4><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >12:15-13:15 Lunch</span></H4>
+<H4><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >13:15-15:15 Session 2: Applications I Chair: P.Leong (Chinese Univ. of Hong Kong)</span></H4>
+<span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >FPGA Cluster Computing in the ETA Radio Telescope</span><BR>
+<span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Cameron Patterson, Brian Martin, Steve Ellingson,</span> <BR>
+<span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >John Simonetti and Sean Cutchin</span><BR>
+<BR>
+<span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >FPGA-based Accelerator Design for RankBoost in Web Search Engines</span><BR>
+<span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Ning-Yi XU, Xiong-Fei CAI, Rui GAO, Lei ZHANG and Feng-Hsiung HSU</span><BR>
+<BR>
+<span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Asymmetric Multi-Processor Architecture for Reconfigurable System-on-Chip and Operating</span><BR>
+<span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >System Abstractions</span><BR>
+<span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Xin Xie, John Williams and Neil Bergmann</span><BR>
+<BR>
+<span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Design and Implementation of an FPGA Architecture for High-Speed Network Feature</span><BR>
+<span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Extraction</span><BR>
+<span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Sailesh Pati, Ramanathan Narayanan, Gokhan Memik, Alok Choudhary and Joseph Zambreno</span><BR>
+<BR>
+<H4><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >15:15-16:15 Poster 2 & Coffee</span></H4>
+<H4><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >16:15-18:15 Session 3: Architecture Chair: P.Cheung (Imperial College London)</span></H4>
+<span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Architecting Hard Crossbars on FPGAs and Increasing their Area-Efficiency with Shadow Clusters</span><BR>
+<span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Peter Jamieson and Jonathan Rose</span><BR>
+<BR>
+<span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >A Method and FPGA Architecture for Real-Time Polymorphic Reconfiguration</span><BR>
+<span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Jason Paul, Samuel Stone Yong Kim and Robert Bennington</span><BR>
+<BR>
+<span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Reconfigurable Functional Units for Scientific Superscalar Processors</span><BR>
+<span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Jonathan Evans, Kyle Rupnow and Katherine Compton</span><BR>
+<BR>
+<span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >A COARSE GRAINED RECONFIGURABLE ARCHITECTURE FOR VARIABLE BLOCK SIZE MOTION ESTIMATION</span><BR>
+<span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Ruchika Verma and Ali Akoglu</span><BR>
+</DIV>
+
+<DIV CLASS="textblock" ID="block12">
+<H3 CLASS="btitle"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >12/13(Thu.) 2nd day</span></H3>
+<H4><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >8:45-9:30 Invited Speech  Chair: M.Fujita (Univ. of Tokyo)</span></H4>
+<span onclick="return false" style="text-decoration:underline; color:blue" HREF="presentationfiles/Hiraki.pdf"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >GAPE-DR Project: a combination of peta-scale computing and high-speed networking</span></span><BR>
+<span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Kei Hiraki (Univ. of Tokyo)</span><BR>
+<BR>
+<H4><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >9:30-10:30 Poster 3 & Coffee</span></H4>
+<H4><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >10:30-12:30 Session 4: Tools II 	O.Diessel (Univ. of New South Wales)</span></H4>
+<span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Instrumented Multi-Stage Word-Length Optimization</span><BR>
+<span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >William Osborne, Jose Coutinho, Ray Cheung, Wayne Luk and Oskar Mencer</span><BR>
+<BR>
+<span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >A Domain Specific Language for Reconfigurable Path-based Monte Carlo Simulations</span><BR>
+<span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >David Barrie Thomas and Wayne Luk</span><BR>
+<BR>
+<span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Fused-Arithmetic Unit Generation for Reconfigurable Devices using Common Subgraph</span><BR>
+<span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Extraction</span><BR>
+<span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Alastair Smith, George Constantinides and Peter Cheung</span><BR>
+<BR>
+<span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Unifying FPGA Hardware Development</span><BR>
+<span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Jacob Alexis Bower, Wei Ning Cho and Wayne Luk</span><BR>
+<BR>
+<H4><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >12:30-13:30 Lunch</span></H4>
+<BR>
+<H4><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >13:30-15:30 Session 5: Applications II 	J.Rose (Univ. of Toronto)</span></H4>
+<span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Applying Cuckoo Hashing for FPGA-based Pattern Matching in NIDS/NIPS</span><BR>
+<span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Tran Ngoc Thinh, Surin Kittitornkun and Shigenori Tomiyama</span><BR>
+<BR>
+<span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >HIGH PERFORMANCE HARDWARE IMPLEMENTATION OF SPIKEPROP LEARNING: POTENTIAL AND TRADEOFFS</span><BR>
+<span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Marco Aurelio Nuno-Maganda, Miguel Arias-Estrada and Cesar Torres-Huitzil</span><BR>
+<BR>
+<span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >The Image Forest Transform Architecture</span><BR>
+<span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >F.A Nabio Augusto Cappabianco, Guido Ara Nzjo and Alexandre Falc Nco</span><BR>
+<BR>
+<span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >A HIGHLY PARALLEL FPGA BASED IEEE-754 COMPLIANT DOUBLE-PRECISION BINARY FLOATING-POINT</span><BR>
+<span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >MULTIPLICATION ALGORITHM</span><BR>
+<span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Sandeep Venishetti and Ali Akoglu</span><BR>
+<BR>
+<H4><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >*15:30-16:30 Poster 4 & Coffee</span></H4>
+<H4><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >16:30-18:00 Session 6: Memory & IP Protection	G.Constantinides (Imperial College London)</span></H4>
+<span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >TAS-MRAM based Non-volatile FPGA logic circuit</span><BR>
+<span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Weisheng ZHAO, Eric BELHAIRE, Bernard DIENY, Guillaume PRENAT and Claude CHAPPERT</span><BR>
+<BR>
+<span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Bitstream Decompression for High Speed FPGA Configuration from Slow Memories</span><BR>
+<span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Dirk Koch, Christian Beckhoff and Juergen Teich</span><BR>
+<BR>
+<span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Dynamic Intellectual Property Protection for Reconfigurable Devices</span><BR>
+<span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Tim G.A Nlneysu, Bodo M Nvller and Christof Paar</span><BR>
+<BR>
+<H4><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Banquet</span></H4>
+</DIV>
+
+<DIV CLASS="textblock" ID="block13">
+<H3 CLASS="btitle"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >12/14(Fri.) 3rd day</span></H3>
+<H4><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >8:45-10:15 Special Session:</span></H4>
+<span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >What is Exciting about FPT ?</span> <BR>
+<span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Moderator:  Wayne Luk (Imperial College London)</span><BR>
+<span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Peter Cheung (Imerial College London)</span><BR>
+<span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Brent Nelson (Brigham Young Univ.)</span><BR>
+<span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Jonathan Rose (Univ. of Tronto)</span><BR>
+<span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Philip Leong (Chinese University of Hong Kong)</span><BR>
+<BR>
+<H4><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >10:15-10:30 Coffee break</span></H4>
+<H4><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >10:30-12:30 Session 7: Applications III  T.Hironaka (Hiroshima City Univ.)</span></H4>
+<span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Hardware/Software Co-design of a General-Purpose Computation Platform in Particle Physics</span><BR>
+<span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Ming Liu, Wolfgang Kuehn, Zhonghai Lu, Axel Jantsch, Shuo Yang, Tiago Perez and</span><BR>
+<span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Zhenan Liu</span><BR>
+<BR>
+<span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Efficient and High-Throughput Implementations of AES-GCM on FPGAs</span><BR>
+<span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Gang Zhou, Harald Michalik and Lasloz Hinsenkamp</span><BR>
+<BR>
+<span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >A Framework for Implementing a Network-Based Stochastic Biochemical Simulator on an FPGA</span><BR>
+<span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Masato Yoshimi, Yuri Nishikawa, Toshinori Kojima, Yasunori Osana, Akira Funahashi,</span><BR>
+<span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Noriko Hiroi, Yuichiro Shibata, Hideki Yamada, Hiroaki Kitano and Hideharu Amano</span><BR>
+<BR>
+<span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >An Approach for Applying Large Filters on Large Images using FPGA</span><BR>
+<span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Shingo Kawada and Tsutomu Maruyama</span><BR>
+<BR>
+<H4><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >12:30-13:20 Lunch</span></H4>
+<H4><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >13:20-14:50 Session 8: Tools III S.Kimura (Waseda Univ.)</span></H4>
+<span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Run-Time Management of Reconfigurable Hardware Tasks using Embedded Linux</span><BR>
+<span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Krzysztof Kobsciuszkiewicz, Fearghal Morgan and Krzysztof Kepa</span><BR>
+<BR>
+<span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Implementations of Reconfigurable Logic Arrays on FPGAs</span><BR>
+<span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Tsutomu Sasao and Hiroki Nakahara</span><BR>
+<BR>
+<span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Net Length Based Routability Driven Packing</span><BR>
+<span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Audip Pandit and Ali Akoglu</span><BR>
+<BR>
+<H4><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >14:50-15:00 Closing</span></H4>
+</DIV>
+
+<DIV CLASS="textblock" ID="block14">
+<H3 CLASS="btitle"><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Poster session details</span></H3>
+<span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session I</span><BR>
+<span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >P1-1: FPGA-based Streaming Computation for Lattice Boltzmann Method</span><BR>
+<span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Kentaro Sano, Oliver Pell, Wayne Luk and Satoru Yamamoto</span><BR>
+<BR>
+<span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >P1-2: Reconfigurable Hardware Module Sequencer - A Tradeoff Between Networked and Data Flow Architectures</span><BR>
+<span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Kai-Jung Shih, Chin-Chieh Hung, and Pao-Ann Hsiung</span><BR>
+<BR>
+<span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >P1-3: An Embedded Reconfigurable Logic Core based on Variable Grain Logic Cell Architecture</span><BR>
+<span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Yoshiaki Satou, Motoki Amagasaki, Hiroshi Miura, Kazunori Matsuyama, Ryoichi Yamaguchi, Masahiro Iida and Toshinori Sueyoshi</span><BR>
+<BR>
+<span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >P1-4: Improving bounds for FPGA Logic Minimization</span><BR>
+<span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Tim Todman, Haohan Fu, Oskar Mencer and Wayne Luk</span><BR>
+<BR>
+<span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >P1-5: Floating-Point Matrix Multiplication in a Polymorphic Processor</span><BR>
+<span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Georgi K. Kuzmanov and Wouter M. van Oijen</span><BR>
+<BR>
+<span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >P1-6: A Secure Digital Content Delivery System Based on Partially Reconfigurable Hardware</span><BR>
+<span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Yohei Hori, Hiroyuki Yokoyama, Hirofumi Sakane and Kenji Toda</span><BR>
+<BR>
+<span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >P1-7: Productivity Of High-Level Languages On Reconfigurable Computers: An HPC Perspective</span><BR>
+<span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Esam El-Araby, Preetham Nosum and Tarek El-Ghazawi</span><BR>
+<BR>
+<span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >P1-8: A Systolic Agorithm for the Quadratic Assignment Problem and its FPGA Implementation</span><BR>
+<span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Yoshihiro Kimura, Shin'ichi Wakabayashi and Shinobu Nagayama</span><BR>
+<BR>
+<span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >P1-9: Reconfiguration performance analysis of a dynamic optically reconfigurable gate array architecture</span><BR>
+<span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Daisaku Seto and Minoru Watanabe</span><BR>
+<BR>
+<BR>
+<span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session II</span><BR>
+<BR>
+<span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >P2-1: Efficient Mesh of Tree Interconnect for FPGA Architecture</span><BR>
+<span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >ZIED MARRAKCHI, HAYDER MRABET, CHRISTIAN MASSON and HABIB MEHREZ</span><BR>
+<BR>
+<span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >P2-2: Overwrite Configuration Technique in Multicast Configuration Scheme for Dynamically Reconfigurable Processor Arrays</span><BR>
+<span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Satoshi Tsutsumi, Vasutan Tunbunheng, Yohei Hasegawa, Adepu Parimala, Takuro Nakamura, Takashi Nishimura and Hideharu Amano</span><BR>
+<BR>
+<span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >P2-3: AN FPGA Based Traveling-Wave Fault Location System</span><BR>
+<span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >David P Coggins, David W P Thomas, Barrie R Hayes-Gill and Yiqun Zhu</span><BR>
+<BR>
+<span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >P2-4: NICFlex: A Functional Verification Accelerator for An RTL NIC Design</span><BR>
+<span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Xianyang Jiang, Xiaomin Li, Yue Tian and Kai Wang</span><BR>
+<BR>
+<span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >P2-5: Power Configurable Block Array Connected in Series as First Prototype Flex Power FPGA Chip</span><BR>
+<span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Masakazu Hioki, Takashi Kawanami, Yohei Matsumoto, Toshiyuki Tsutsumi, Tadashi Nakagawa, Toshihiro Sekigawa and Hanpei Koike</span><BR>
+<BR>
+<span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >P2-6: Optimal Buffering of FPGA Interconnect for Expected Delay optimization</span><BR>
+<span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Yi-Ru He and Wai-Kei Mak</span><BR>
+<BR>
+<span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >P2-7: FPGA-Based 3-D engine for high-speed 3-D measurement based on light section method</span><BR>
+<span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Yachide Yusuke, Makoto Ikeda and Kunihiro Asada</span><BR>
+<BR>
+<span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >P2-8: A 62.5 ns holographic reconfiguration for an optically differential reconfigurable gate array</span><BR>
+<span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Mao Nakajima and Minoru Watanabe</span><BR>
+<BR>
+<span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >P2-9: Recursive Variable Expansion: A Loop Transformation for Reconfigurable Systems</span><BR>
+<span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Zubair Nawaz, Ozana Silvia Dragomir, Thomas Marconi, Elena Moscu Panainte, Koen Bertels and Stamatis Vassiliadis</span><BR>
+<BR>
+<BR>
+<span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session III</span><BR>
+<span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >P3-1: A Rapid Prototyping of Real-Time Pattern Generator for Step-and-Scan Lithography Using Digital Micromirror Device</span><BR>
+<span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Naoto Miyamoto, Masahiko Shimakage, Tatsuo Morimoto, Kazuya Kadota, Shigetoshi Sugawa and Tadahiro Ohmi</span><BR>
+<BR>
+<span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >P3-2: High Performance Software-Hardware Network Intrusion Detection System</span><BR>
+<span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Ryan Proudfoot, Kenneth B. Kent, Eric Aubanel and Nan Chen</span><BR>
+<BR>
+<span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >P3-3: A Domain-Specific Dynamically Reconfigurable Hardware Platform for Wireless Sensor Networks</span><BR>
+<span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Heiko Hinkelmann, Peter Zipf and Manfred Glesner</span><BR>
+<BR>
+<span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >P3-4: FPGA implementation of a statically reconfigurable Java environment for embedded systems</span><BR>
+<span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Shinsuke Nino, Takayuki Mori, YoungHun Ko, Yuichiro Shibata and Kiyoshi Oguri</span><BR>
+<BR>
+<span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >P3-5: A Dynamically Reconfigurable Architecture Combining Pixel-Level SIMD and Operation-Pipeline Modes for High Frame Rate Visual Processing</span><BR>
+<span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Nao Iwata, Shingo Kagami and Koichi Hashimoto</span><BR>
+<BR>
+<span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >P3-6: A BALANCED VECTOR-QUANTIZATION PROCESSOR ELIMINATING REDUNDANT CALCULATION FOR REAL-TIME MOTION PICTURE COMPRESSION</span><BR>
+<span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Masahiro Konda, Takahiro Nakayama, Naoto Miyamoto and Tadahiro Ohmi</span><BR>
+<BR>
+<span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >P3-7: Real-time Segmentation of Color Images based on K-Means Clustering on FPGA</span><BR>
+<span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Takashi Saegusa and Tsutomu Maruyama</span><BR>
+<BR>
+<span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >P3-8: A PORTABLE MEMORY ACCESS FRAMEWORK FOR HIGH-PERFORMANCE RECONFIGURABLE COMPUTERS</span><BR>
+<span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Miaoqing Huang, Ivan Gonzalez and Tarek El-Ghazawi</span><BR>
+<BR>
+<span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >P3-9: The Spiral Search: A Linear Complexity Algorithm for the Generation of Convex Multiple Input Multiple Output Instruction-Set Extensions</span><BR>
+<span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Carlo Galuzzi, Koen Bertels and Stamatis Vassiliadis</span><BR>
+<BR>
+<span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >P3-10: A Case for Soft Vector Processors in FPGAs</span><BR>
+<span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Jason Yu and Guy Lemieux</span><BR>
+<BR>
+<span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >P3-11: A Portable Co-Verification System Which Generates Transactor and Testbench Automatically</span><BR>
+<span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Takahito Nakajima, Shigeru Namiki, Shuhei Kinoshita and Naohiko Shimizu</span><BR>
+<BR>
+<span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session IV</span><BR>
+<span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >P4-1: Multiply Accumulate Unit Optimised for Fast Dot-Product Evaluation</span><BR>
+<span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >William Kamp and Andrew Bainbridge-Smith</span><BR>
+<BR>
+<span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >P4-2: A Novel Network Architecture Support for Fast Reconfiguration</span><BR>
+<span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Jenny Yi-Chun Kuo, Hossam El Gindy and Anderson Kuei-An Ku</span><BR>
+<BR>
+<span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >P4-3: A Mapping method for Multi-processing Execution on Dynamically Reconfigurable Processors</span><BR>
+<span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Vu Manh Tuan, Yohei Hasegawa and Hideharu Amano</span><BR>
+<BR>
+<span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >P4-4: A Programmable Load/Store Unit on C-based Hardware Design for FPGA</span><BR>
+<span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Akira Yamawaki and Masahiko Iwane</span><BR>
+<BR>
+<span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >P4-5: An efficient FPGA-based implementation of Pollard's (</span><SPAN class=inline-math-graphics><img onmousedown="imd(this)" height=27 alt="" src="graphics\swptransparent.png" width=1 align=top border=none><SPAN style="POSITION: relative; TOP: 4px"><img onmousedown="imd(this)" height=23 alt="$\rho $" src="graphics/web__1.png" width=11 align=baseline></SPAN></SPAN><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >-1) factorization algorithm</span><BR>
+<span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Dimitrios Meintanis and Ioannis Papaefstathiou</span><BR>
+<BR>
+<span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >P4-6: A NOVEL ASYNCHRONOUS E-FPGA ARCHITECTURE FOR SECURITY APPLICATIONS</span><BR>
+<span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Taha Beyrouthy, Alin Razafindraibe, Laurent Fesquet, Marc Renaudin, Sumanta Chaudhuri, Sylvain Guilley, Philippe Hoogvorst and Jean-luc Danger</span><BR>
+<BR>
+<span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >P4-7: A Multiprocessor System-on-Chip Implementation of a Laser-based Transparency Meter on an FPGA</span><BR>
+<span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >James Dykes, Paulman Chan, Glenn Chapman and Lesley Shannon</span><BR>
+<BR>
+<span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >P4-8: Compound Uniform Random Number Generators with On-Chip Correlation and Distribution Measurements</span><BR>
+<span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Amirhossein Alimohammad, Saeed Fouladi Fard, Bruce Cockburn and Christian Schlegel</span><BR>
+<BR>
+<span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >P4-9: Exploiting Slack Time in Dynamically Reconfigurable Processor Architectures</span><BR>
+<span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Thomas Schweizer, Tobias Oppold, Julio Filho, Sven Eisenhardt, Kai Blocher and Wolfgang Rosenstiel</span>

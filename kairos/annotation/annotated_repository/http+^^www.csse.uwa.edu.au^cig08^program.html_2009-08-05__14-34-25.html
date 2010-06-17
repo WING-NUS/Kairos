@@ -1,0 +1,666 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "DTD/xhtml1-transitional.dtd">
+<html>
+
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.csse.uwa.edu.au^cig08^program.html_2009-08-05__14-34-25.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.csse.uwa.edu.au^cig08^program.html_2009-08-05__14-34-25.yaml created on Wed Aug 05 17:31:49 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<title>
+CIG'08 - Program
+</title>
+<link rel="StyleSheet" href="cig08style.css" type="text/css" />
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<div id="wrapper">
+
+<!-- SIDE MENU -->
+<div id="menu">
+<h4>
+<center><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >CIG'08</span></center>
+</h4>	
+<ul>
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="home.html" title="Home"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span><br/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="news.html" title="News"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >News</span></span><br/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="cfp.html" title="Call For Papers"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Call For Papers</span></span><br/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="acceptedPapers.html" title="Accepted Papers"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers</span></span><br/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="program.html" title="Program"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span><br/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="authorInstructions.html" title="Author Instructions"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Author Instructions</span></span><br/>
+<!--	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="finalSubmissionInstructions.html" title="Final Paper Submission">Final Paper Submission</span><br/>-->
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="presentationInformation.html" title="Presentation Information"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Presentation Info.</span></span><br/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="keynotes.html" title="Keynotes"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Keynotes</span></span><br/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="tutorials.html" title="Tutorials"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span><br/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="specialSessions.html" title="Special Sessions"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Special Sessions</span></span><br/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="competitions.html" title="Competitions"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Competitions</span></span><br/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="registration.html" title="Registration"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span><br/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="studentTravelGrants.html" title="Student Travel Grants"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Student Travel Grants</span></span><br/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="committee.html" title="Committee"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Committee</span></span><br/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="programCommittee.html" title="Program Committee"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></span><br/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="promotion.html" title="Promotion"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Promotion</span></span><br/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="localInformation.html" title="Local Information"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Local Information</span></span><br/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="accommodation.html" title="Accommodation"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation</span></span><br/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" class="nav" href="Proceedings/" title="Proceedings Online"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings Online</span></span><br/>
+	<br/>
+</ul>
+</div>
+
+<!-- FRAME AREA -->
+<div id="frame">
+
+<!-- CONTENT AREA -->	
+<div id="content">
+<img onmousedown="imd(this)" style="margin-top:10px; float:right" src="images/Logo.gif" height="73px" />
+<img onmousedown="imd(this)" style="margin-top:10px" src="images/cig08.gif" alt="CIG'08" />
+<br/>
+<b style="font-size:1.5em"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >IEEE Symposium on Computational Intelligence and Games</span></b>
+<br/>
+<br/>
+<img onmousedown="imd(this)" style="margin-left:-10px" src="images/perth.gif" alt="Perth, Australia" />
+<br/>
+<b style="font-size:1.25em"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >15 - 18 December 2008</span></b>
+
+<!-- MAIN CONTENT -->
+<p>
+<font size="+2"><b><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >CIG 2008 Program</span></b></font>
+<br/>
+
+<p>
+<b style="color:#ee2225"><span onclick="return false" style="text-decoration:underline; color:blue" href="programOverview.html"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Overview</span></span></b>
+</p>
+
+<p><b><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></b><br>
+<i><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Monday, December 15, 7:40AM-8:20AM, Room: CSSE Reception (Computer Science Building, UWA)</span></i>
+</p><table cellspacing=1>
+</table>
+<p><b><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial T1: Learning to Play Games</span></b><br>
+<i><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Monday, December 15, 8:30AM-10:30AM, Room: Lecture Theatre G.16 (General Purpose Building 2, UWA), Instructor: Simon Lucas</span></i>
+</p><table cellspacing=1>
+</table>
+<p><b><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial T2: Inducing Agent Models from Examples</span></b><br>
+<i><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Monday, December 15, 11:00AM-1:00PM, Room: Lecture Theatre G.16 (General Purpose Building 2, UWA), Instructor: Bobby Bryant</span></i>
+</p><table cellspacing=1>
+</table>
+<p><b><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial T3: Measuring and Optimizing Player Satisfaction</span></b><br>
+<i><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Monday, December 15, 2:30PM-4:30PM, Room: Lecture Theatre G.16 (General Purpose Building 2, UWA), Instructor: Georgios Yannakakis and Julian Togelius</span> </i>
+</p><table cellspacing=1>
+</table>
+<p><b><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Social 1: Welcome and Poster Reception</span></b><br>
+<i><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Monday, December 15, 6:30PM-8:30PM, Room: St George's College (Crawley), Chair: Luigi Barone and Philip Hingston</span></i>
+</p><table cellspacing=1>
+<tr valign=top><td align=right><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >P101&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >A Comparative Study of Solvers in Amazons Endgames [#8033]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Julien Kloetzer, Hiroyuki Iida and Bruno Bouzy</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Japan Advanced Institute of Science and Technology, Japan; Universite Rene Descartes, France</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >P102&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Social Learning Methods in Board Game Agents [#8049]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Vukosi Marivate and Tshilidzi Marwala</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >University of the Witwatersrand, Johannesburg, South Africa</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >P103&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >A Scalable Neural Network Architecture for Board Games [#8064]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Tom Schaul and Juergen Schmidhuber</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >IDSIA, Switzerland</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >P104&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Improving a Case-Based Texas Hold'em Poker Bot [#8031]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Ian Watson, Song Lee, Rubin Jonathan and Wender Stefan</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >The University of Auckland, New Zealand</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >P105&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Evolving Neural NPCs with Layered Influence Map in the Real-time Simulation Game 'Conqueror' [#8034]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Su-hyung Jang and Sung-Bae Cho</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Yonsei University, South Korea</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >P106&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Using Reinforcement Learning for City Site Selection in the Turn-Based Strategy Game Civilization IV [#8045]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Stefan Wender and Ian Watson</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >The University of Auckland, New Zealand</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >P107&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Applying GA for Reward Allotment in an Event-driven Hybrid Learning Classifier System for Soccer Video Games [#8022]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Yuhki Inoue and Yuji Sato</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Hosei University, Japan</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >P108&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >An Evaluation of the Benefits of Look-Ahead in Pac-Man [#8025]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Thomas Thompson, Lewis McMillan, John Levine and Alastair Andrew</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >University of Strathclyde, United Kingdom</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >P109&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Improvement of a Car Racing Controller by Means of Ant Colony Optimization Algorithms [#8029]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Luis delaOssa, Jose A. Gamez and Veronica Lopez</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Universidad de Castilla-La Mancha, Spain</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >P110&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Evolving a Rule System Controller for Automatic Driving in a Car Racing Competition [#8043]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Diego Perez, Saez Yago, Recio Gustavo and Isasi Pedro</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Universidad Carlos III de Madrid, Spain</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >P111&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Learning and Knowledge Generation in General Games [#8035]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Shiven Sharma, Ziad Kobti and Scott Goodwin</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >University of Windsor, Canada</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >P112&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Survival by Continuous Learning in a Dynamic Multiple Task Environment [#8044]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Hasan Mujtaba and Rauf Baig</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >National University of Computer and Emerging Sciences, Pakistan</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >P113&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >A Game-Theoretical Approach for Designing Market Trading Strategies [#8011]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Garrison Greenwood and Richard Tymerski</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Portland State University, United States</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >P114&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Player Adaptive Entertainment Computing (PAEC): Mechanism to Model User Satisfaction by Using Neuro Linguistic Programming (NLP) Techniques [#8038]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Andrew Chiou and Kok Wai Wong</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >CQUniversity Australia, Australia; Murdoch University, Australia</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >P115&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Hierarchical Nash-Q Learning in Continuous Games [#8076]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Mostafa Sahraei-Ardakani, Ashkan Rahimi-Kian and Majid Nili-Ahmadabadi</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >University of Tehran, Iran</span></td></tr>
+</table>
+<hr>
+<p><b><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></b><br>
+<i><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday, December 16, 7:40AM-8:20AM, Room: CSSE Reception (Computer Science Building, UWA)</span></i>
+</p><table cellspacing=1>
+</table>
+<p><b><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Plenary Talk P1: Computer (and Human) Perfection at Checkers</span></b><br>
+<i><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday, December 16, 8:30AM-9:20AM, Room: Lecture Theatre G.16 (General Purpose Building 2, UWA), Speaker: Jonathan Schaeffer</span></i>
+</p><table cellspacing=1>
+</table>
+<p><b><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Special Session SS3: Coevolution in Games</span></b><br>
+<i><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday, December 16, 9:30AM-10:45AM, Room: Lecture Theatre G.16 (General Purpose Building 2, UWA), Chair: Julian Togelius, Alan Blair, and Philip Hingston</span></i>
+</p><table cellspacing=1>
+<tr valign=top><td align=right> <span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >9:30AM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Investigating Learning Rates for Evolution and Temporal Difference Learning [#8039]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Simon Lucas</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >University of Essex, United Kingdom</span></td></tr>
+<tr valign=top><td align=right> <span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >9:55AM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Adapting to Human Game Play [#8020]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Phillipa Avery and Zbigniew Michalewicz</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >University of Adelaide, Australia</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >10:20AM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Evolution of Counter Strategies: Application of Co-evolution to Texas Hold'em Poker [#8027]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Thomas Thompson, John Levine and Russell Wotherspoon</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >University of Strathclyde, United Kingdom</span></td></tr>
+</table>
+<p><b><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Special Session SS4: Player/Opponent Modeling</span></b><br>
+<i><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday, December 16, 11:05AM-12:45PM, Room: Lecture Theatre G.16 (General Purpose Building 2, UWA), Chair: Bobby Bryant and Philip Hingston</span></i>
+</p><table cellspacing=1>
+<tr valign=top><td align=right><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >11:05AM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Can Opponent Models Aid Poker Player Evolution? [#8024]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Roderick Baker, Peter Cowling, Thomas Randall and Ping Jiang</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >University of Bradford, United Kingdom</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >11:30AM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Evolving Opponent Models for Texas Hold 'Em [#8058]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Alan Lockett and Risto Miikkulainen</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >The University of Texas at Austin, United States</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >11:55AM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >An Evaluation of Models for Predicting Opponent Positions in First-Person Shooter Games [#8071]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Stephen Hladky and Vadim Bulitko</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >University of Alberta, Canada</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >12:20PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Dynamic Formations in Real-Time Strategy Games [#8054]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Marcel van der Heijden, Sander Bakkes and Pieter Spronck</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Maastricht University, Netherlands; Tilburg University, Netherlands</span></td></tr>
+</table>
+<p><b><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Special Session SS1: Computational Intelligence in Real Time Strategy Games</span></b><br>
+<i><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday, December 16, 2:00PM-3:40PM, Room: Lecture Theatre G.16 (General Purpose Building 2, UWA), Chair: Mike Preuss, Bobby Bryant, and Chris Miles</span></i>
+</p><table cellspacing=1>
+<tr valign=top><td align=right> <span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >2:00PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Dealing with Fog of War in a Real Time Strategy Game Environment [#8052]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Johan Hagelback and Stefan J. Johansson</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Blekinge Institute of Technology, Sweden</span></td></tr>
+<tr valign=top><td align=right> <span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >2:25PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Intelligent Anti-Grouping in Real-Time Strategy Games [#8073]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Nicola Beume, Tobias Hein, Boris Naujoks, Nico Piatkowski, Mike Preuss and Simon Wessing</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Dortmund University of Technology, Germany</span></td></tr>
+<tr valign=top><td align=right> <span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >2:50PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Intelligent Moving of Groups in Real-Time Strategy Games [#8075]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Holger Danielsiek, Raphael Stuer, Andreas Thom, Nicola Beume, Boris Naujoks and Mike Preuss</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Dortmund University of Technology, Germany</span></td></tr>
+<tr valign=top><td align=right> <span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >3:15PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Rapid Adaptation of Video Game AI [#8059]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Sander Bakkes, Pieter Spronck and Jaap van den Herik</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Tilburg University, Netherlands</span></td></tr>
+</table>
+<p><b><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Special Session SS2: Player Satisfaction</span></b><br>
+<i><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday, December 16, 4:00PM-5:40PM, Room: Lecture Theatre G.16 (General Purpose Building 2, UWA), Chair: Georgios Yannakakis and Bobby Bryant</span></i>
+</p><table cellspacing=1>
+<tr valign=top><td align=right> <span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >4:00PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Real-time Challenge Balance in an RTS Game Using rtNEAT [#8023]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Jacob Kaae Olesen, Georgios Yannakakis and John Hallam</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >University of Southern Denmark, Denmark; IT-University of Copenhagen, Denmark</span></td></tr>
+<tr valign=top><td align=right> <span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >4:25PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Friendly Partner System of Poker Game with Facial Expressions [#8041]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Keisuke Ohsone and Takehisa Onisawa</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Graduate School of Systems and Information Engin, Japan</span></td></tr>
+<tr valign=top><td align=right> <span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >4:50PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Real-time Adaptation of Augmented-Reality Games for Optimizing Player Satisfaction [#8005]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Georgios Yannakakis and John Hallam</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >IT-University of Copenhagen, Denmark; University of Southern Denmark, Denmark</span></td></tr>
+<tr valign=top><td align=right> <span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >5:15PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >An Experiment in Automatic Game Design [#8070]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Julian Togelius and Juergen Schmidhuber</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >IDSIA, Switzerland</span></td></tr>
+</table>
+<p><b><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Social 2: CIG'08 Pub Quiz</span></b><br>
+<i><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday, December 16, 8:00PM-11:00PM, Room: Captain Stirling Pub (Nedlands), Chair: Lyndon While</span></i>
+</p><table cellspacing=1>
+</table>
+<hr>
+<p><b><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Plenary Talk P2: Emergence in Games</span></b><br>
+<i><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, December 17, 8:30AM-9:20AM, Room: Lecture Theatre G.16 (General Purpose Building 2, UWA), Speaker: Penny Sweetser</span></i>
+</p><table cellspacing=1>
+</table>
+<p><b><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Session RS1: Simulated Car Racing</span></b><br>
+<i><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, December 17, 9:30AM-10:45AM, Room: Lecture Theatre G.16 (General Purpose Building 2, UWA), Chair: Simon Lucas</span></i>
+</p><table cellspacing=1>
+<tr valign=top><td align=right> <span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >9:30AM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >The WCCI 2008 Simulated Car Racing Competition [#8065]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Daniele Loiacono, Julian Togelius, Pier Luca Lanzi, Leonard Kinnaird-Heether, Simon Lucas, Matt Simmerson, Diego Perez, Robert G. Reynolds and Yago Saez</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Politecnico di Milano, Italy; IDSIA, Switzerland; Wayne State University, United States; University of Essex, United Kingdom; Independent researcher, New Zealand; University Carlos III of Madrid, Spain</span></td></tr>
+<tr valign=top><td align=right> <span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >9:55AM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >A Fuzzy Approach For The 2007 CIG Simulated Car Racing Competition [#8048]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Duc Thang Ho and Jon Garibaldi</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >University of Nottingham, United Kingdom</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >10:20AM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Generating Diverse Opponents with Multiobjective Evolution [#8074]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Alexandros Agapitos, Julian Togelius, Simon Lucas, Juergen Schmidhuber and Andreas Konstantinidis</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >University of Essex, United Kingdom; IDSIA, Switzerland</span></td></tr>
+</table>
+<p><b><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Session RS2: Adversarial and FPS Games</span></b><br>
+<i><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, December 17, 11:05AM-12:45PM, Room: Lecture Theatre G.16 (General Purpose Building 2, UWA), Chair: Marcus Gallagher</span></i>
+</p><table cellspacing=1>
+<tr valign=top><td align=right><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >11:05AM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Creating a Multi-Purpose First Person Shooter Bot with Reinforcement Learning [#8017]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Michelle McPartland and Marcus Gallagher</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >University of Queensland, Australia</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >11:30AM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Visual Control in Quake II with a Cyclic Controller [#8072]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Matt Parker and Bobby Bryant</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >University of Nevada, Reno, United States</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >11:55AM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Scaling-up Behaviours in EvoTanks: Applying Subsumption Principles to Artificial Neural Networks [#8026]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Thomas Thompson and John Levine</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >University of Strathclyde, United Kingdom</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >12:20PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Interactively Evolved Modular Neural Networks for Game Agent  Control [#8063]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >John Reeder, Roberto Miguez, Jessica Sparks, Michael Georgiopoulos and Georgios Anagnostopoulos</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >University of Central Florida, United States; Purdue University, United States; Florida Institute of Technology, United States</span></td></tr>
+</table>
+<p><b> <span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Social 3: Competitions</span></b><br>
+<i><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, December 17, 2:00PM-5:40PM, Room: CSSE Lab 2.01 (Computer Science Building, UWA), Chair: Simon Lucas</span></i>
+</p><table cellspacing=1>
+</table>
+<p><b> <span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Social 4: CIG'08 Symposium Banquet</span></b><br>
+<i><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, December 17, 7:30PM-11:00PM, Room: Fraser's Restaurant (Kings Park), Chair: Luigi Barone and Philip Hingston</span></i>
+</p><table cellspacing=1>
+</table>
+<hr>
+<p><b><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Plenary Talk P3: Pseudo-Intelligence as Entertainment</span></b><br>
+<i><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, December 18, 8:30AM-9:20AM, Room: Lecture Theatre G.16 (General Purpose Building 2, UWA), Speaker: Jason Hutchens</span></i>
+</p><table cellspacing=1>
+</table>
+<p><b><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >Session RS3: Monte Carlo Approaches</span></b><br>
+<i><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, December 18, 9:30AM-10:45AM, Room: Lecture Theatre G.16 (General Purpose Building 2, UWA), Chair: Philip Hingston</span></i>
+</p><table cellspacing=1>
+<tr valign=top><td align=right> <span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >9:30AM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Determination and Evaluation of Efficient Strategies for a Stop or Roll Dice Game: Heckmeck am Bratwurmeck (Pickomino) [#8062]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >Nathalie Chetcuti-Sperandio, Fabien Delorme, Sylvain Lagrue and Denis Stackowiak</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >CRIL-CNRS UMR 8188, France</span></td></tr>
+<tr valign=top><td align=right> <span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >9:55AM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Combining Final Score with Winning Percentage by Sigmoid Function in Monte-Carlo Simulations [#8016]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Kazutomo Shibahara and Yoshiyuki Kotani</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Tokyo University of Agriculture and Technology, Japan</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >10:20AM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >Evaluation of Monte Carlo Tree Search and the Application to Go [#8046]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Shogo Takeuchi, Tomoyuki Kaneko and Kazunori Yamaguchi</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >The University of Tokyo, Japan</span></td></tr>
+</table>
+<p><b><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Session RS4: Board Games</span></b><br>
+<i><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, December 18, 11:05AM-12:45PM, Room: Lecture Theatre G.16 (General Purpose Building 2, UWA), Chair: Risto Miikkulainen</span></i>
+</p><table cellspacing=1>
+<tr valign=top><td align=right><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >11:05AM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Learning Position Evaluation for Go with Internal Symmetry Networks [#8051]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Alan Blair</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >University of New South Wales, Australia</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >11:30AM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >An Othello Evaluation Function Based on Temporal Difference Learning Using Probability of Winning [#8010]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >Yasuhiro Osaki, Kazutomo Shibahara, Yasuhiro Tajima and Yoshiyuki Kotani</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Tokyo University of Agriculture and Technology, Japan</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >11:55AM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Ensemble Approaches in Evolutionary Game Strategies: A Case Study in Othello [#8013]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Kyung-Joong Kim and Sung-Bae Cho</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >Cornell University, United States; Yonsei University, Korea (South)</span></td></tr>
+<tr valign=top><td align=right><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >12:20PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >Transfer of Evolved Pattern-Based Heuristics in Games [#8067]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Erkin Bahceci and Risto Miikkulainen</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >The University of Texas at Austin, United States</span></td></tr>
+</table>
+<p><b><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Session RS5: Video Games</span></b><br>
+<i><span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, December 18, 2:00PM-3:40PM, Room: Lecture Theatre G.16 (General Purpose Building 2, UWA), Chair: Cara MacNish</span></i>
+</p><table cellspacing=1>
+<tr valign=top><td align=right> <span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >2:00PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >An Influence Map Model for Playing Ms. Pac-Man [#8036]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >Nathan Wirth and Marcus Gallagher</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >University of Queensland, Australia</span></td></tr>
+<tr valign=top><td align=right> <span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >2:25PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >Using NEAT for Continuous Adaptation and Teamwork Formation in Pacman [#8080]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >Mark Wittkamp, Luigi Barone and Philip Hingston</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >The University of Western Australia, Australia; Edith Cowan University, Australia</span></td></tr>
+<tr valign=top><td align=right> <span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >2:50PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >On-line Adapting Games Using Agent Organizations [#8050]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >Joost Westra, Hado Hasselt, Virginia Dignum and Frank Dignum</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >Utrecht University, Netherlands</span></td></tr>
+<tr valign=top><td align=right> <span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >3:15PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >Brain-Computer Interface: Next Generation Thought Controlled Distributed Video Game Development Platform [#8069]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >Payam Aghaei Pour, Tauseef Gulrez, Omar Al Zoubi, Gaetano Gargiulo and Rafael Calvo</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >The University of Sydney, Australia</span></td></tr>
+</table>
+<p><b><span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >Session RS6: Real-world and Serious Games</span></b><br>
+<i><span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, December 18, 4:00PM-5:40PM, Room: Lecture Theatre G.16 (General Purpose Building 2, UWA), Chair: Martin Masek</span></i>
+</p><table cellspacing=1>
+<tr valign=top><td align=right> <span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >4:00PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >Hierarchical Path Planning for Multi-size Agents in Heterogeneous Environments [#8032]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Harabor and Adi Botea</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >NICTA and The Australian National University, Australia</span></td></tr>
+<tr valign=top><td align=right> <span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >4:25PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >Preparing for the Aftermath:  Using Emotional Agents in Game-Based Training for Disaster Response [#8019]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >Donna Djordjevich, Patrick Xavier, Michael Bernard, Jonathan Whetzel, Matthew Glickman and Stephen Verzi</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >Sandia National Laboratories, United States</span></td></tr>
+<tr valign=top><td align=right> <span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >4:50PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >Morphology Independent Dynamic Locomotion Control for Virtual Characters [#8037]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >Adrian Boeing</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >Edith Cowan University, Australia</span></td></tr>
+<tr valign=top><td align=right> <span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >5:15PM&nbsp;&nbsp;</span></td><td><span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >A Study of Electricity Market Dynamics Using Invasive Weed Colonization Optimization [#8056]</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >Mostafa Sahraei-Ardakani, Mahnaz Roshanaei, Ashkan Rahimi-Kian and Caro Lucas</span></td></tr>
+ <tr><td></td><td><span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >CIPCE, ECE Dep., College of Eng.,Univ. of Tehran, Iran</span>

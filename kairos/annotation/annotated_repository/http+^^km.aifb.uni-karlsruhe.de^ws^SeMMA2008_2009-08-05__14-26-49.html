@@ -1,0 +1,530 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" 
+   "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^km.aifb.uni-karlsruhe.de^ws^SeMMA2008_2009-08-05__14-26-49.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^km.aifb.uni-karlsruhe.de^ws^SeMMA2008_2009-08-05__14-26-49.yaml created on Wed Aug 05 17:31:22 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<base href="http://km.aifb.uni-karlsruhe.de/ws/SeMMA2008/" />
+
+  <title>SeMMA2008 - First International Workshop on Semantic Metadata Management and Applications</title>
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)" bgcolor="#FFFFFF" link="#0000FF" alink="#0000FF" vlink="#0000FF" style="font-family : tahoma, arial; margin: 40px 7% 40px 7%"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<div align="center">
+  <span onclick="return false" style="text-decoration:underline; color:blue" name="top" />
+  <h2><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >SeMMA2008</span></h2>
+  <h2><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >First International Workshop on</span> </h2>
+  <h1><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Semantic Metadata Management and Applications</span></h1>
+  <p><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Located at the Fifth European Semantic Web Conference</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://eswc2008.org/"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >ESWC2008</span></span> <br />
+  <span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >June 2, 2008</span> <br />
+  <span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Teneriffe, Spain</span></p>
+  <p><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Supported by</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.omii.ac.uk/"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >OMII-UK</span></span> <span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >and the EU project</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.neon-project.org/"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >NeOn</span></span> </p>
+</div>
+
+<table align="center" border="0" width="100%">
+ <tr align="center" valign="middle" bgcolor="#c8c8ff">
+   <td width="10%"><b><span onclick="return false" style="text-decoration:underline; color:blue" href="#program"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Programme</span></span></b></td>
+   <td width="10%"><b><span onclick="return false" style="text-decoration:underline; color:blue" href="#topics"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Topics</span></span></b></td>
+   <td width="10%"><b><span onclick="return false" style="text-decoration:underline; color:blue" href="#oc"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Organisation committee</span></span></b></td>
+   <td width="10%"><b><span onclick="return false" style="text-decoration:underline; color:blue" href="#pc"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Program committee</span></span></b></td>
+   <td width="10%"><b><span onclick="return false" style="text-decoration:underline; color:blue" href="#submission"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Submission</span></span></b></td>
+   <td width="10%"><b><span onclick="return false" style="text-decoration:underline; color:blue" href="#dates"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Important dates</span></span></b></td>
+ </tr>
+</table>
+
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="objectives" />
+<h2><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Objectives</span></h2>
+<p>
+<span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Metadata is, and will increasingly be playing a central role in the provisioning of semantic web functionalities, e.g., in easing the discovery, interoperability and integration of a variety of data and service resources. For example, applications and databases in the life sciences rely heavily on metadata for describing and curating data products. To effectively exploit the true potential of metadata, however, methods and tools to facilitate its management are required. Metadata management certainly includes traditional issues such as modelling, specification, generation, curation, storage and retrieval, that are typical of any data management system. Additional properties that are specific to metadata, however, have an impact on its management. As a form of resource annotation, for example, metadata has a recognizable lifecycle, that is determined by the evolution of the underlying resources and should be managed accordingly. Also, the use of semantic metadata, i.e., metadata that is defined using shared conceptualisations (ontologies) or controlled vocabularies, is increasingly popular in a number of application areas. Managing semantic metadata provides both new challenges and opportunities.</span>
+</p>
+<p>
+<span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >The first international workshop on semantic metadata management aims to bring together researchers and practitioners to 
+discuss issues related to metadata management, with particular emphasis on the management of semantic metadata. 
+The workshop also aims to shed light on relatively new issues that emerge in the context of metadata intensive applications, 
+e.g., semantic web services, semantic web processes and semantic grid applications, including metadata evolution, 
+propagation and curation.</span> </p>
+
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="program" />
+<h2><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Programme</span></h2>
+
+<table border="1">
+<tr><td><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >9.15 – 9.30</span></td><td><b><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Opening Session</span></b></td><td /></tr>
+<tr>
+<td><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >9.30 – 10.30</span></td><td> <b><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span></b> 
+<ul>
+<li><b><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Metadata Management in Next Generation Knowledge-based Applications</span></b><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >, Oscar Corcho</span></li>
+</ul>
+</td>
+</tr>
+<tr><td><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >10.30 – 11.00</span></td><td><b><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></b></td><td /></tr>
+
+<tr><td><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >11.00– 12.30</span></td><td><b><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Session 1: Semantic Web Service Discovery and Composition</span></b>
+<ul>
+<li><b><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >A Deductive system for Semantically Integrated Scientific Workflows</span> </b><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >, Nadia yacoubi, Zoe Lacroix and Maria Esther Vidal</span></li>
+<li><b><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Simplifying the Web Service Discovery Process</span> </b><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >, Mick Kerrigan, Nathalie Steinmetz, Holger Lausen, Martin Tanler and Adina Sirbu</span></li>
+<li><b><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Semantic Hubs for Geological Projects</span></b><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >, Yamine AIT AMEUR, Nabil Belaid, Mohammed Bennis, Olivier Corby, Rose Dieng-Kuntz, Jérémie Doucy, Priscille Durville, Chimène Fankam, Fabien Gandon, Alain Giboin, Patrick GIROUX, Sandrine Grataloup, Bruno GRILHERES, Florian Husson, Stéphane Jean, Joel Langlois, Phuc Hiep Luong, Laura MASTELLA, Olivier Morel, Michel Perrin, Guy Pierra, Jean-François Rainaud, Idir Ait-Sadoune, Eric Sardet, Francois Tertre and Joao Francisco Valiati</span></li>
+</ul>
+</td></tr>
+<tr><td><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >12.30 – 14.30</span> </td><td><b><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Lunch Break</span></b></td><td /></tr>
+<tr><td><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >14.30 – 16:00</span> </td><td><b><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Session 2: Retrieval of Semantic Annotations</span></b>
+<ul>
+<li><b><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Combining Context Navigation with Semantic Autocompletion to Solve Problems in Concept Selection</span> </b><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >, Reetta Sinkkilä, Eetu Mäkelä, Eero Hyvönen and Tomi Kauppinen</span></li>
+<li><b><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Viewing and Querying Topic Maps in terms of RDF</span> </b><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >, Silvia Stefanova and Tore Risch</span></li>
+<li><b><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Numeric reasoning in the Semantic Web</span> </b><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >, Fankam chimene, Stéphane Jean and Guy Pierra</span></li>
+</ul>
+</td></tr>
+<tr><td><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >16.00 – 16.30</span></td><td><b><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></b></td><td /></tr>
+<tr><td><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >16.30 – 17.30</span></td><td><b><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Session 3: Annotation and Management of Documents</span></b>
+<ul>
+<li><b><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Contextual and Metadata-based Approach for the Semantic Annotation of Heterogeneous Documents</span> </b><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >, Mouhamadou THIAM, nathalie pernelle and Nacéra Bennacer</span></li>
+<li><b><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Semantic Metadata Instantiation and Consolidation within an Ontology-based Multimedia Document Management System</span> </b><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Annett Mitschick, Ralf Nagel and Klaus Meißner.</span> </li>
+</ul>
+</td></tr>
+<tr><td><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >17.30 – 17.45</span></td><td><b><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Closing Session</span></b></td></tr>
+</table>
+
+<p><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >The proceedings of the workshop are now available online at</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://ceur-ws.org/Vol-346"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >CEUR-WS</span></span><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >.</span></p>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="topics" />
+<h2><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Topics of Interest</span></h2>
+
+<span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >We seek papers describing ongoing innovative work and applications on these metadata management issues. 
+Specifically, the workshop topics include, but are not limited to:</span>
+<ul>
+<li><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >metadata generation, curation, and lifetime management</span></li>
+<li><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >metadata mapping and reconciliation</span></li>
+<li><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >efficient storage and retrieval of metadata</span></li>
+<li><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >metadata interoperability</span></li>
+<li><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >evolution and propagation of metadata</span></li>
+<li><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >quality, pedigree and provenance of metadata</span></li>
+<li><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >contextual metadata</span></li>
+<li><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >metadata identification</span></li>
+<li><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >models and languages for metadata.</span></li>
+</ul>
+<span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >As well as the above topics, the workshop seeks papers that describe case studies that show the benefits gained thanks to the use of metadata. We also seek papers that show the limitations of current state of the art in metadata models, languages and tools. Papers that report on success stories or experiences/evaluations that pinpoint metadata management issues that need further investigation in this field are encouraged. The application areas that are in the scope of the workshop include, but are not limited to:</span>
+<ul>
+<li><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >metadata in life science databases and applications,</span></li>
+<li><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >e-Science and e-Health,</span> </li>
+<li><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >business and scientific workflows,</span></li>
+<li><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >semantic guided web service interoperability and composition,</span></li>
+<li><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >web service and workflow discovery,</span></li>
+<li><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >social and scientific networks,</span></li>
+<li><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >semantic grid services,</span></li>
+<li><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >semantic query processing,</span></li>
+<li><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >semantic-enriched web portals and mashups.</span></li>
+</ul>
+
+
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="oc" />
+<h2><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Organising Committee</span></h2>
+<ul>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:Khalid.Belhajjame@manchester.ac.uk"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Khalid Belhajjame</span></span><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >,</span>
+    <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.manchester.ac.uk"> <span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >University of Manchester (UK)</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:M.Daquin@open.ac.uk"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Mathieu d’Aquin</span></span><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >,</span>
+    <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.kmi.ou.ac.uk/"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >KMi</span></span><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >, Open University (UK)</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:haase@aifb.unikarlsruhe.de"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Peter Haase</span></span><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >,</span>
+    <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aifb.uni-karlsruhe.de/english"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Institut AIFB</span></span><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >, Universität Karlsruhe (TH), Germany</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:pmissier@cs.man.ac.uk"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Paolo Missier</span></span><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >,</span>
+    <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.manchester.ac.uk"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >University of Manchester</span> </span> <span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >(UK)</span></li>
+</ul>
+
+
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="pc" />
+<h2><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></h2>
+<ul><li>  <span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Boualem Benatallah, University of New South Wales (Australia)</span>
+</li><li><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Marco Brambilla, Politecnico Di Milano (Italy)</span>
+</li><li><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Christine Collet, University of Grenoble (France)</span>
+</li><li><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Isabel Cruz, University of Illinois (USA)</span>
+</li><li><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Carole Goble, University of Manchester (UK)</span>
+</li><li><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >David de Roure, University of Southampton (UK)</span>
+</li><li><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Asuman Dogac, Middle East Technical University (Turkey)</span>
+</li><li><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Mohand-Saïd Hacid, Claude Bernard University (France)</span>
+</li><li><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Vipul Kashyap, Partners HealthCare System (USA)</span>
+</li><li><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Bertram Ludäscher, UC Davis (USA)</span>
+</li><li><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Peter Mika, Yahoo Research (Spain)</span>
+</li><li><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Natasha Noy, Stanford University (USA)</span>
+</li><li><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Eyal Oren, VU Amsterdam (Netherland)</span>
+</li><li><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Jeff Z. Pan, University of Aberdeen (UK)</span>
+</li><li><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Matthew Perry, Wright State University (USA)</span>
+</li><li><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Alexandra Poulovassilis, Birkbeck College (UK)</span>
+</li><li><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Marta Sabou, The Open University (UK)</span>
+</li><li><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Genoveva Vargas-Solar, University of Grenoble (France)</span> 
+</li>
+</ul>
+<span onclick="return false" style="text-decoration:underline; color:blue" name="submission" />
+<h2><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Submission and Proceedings</span></h2>
+<p>
+<span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Papers should be formatted according to the guidelines of the ESWC conference.</span><br />
+<span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Papers should be submitted using</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.easychair.org/conferences/?conf=semma2008"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >EasyChair</span></span><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >.</span><br />
+<span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings will be published for the workshop.</span>
+</p>
+<p>
+<span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Papers must not exceed 15 pages. Short papers, experimental contributions, system and demo descriptions
+must not exceed 8 pages.</span>
+</p>
+<p>
+<span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Note that workshop attendees must also register for the main conference. 
+So try to register both for the conference and the workshop before the ESWC2008 early registration deadline.</span>
+</p>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="dates" />
+<h2><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></h2>
+<ul>
+   <li><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Deadline for abstract submissions: March 10, 2008</span></li>
+   <li><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Deadline for paper submissions: March 17, 2008</span></li>
+   <li><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Notification of acceptance: April 4, 2008</span></li> 
+   <li><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Camera-ready versions: April 18, 2008</span></li>
+   <li><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Workshop: June 2, 2008</span>

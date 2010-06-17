@@ -1,0 +1,789 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/9/annotation/annotated_repository/http+^^www.sigir2008.org^posters.html_2009-08-05__14-44-43.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/9/annotation/annotated_repository/http+^^www.sigir2008.org^posters.html_2009-08-05__14-44-43.yaml created on Thu Aug 13 13:58:58 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+
+<meta http-equiv="content-type" content="text/html; charset=iso-8859-1" />
+
+<meta name="description" content="SIGIR 2008" />
+
+<meta name="keywords" content="SIGIR 2008" />
+
+<meta name="author" content="Victor" />
+
+<link rel="stylesheet" type="text/css" href="sigir08.css" media="screen,projection" />
+
+<link rel="stylesheet" type="text/css" href="print.css" media="print" />
+
+<title>SIGIR'08 - Singapore</title>
+
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+
+
+<div id="wrap">
+
+
+
+<div id="leftside">
+
+
+
+<!-- Start of Navigation -->
+
+<div id="menu">
+
+<ul class="avmenu">
+
+	<li><b><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >For Participants</span></b>
+
+		<ul class="avmenu-sub">
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="news.html"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >News</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="venue.html"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Conference Venue</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="visa.html"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Travel & Visa</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="accommodation.html"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="registration.html"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://sigir2008.photoshop.com
+"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Photo Gallery I</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://av.comp.nus.edu.sg/coppermine/thumbnails.php?album=170"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Photo Gallery II</span></span></li>
+
+		</ul>
+
+		
+
+	<li><b><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Programme</span></b>
+
+		<ul class="avmenu-sub">
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="program.html"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Conference Program</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="social_programs.html"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Social Programs</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="speakers.html"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Speakers</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="papers.html"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Full Papers</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="posters.html" class="current"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Posters</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="demos.html"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Demos</span></span></li>
+
+			
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials.html"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.html"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="doctoral.html"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Doctoral Consortium</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.sheridanprinting.com/typedept/sigir2.htm"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Camera-ready Submission</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="presenter.html"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Presenter Information</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="comm_reviewers.html"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Technical Review Committees & Reviewers</span></span></li>
+<!--<li><span onclick="return false" style="text-decoration:underline; color:blue" href="poster.html">Conference Poster</span></li>-->
+
+<!--<li><span onclick="return false" style="text-decoration:underline; color:blue" href="callforpapers.pdf">Conference CFP Poster</span></li>-->
+
+		</ul>
+
+
+
+	
+</li>
+<li><b><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >For Contributors</span></b>
+
+		<ul class="avmenu-sub">
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="mentoring.html"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Call for Mentoring</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="callforpapers.html"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span></li>
+
+			<li><!--<span onclick="return false" style="text-decoration:underline; color:blue" href="callforposters.html" class="current">--><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Call for Posters & Demos</span><!--</span>--></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="callfortutorials.html"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Call for Tutorials</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="callforworkshops.html"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Call for Workshops</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="doctoral_con.html"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Doctoral Consortium</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="dates.html"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="howtosubmit.html"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >How to Submit?</span></span></li>
+            <li><span onclick="return false" style="text-decoration:underline; color:blue" href="corporate_sponsorship.html"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Corporate Sponsorship Opportunities</span></span></li>
+
+		</ul>
+
+	</li>
+
+	<li><b><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Singapore</span></b>
+
+		<ul class="avmenu-sub">
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="sg_city.html"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >General Info</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="sg_places.html"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Places of Interests</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="sg_shop.html"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Shopping</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="sg_food.html"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Food and Dining</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://wing.comp.nus.edu.sg/blog/"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Traveller's Blog</span></span></li>
+
+		</ul>
+
+	</li>
+
+	<li><b><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >About Us</span></b>
+
+		<ul class="avmenu-sub">
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="history.html"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >History</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="organizers.html"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Organizers</span></span></li>
+
+			<li><span onclick="return false" style="text-decoration:underline; color:blue" href="contact.html"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Contact Us</span></span></li>
+
+		</ul>
+
+	</li>
+
+</ul>
+
+</div>
+
+<!-- End of Navigation -->
+
+
+
+
+
+</div>
+
+
+
+<div id="contentwide">
+
+
+
+<div id="bannersubtext">
+
+<span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >The 31</span><sup><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >st</span></sup> <span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Annual International ACM SIGIR Conference</span><br/><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >20-24 July 2008, Singapore</span>
+
+</div>
+
+
+
+<h2><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >List of Accepted Posters</span></h2>
+
+
+
+
+
+<p><strong><u><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Group 1: Evaluation, Text Collections  and User/Personalized IR</span></u></strong></p>
+<p><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >P1-1:&nbsp;&nbsp;&nbsp; Relevance Judgments between TREC and  Non-TREC Assessors</span><br />
+  <span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; A. Al-Maskari, M. Sanderson and P.  Clough (University   of Sfeffield)</span> </p>
+<p><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >P1-2:&nbsp;&nbsp;&nbsp; Evaluation Measures for Preference Judgments</span><br />
+  <span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; B. Carterette and P. Bennett  (University of Massachusetts/Microsoft Research)</span> </p>
+<p><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >P1-3:&nbsp;&nbsp;&nbsp; Exploring Evaluation Metrics: GMAP versus  MAP</span><br />
+  <span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; S.D. RAVANA and A. Moffat (University of Melbourne)</span> </p>
+<p><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >P1-4:&nbsp;&nbsp;&nbsp; A new interpretation of average precision</span><br />
+  <span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; S. Robertson (Microsoft Research)</span> </p>
+<p><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >P1-5:&nbsp;&nbsp;&nbsp; Comparing Metrics across TREC and NTCIR: The  Robustness to Pool Depth Bias</span><br />
+  <span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; T. Sakai (NewsWatch Inc.)</span> </p>
+<p><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >P1-6:&nbsp;&nbsp;&nbsp; Relevance Thresholds in System Evaluations</span><br />
+  <span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; F. Scholer and A. Turpin (RMIT University)</span> </p>
+<p><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >P1-7:&nbsp;&nbsp;&nbsp; Precision-At-Ten Considered Redundant</span><br />
+  <span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; W. Webber, A. Moffat, J. Zobel and  T. Sakai (NewsWatch Inc. /University   of Melbourne)</span> </p>
+<p><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >P1-8:&nbsp;&nbsp;&nbsp; Structuring Collections with Scatter/Gather Extensions</span><br />
+  <span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; O.  Alonso (UC Davis) and J. Talbot (Stanford)</span></p>
+<p><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >P1-9:&nbsp;&nbsp;&nbsp; Text Collections for FIRE</span><br />
+  <span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; P. Majumder, M. Mitra, D. Pal, A.  Bandyopadhyay, S. Maiti, S. Mitra, A. Sen and S. Pal</span> <br />
+  <span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; (Indian Statistical  Institute Kolkata)</span> </p>
+<p><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >P1-10:&nbsp; A Longitudinal Study of Real-time Search  Assistance Adoption</span><br />
+  <span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; P. Anick and R.G. Kantamneni (Yahoo!  Inc.)</span> </p>
+<p><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >P1-11:&nbsp; TopicRank: Bringing Insight to Users</span><br />
+  <span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; I. Berlocher, K.I. Lee and K. Kim  (Saltlux Inc.)</span> </p>
+<p><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >P1-12:&nbsp; Talking the Talk vs. Walking the Walk:  Salience of Information Needs in Querying vs. Browsing</span><br />
+  <span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; M. Bilenko, R. White, M. Richardson  and G.C. Murray (Microsoft Research/University of Maryland)</span> </p>
+<p><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >P1-13:&nbsp; Exploring Mouse Movements for Inferring Query  Intent</span><br />
+  <span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Q. Guo and E. Agichtein (Emory University)</span> </p>
+<p><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >P1-14:&nbsp; Emulating query-biased summaries using  document titles</span><br />
+  <span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; H. Joho, D. Hannah and J. Joemon (University of Glasgow)</span> </p>
+<p><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >P1-15:&nbsp; Hierarchical Naive Bayes models to represent  user profiles</span><br />
+  <span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; J. Huete, L. de Campos, J.  Fernandez-Luna and M. Rueda-Morales (University   of Granada)</span> </p>
+<p><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >P1-16:&nbsp; A Topical PageRank based Algorithm for  Recommender Systems</span><br />
+  <span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; L. Zhang, K. Zhang and C. Li (School of Software,  Tsinghua University)</span> </p>
+<p><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >P1-17:&nbsp; The Impact of History Length on Personalized  Search</span><br />
+  <span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Y. Zhu, J. Callan and J. Carbonell (Carnegie Mellon University)</span> </p>
+<p><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >P1-18:&nbsp; User Preference Choices for Complex Question  Answering</span> <br />
+  <span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; M. Wu, F. Scholer and A. Turpin (RMIT University)</span> </p>
+<p><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >P1-19:&nbsp; Towards Personalized Distributed Information  Retrieval</span><br />
+  <span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; M. Carman and F. Crestani (Faculty  of Informatics/University of Lugano (USI))</span> </p>
+<p><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >P1-20:&nbsp; Task-aware Search Personalization</span><br />
+  <span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; J. Luxenburger, S. Elbassuoni and G.  Weikum (Max-Planck Institute for Informatics)</span> </p>
+<p><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+<p><strong><u><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Group 2: Blog, Tagging, Opinion Analysis  and Web IR</span></u></strong></p>
+<p><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >P2-1:&nbsp;&nbsp;&nbsp; Personal vs Non-Personal Blogs: Initial  Classification Experiments</span><br />
+  <span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; M. de Rijke and E. Elgersma  (Informatics Institute)</span> </p>
+<p><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >P2-2:&nbsp;&nbsp;&nbsp; Exploiting Subjectivity Analysis in Blogs to  Improve Political Leaning Categorization</span><br />
+  <span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; M. Jiang and S. Argamon (Illinois  Institute of Technology)</span> </p>
+<p><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >P2-3:&nbsp;&nbsp;&nbsp; Ranking Opinionated Blog Posts using  OpinionFinder</span><br />
+  <span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; C. Macdonald, B. He and I. Ounis (University of Glasgow)</span> </p>
+<p><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >P2-4:&nbsp;&nbsp;&nbsp; Searching Blogs and News: A Study on Popular  Queries</span><br />
+  <span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; A. Sun, M. Hu and E.P. Lim (Nanyang  Technological University)</span> </p>
+<p><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >P2-5:&nbsp;&nbsp;&nbsp; Aggregated Click-through Data in a  Homogeneous User Community</span><br />
+  <span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; M. Wu, A. Turpin and J. Zobel (RMIT University)</span> </p>
+<p><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >P2-6:&nbsp;&nbsp;&nbsp; To Tag or Not to Tag - Harvesting Adjacent  Metadata in Large-Scale Tagging Systems</span><br />
+  <span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; A. Budura, S. Michel, P. Cudre-Mauroux  and K. Aberer (EPFL)</span> </p>
+<p><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >P2-7:&nbsp;&nbsp;&nbsp; Subjectivity Analysis for Questions in QA  Communities</span><br />
+  <span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; B. Li, Y. Liu, A. Ram, E.V. Garcia  and E. Agichtein (Emory   University)</span> </p>
+<p><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >P2-8:&nbsp;&nbsp;&nbsp; On the Evolution of the Yahoo! Answers QA  Community</span><br />
+  <span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Y. Liu and E. Agichtein (Emory University)</span> </p>
+<p><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >P2-9:&nbsp;&nbsp;&nbsp; Detecting synonyms in social tagging systems  to improve content retrieval</span><br />
+  <span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; M. Clements, A. de Vries and M.  Reinders (Delft University of Technology/CWI)</span> </p>
+<p><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >P2-10:&nbsp; SOPING: A Chinese Customer Review Mining  System</span><br />
+  <span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Z. Chao and G. Qiu (Zhejiang University)</span> </p>
+<p><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >P2-11:&nbsp; Combining Learn-based and Lexicon-based  Techniques for Sentiment Detection without Using</span> <br />
+<span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  Labeled Examples</span><br />
+  <span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; S. Tan (Institute of Computing  Technology)</span> </p>
+<p><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >P2-12:&nbsp; Semi-supervised spam filtering:&nbsp; Does it work?</span><br />
+  <span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; G. Cormack and M. Mojdeh (University  of Waterloo/Cheriton School   of Computer Science)</span> </p>
+<p><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >P2-13:&nbsp; Limits of Opinion-Finding Baseline Systems</span><br />
+  <span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; C. Macdonald, B. He, I. Ounis and I.  Soboroff (NIST/University of Glasgow)</span> </p>
+<p><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >P2-14:&nbsp; Web Query Translation via Web Log Mining</span><br />
+  <span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; R. Hu and W. Chen (Microsoft  Research Asia)</span> </p>
+<p><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >P2-15:&nbsp; Analyzing Web Text Association to Disambiguate  Abbreviation in Queries</span><br />
+  <span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; X. Wei, F. Peng and B. Dumoulin  (Yahoo! Inc.)</span> </p>
+<p><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >P2-16:&nbsp; Bloggers as Experts: Feed Distillation using  Expert Retrieval Models</span><br />
+  <span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; K. Balog, M. de Rijke and W.  Weerkamp (University of Amsterdam/Informatics Institute)</span> </p>
+<p><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >P2-17:&nbsp; Search Effectiveness with a Breadth-First  Crawl</span><br />
+  <span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; D. Fetterly, N. Craswell and V.  Vinay (Microsoft)</span> </p>
+<p><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >P2-18:&nbsp; Guide Focused Crawler Efficiently and  Effectively Using On-line Topical Importance Estimation</span><br />
+  <span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Z. Guan (Zhejiang University)</span> </p>
+<p><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >P2-19:&nbsp; Web Page Retrieval in Ubiquitos Sensor  Environment</span><br />
+  <span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; T. Maekawa, Y. Yanagisawa, Y.  Sakurai, Y. Kishino, K. Kamei and T.Okadome (NTT Corporation)</span> </p>
+<p><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >P2-20:&nbsp; Automatic Document Prior Feature Selection for  Web Retrieval</span><br />
+  <span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; J. Peng, C. Macdonald and I. Ounis (University of Glasgow)</span> </p>
+<p><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >P2-21:&nbsp; Using Parsimonious Language Models on Web Data</span><br />
+  <span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; R. Kaptein, R. Li, D. Hiemstra and  J. Kamps (University of Twente/ University   of Amsterdam)</span> </p>
+<p><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >P2-22:&nbsp; Query Preprocessing: Improving Web Search  through a Vietnamese Word Tokenization Approach</span><br />
+  <span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; D. Nguyen (HP)</span> </p>
+<p><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+<p><strong><u><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Group 3: Multimedia and Domain Specific  IR</span></u></strong></p>
+<p><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >P3-1:&nbsp;&nbsp; AdImage:  Video Advertising by Image Matching and Ad Scheduling Optimization</span><br />
+  <span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; W. Hsu, W.S. Liao and K.T. Chen (National Taiwan University)</span> </p>
+<p><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >P3-2:&nbsp;&nbsp;&nbsp; Bag-of-Visual-Words Expansion Using Visual  Relatedness for Video Indexing</span><br />
+  <span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Y.G. Jiang and C.W. Ngo (City University  of Hong Kong)</span> </p>
+<p><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >P3-3:&nbsp;&nbsp;&nbsp; A Word Shape Coding Method for Camera-based  Document Images</span><br />
+  <span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; L. Li and C.L. Tan (National University  of Singapore)</span> </p>
+<p><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >P3-4:&nbsp;&nbsp;&nbsp; Term Clouds as surrogates for User Generated  Speech</span><br />
+  <span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; M. Tsagias, M. Larson and M. de  Rijke (University of Amsterdam/Informatics Institute)</span> </p>
+<p><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >P3-5:&nbsp;&nbsp;&nbsp; A Faceted Interface for Multimedia Search</span><br />
+  <span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; R. Villa, N. Gildea and J. Joemon (University of Glasgow)</span> </p>
+<p><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >P3-6:&nbsp;&nbsp;&nbsp; WISA: A Novel Web Image Semantic Analysis  System</span><br />
+  <span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; H. Xu, X. Zhou and L. Lan (Fudan  University/Tongji University)</span> </p>
+<p><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >P3-7:&nbsp;&nbsp;&nbsp; One-button Search Extracts Wider Interests:  An Empirical Study with Video Bookmarking Search</span><br />
+  <span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; M. Okamoto, M. Kikuchi and T.  Yamasaki (Toshiba Corporation)</span> </p>
+<p><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >P3-8:&nbsp;&nbsp;&nbsp; Product Retrieval for Grocery Stores</span><br />
+  <span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; P. Nurmi, E. Lagerspetz, W. Buntine,  P. Floreen and J. Kukkonen (Helsinki Institute for</span> <br />
+<span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  Information Technology)</span> </p>
+<p><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >P3-9:&nbsp;&nbsp;&nbsp; A Reranking Model for Genomics Aspect Search</span><br />
+  <span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; J. Huang and Q. Hu (York University)</span> </p>
+<p><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >P3-10:&nbsp; Improving Biomedical Document Retrieval using  Domain Knowledge</span><br />
+  <span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; S. Wang and M. Hauskrecht  (Intelligent Systems Program/University of Pittsburgh)</span> </p>
+<p><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >P3-11:&nbsp; Kleio: a knowledge-enriched information  retrieval system for biology</span><br />
+  <span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; C. Nobata, P. Cotter, N. Okazaki, B.  Rea, Y. Sasaki, Y. Tsuruoka, J. Tsujii and S. Ananiadou</span><br />
+<span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  (NaCTeM/University of  Manchester/University of Tokyo)</span> </p>
+<p><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >P3-12:&nbsp; Enhancing Keyword-Based Botanical Information  Retrieval with Information Extraction</span><br />
+  <span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; X. Tang (Emporia State   University)</span> </p>
+<p><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >P3-13:&nbsp; How Medical Expertise Influences Web Search  Interaction</span><br />
+  <span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; R. White, S.T. Dumais and J. Teevan  (Microsoft Research)</span> </p>
+<p><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >P3-14:&nbsp; Generating Diverse Katakana Variants Based on  Phonemic Mapping</span><br />
+  <span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; K. Seki, H. Hattori and K. Uehara (Kobe University)</span> </p>
+<p><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >P3-15:&nbsp; Exploiting sequential dependencies for expert  finding</span><br />
+  <span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; P. Serdyukov, H. Rode and D.  Hiemstra (University   of Twente)</span> </p>
+<p><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >P3-16:&nbsp; Modeling expert finding as an absorbing random  walk</span><br />
+  <span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; P. Serdyukov, H. Rode and D.  Hiemstra (University   of Twente)</span> </p>
+<p><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >P3-17:&nbsp; A Scalable Assistant Librarian: Hierarchical  Subject Classification of Books</span><br />
+  <span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; S. Crain, J. Huang and H. Zha  (Georgia Tech/Pennsylvania State University)</span> </p>
+<p><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >P3-18:&nbsp; Information Retrieval on Bug Locations by  Learning Co-located Bug Report Clusters</span><br />
+  <span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; I.X. Chen, H. Jaygarl, C.Z. Yang and  P.J. Wu (Yuan Ze University)</span> </p>
+<p><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >P3-19:&nbsp; Summarization of Compressed Text Images: an  Experience on Indic Script Documents</span><br />
+  <span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; U. Garain (Indian Statistical Institute, Kolkata, India)</span> </p>
+<p><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+<p><strong><u><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Group 4: Theory and IR Models</span></u></strong></p>
+<p><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >P4-1:&nbsp;&nbsp;&nbsp; A Method for Transferring Retrieval Scores  between Collections with Non-Overlapping Vocabularies</span><br />
+  <span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; F. Diaz (Yahoo! Inc.)</span> </p>
+<p><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >P4-2:&nbsp;&nbsp;&nbsp; Improving Relevance Feedback in Language  Modeling with Score Regularization</span><br />
+  <span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; F. Diaz (Yahoo! Inc.)</span> </p>
+<p><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >P4-3:&nbsp;&nbsp;&nbsp; Theoretical Bounds On and Empirical  Robustness of Score Regularization to Different</span> <br />
+<span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  Similarity Measures</span><br />
+  <span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; F. Diaz (Yahoo! Inc.)</span> </p>
+<p><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >P4-4:&nbsp;&nbsp;&nbsp; A Study of Query Length</span><br />
+  <span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; A. Arampatzis and J. Kamps (University of Amsterdam)</span> </p>
+<p><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >P4-5:&nbsp;&nbsp;&nbsp; Don't Have a Stemmer? Be Un+concern+ed</span><br />
+  <span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; P. McNamee, C. Nicholas and J.  Mayfield (Johns Hopkins University)</span> </p>
+<p><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >P4-6:&nbsp;&nbsp;&nbsp; Parsimonious Concept Modeling</span><br />
+  <span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; E. Meij, D. Trieschnigg, M. de Rijke  and W. Kraaij (University of Amsterdam/University of</span> <br />
+<span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  Twente/Informatics  Institute)</span> </p>
+<p><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >P4-7:&nbsp;&nbsp;&nbsp; Parsimonious Relevance Models</span><br />
+  <span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; E. Meij, W. Weerkamp, K. Balog and  M. de Rijke (University of Amsterdam/Informatics Institute)</span> </p>
+<p><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >P4-8:&nbsp;&nbsp;&nbsp; Author-Topic Evolution Analysis using  Three-way Non-negative Paratucker</span><br />
+  <span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; W. Peng and T. Li (Florida International   University)</span> </p>
+<p><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >P4-9:&nbsp;&nbsp;&nbsp; Exploiting Proximity Feature in Bigram  Language Model for Information Retrieval</span><br />
+  <span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; N. Seung-Hoon, J. Kim, K. In-Su and  L. Jong-Hyeok (Pohang University of Science &amp; Technology)</span> </p>
+<p><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >P4-10:&nbsp; Measuring Concept Relatedness Using Language  Models</span><br />
+  <span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; D. Trieschnigg, E. Meij, M. de Rijke  and W. Kraaij (University of Amsterdam/University of</span> <br />
+<span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  Twente/Informatics  Institute)</span> </p>
+<p><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >P4-11:&nbsp; Query-drift prevention for robust query  expansion</span><br />
+  <span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; L. Zighelnic and O. Kurland  (Technion)</span> </p>
+<p><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >P4-12:&nbsp; Adaptive Label-Driven Scaling for Latent  Semantic Indexing</span><br />
+  <span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; X. Quan, E. Chen, Q. Luo and H.  Xiong (University of Science and Technology of China)</span> </p>
+<p><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >P4-13:&nbsp; Fixed-threshold SMO for Joint Constraint  Learning Algorithm of Structural SVM</span><br />
+  <span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; C. Lee and M.G. Jang (ETRI)</span> </p>
+<p><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >P4-14:&nbsp; Posterior Probabilistic Clustering using NMF</span><br />
+  <span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; T. Li, D. Luo, C. Ding and W. Peng (Florida International University)</span> </p>
+<p><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >P4-15:&nbsp; On Document Splitting in Passage Detection</span><br />
+  <span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; S. Mengle and N. Goharian (Illinois  Institute of Technology)</span> </p>
+<p><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >P4-16:&nbsp; Learning with Support Vector Machines for  Query-By-Multiple-Examples</span><br />
+  <span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; D. Zhang and W.S. Lee (University of London)</span> </p>
+<p><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >P4-17:&nbsp; Question Classification with Semantic Tree  Kernel</span><br />
+  <span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Y. Pan, Y. Tang and L. Lin (Sun Yat-sen   University)</span> </p>
+<p><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >P4-18:&nbsp; Generalising multiple capture-recapture to  non-uniform sample sizes</span><br />
+  <span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; P. Thomas (CSIRO ICT Centre)</span> </p>
+<p><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >P4-19:&nbsp; Predicting when Browsing Context Is Relevant  to Search</span><br />
+  <span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; M. Rahurkar and S. Cucerzan  (Microsoft Research/University of Illinois)</span> </p>
+<p><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+<p><strong><u><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Group 5: Structured IR, Ranking, Classification  and Filtering</span></u></strong></p>
+<p><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >P5-1:&nbsp;&nbsp;&nbsp; XML-Aided Phrase Indexing for Hypertext  Documents</span><br />
+  <span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; M. Lehtonen and A. Doucet  (University of Helsinki/University of Caen)</span> </p>
+<p><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >P5-2:&nbsp;&nbsp;&nbsp; Proximity-Aware Scoring for XML Retrieval</span><br />
+  <span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; A. Broschart and R. Schenkel  (Max-Planck Institute for Informatics)</span> </p>
+<p><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >P5-3:&nbsp;&nbsp;&nbsp; Locating Relevant Text within XML Documents</span><br />
+  <span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; J. Kamps, M. Koolen and M. Lalmas  (Queen Mary, University of London/ University   of Amsterdam)</span> </p>
+<p><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >P5-4:&nbsp;&nbsp;&nbsp; A Flexible extension of XPath to improve XML  querying</span><br />
+  <span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; S. Marrara, E. Damiani and G. Pasi (University of Milan  - DTI/ University   of Milan - Bicocca)</span></p>
+<p><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >P5-5:&nbsp;&nbsp;&nbsp; Combining Document- and Paragraph-Based  Entity Ranking</span><br />
+  <span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; H. Rode, P. Serdyukov and D.  Hiemstra (University   of Twente)</span> </p>
+<p><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >P5-6:&nbsp;&nbsp;&nbsp; Re-ranking search results using  document-passage graphs</span><br />
+  <span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; M. Bendersky and O. Kurland  (Technion/University of Massachusetts, Amherst)</span> </p>
+<p><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >P5-7:&nbsp;&nbsp;&nbsp; Utilizing Phrase Based Semantic Information  for Term Dependency</span><br />
+  <span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Y. Xu, B. Wang and D. Fan (Institute  of Computing Technology/Chinese Academy   of Sciences)</span> </p>
+<p><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >P5-8:&nbsp;&nbsp;&nbsp; Inferring the Most Important Types of a  Query: a Semantic Approach</span><br />
+  <span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; D. Vallet and H. Zaragoza (Yahoo  Research/Universidad Autonoma de Madrid)</span> </p>
+<p><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >P5-9:&nbsp;&nbsp;&nbsp; On Multiword Entity Ranking in Peer-to-Peer  Search</span><br />
+  <span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Y. Merhav and O. Frieder (Illinois  Institute of Technology)</span> </p>
+<p><span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >P5-10:&nbsp; Site-Based Dynamic Pruning for Query  Processing in Search Engines</span><br />
+  <span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; I. Altingovde, e. Demir, F. Can and  O. Ulusoy (Bilkent University)</span> </p>
+<p><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >P5-11:&nbsp; Exploiting MDS Projections for Cross-language  IR</span><br />
+  <span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; R. Banchs and A. Kaltenbrunner (Barcelona Media Innovation  Centre)</span> </p>
+<p><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >P5-12:&nbsp; Local Approximation of PageRank and Reverse  PageRank</span><br />
+  <span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; L.T. Mashiach and Z. Bar-Yossef  (Technion - Isarael Institurte of technology)</span> </p>
+<p><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >P5-13:&nbsp; Improving Text Classification Accuracy using  Topic Modeling over an Additional Corpus&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span> <br />
+  <span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; S. Banerjee (HP Labs India)</span> </p>
+<p><span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >P5-14:&nbsp; An Algorithm for Text Categorization</span><br />
+  <span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; A. Gkanogiannis and T. Kalamboukis (Athens University  of Economics and Business)</span> </p>
+<p><span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >P5-15:&nbsp; Hypergraph Partitioning for Document  Clustering: A Unified Clique Perspective</span><br />
+  <span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; T. Hu, H. Xiong, W. Zhou, S.Y. Sung  and H. Luo (East China Normal   University)</span> </p>
+<p><span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >P5-16:&nbsp; PageRank Based Clustering of Hypertext  Document CollectionsK. Avrachenkov, V. Dobrynin,</span> <br />
+<span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  D. Nemirovsky, S. Pham and E.  Smirnova (INRIA Sophia Antipolis)</span></p>
+<p><span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >P5-17:&nbsp; An Alignment-based Pattern Representation  Model for Information Extraction</span><br />
+  <span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; S. Kim, M. Jeong and G.G. Lee (Pohang University  of Science and Technology)</span> </p>
+<p><span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >P5-18:&nbsp; Relational Distance-Based Collaborative  Filtering</span><br />
+  <span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; W. Zhang (Chinese Academy  of Sciences)</span> </p>
+<p align="left"><span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+<p align="left"><span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+</div>
+
+<div id="footer">
+<div style="text-align:left;margin: 0 0 8px 0;padding: 0 8px 12px 8px;line-height:12pt;font: 10pt arial, helvetica, sans-serif; border-bottom: 4px solid #f0f0f0;">
+    <span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >Featured Links:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://icpp2008.org/" target="_blank"><span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >icpp2008</span></span><span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.oasisglobal.net/" target="_blank"><span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >agriculture</span></span><span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.lubelska.com/" target="_blank"><span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >Big Lubelska</span></span><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.mensvita.com" target="_blank"><span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >Anti Aging</span></span><span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.nofec.org" target="_blank"><span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >caregivers</span></span><span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >|</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cheap-car-insurance-tips.com/" target="_blank"><span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >Cheap Auto Insurance</span></span><span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://mr-quote.com" target="_blank"><span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >car insurance</span></span><span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.eyesearch.com" target="_blank"><span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >eye search</span></span> <span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.kievapartment.org" target="_blank"><span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >kiev apartment</span></span><span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.enhancementhq.com/ogoplex.html" target="_blank"><span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >Ogoplex</span> </span><span class="coloringspan" id="282" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.mapleleaftickets.com/disney_tickets.htm" target="_blank"><span class="coloringspan" id="283" onmousedown="md(this)" onmouseup="mu(this)" >Disney World Tickets</span></span><span class="coloringspan" id="284" onmousedown="md(this)" onmouseup="mu(this)" >|</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.homebuildersaustralia.com.au" target="_blank"><span class="coloringspan" id="285" onmousedown="md(this)" onmouseup="mu(this)" >Builders</span></span><span class="coloringspan" id="286" onmousedown="md(this)" onmouseup="mu(this)" >|</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apnoti.com" target="_blank"><span class="coloringspan" id="287" onmousedown="md(this)" onmouseup="mu(this)" >smart shoppers portal</span></span><span class="coloringspan" id="288" onmousedown="md(this)" onmouseup="mu(this)" >|</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apnoti.com/index/download" target="_blank"><span class="coloringspan" id="289" onmousedown="md(this)" onmouseup="mu(this)" >Toolbar Download</span></span><span class="coloringspan" id="290" onmousedown="md(this)" onmouseup="mu(this)" >|</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://blog.apnoti.com/" target="_blank"><span class="coloringspan" id="291" onmousedown="md(this)" onmouseup="mu(this)" >Smart shopping Blog</span></span><span class="coloringspan" id="292" onmousedown="md(this)" onmouseup="mu(this)" >|</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.sentius.com" target="_blank"><span class="coloringspan" id="293" onmousedown="md(this)" onmouseup="mu(this)" >software</span></span><span class="coloringspan" id="294" onmousedown="md(this)" onmouseup="mu(this)" >|</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.mbat.com" target="_blank"><span class="coloringspan" id="295" onmousedown="md(this)" onmouseup="mu(this)" >mba</span></span><span class="coloringspan" id="296" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ontariowebsitesdesign.com/homes-for-sale.html" target="_blank"><span class="coloringspan" id="297" onmousedown="md(this)" onmouseup="mu(this)" >Homes in Toronto</span></span><span class="coloringspan" id="298" onmousedown="md(this)" onmouseup="mu(this)" >|</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://iticsoftware.com" target="_blank"><span class="coloringspan" id="299" onmousedown="md(this)" onmouseup="mu(this)" >metatrader expert advisor</span></span><span class="coloringspan" id="300" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.rockryno.com/" target="_blank"><span class="coloringspan" id="301" onmousedown="md(this)" onmouseup="mu(this)" >Business Software Forums</span></span><span class="coloringspan" id="302" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.bestcleansediet.com" target="_blank"><span class="coloringspan" id="303" onmousedown="md(this)" onmouseup="mu(this)" >Isagenix</span></span><span class="coloringspan" id="304" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.FireFold.com" target="_blank"><span class="coloringspan" id="305" onmousedown="md(this)" onmouseup="mu(this)" >HDMI Cable</span></span><span class="coloringspan" id="306" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.selectfoam.com/" target="_blank"><span class="coloringspan" id="307" onmousedown="md(this)" onmouseup="mu(this)" >mattresses</span></span><span class="coloringspan" id="308" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.eztrip.com/" target="_blank"><span class="coloringspan" id="309" onmousedown="md(this)" onmouseup="mu(this)" >Hotels</span></span><span class="coloringspan" id="310" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.spadepot.com/shop/Spas---Hot-Tubs-C59.aspx" target="_blank"><span class="coloringspan" id="311" onmousedown="md(this)" onmouseup="mu(this)" >Hot Tubs</span></span><span class="coloringspan" id="312" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+
+
+
+</div>
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.checkpagerank.net" target="_blank"><span class="coloringspan" id="313" onmousedown="md(this)" onmouseup="mu(this)" >Powered by Check Pagerank</span></span> <span class="coloringspan" id="314" onmousedown="md(this)" onmouseup="mu(this)" >&copy; Copyright 2007-2008 ACM SIGIR</span>

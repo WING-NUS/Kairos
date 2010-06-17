@@ -1,0 +1,877 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html lang="en"><head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session1/6/annotation/annotated_repository/http+^^iwqos08.ewi.utwente.nl^Program^_2009-08-05__14-26-37.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session1/6/annotation/annotated_repository/http+^^iwqos08.ewi.utwente.nl^Program^_2009-08-05__14-26-37.yaml created on Thu Aug 13 13:48:35 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+<LINK REL="SHORTCUT ICON" HREF="http://www.utwente.nl/repository/atcampus/images/favicon.ico"><link rel="stylesheet" href="http://www.utwente.nl/repository/atcampus/css-v2/atcampus.css" type="text/css">
+<style type="text/css">
+      #top_large { background-image: url(http://www.utwente.nl/repository/atcampus/images/photosets2/bezoekers/top-large.gif); background-repeat: no-repeat; height: 120px; text-align: top;}
+      #top_small { background-image: url(http://www.utwente.nl/repository/atcampus/images/photosets2/bezoekers/top-small.gif); background-repeat: no-repeat; height: 54px; text-align: top;}
+    </style>
+  
+    <script language="javascript" src="http://www.utwente.nl/repository/atcampus/js-v2/commonfunctions.js" type="text/javascript"></script>
+    <script language="javascript" src="http://www.utwente.nl/repository/atcampus/js-v2/images.js" type="text/javascript"></script>
+    <script language="javascript" src="http://www.utwente.nl/repository/atcampus/js-v2/menuengine.js" type="text/javascript"></script>
+    <script language="javascript" src="http://www.utwente.nl/repository/atcampus/js-v2/atcampus-en.js" type="text/javascript"></script>
+    <script language="javascript" src="http://www.utwente.nl/repository/atcampus/js-v2/swfobject.js" type="text/javascript"></script>
+  
+<title>Program</title>
+<meta name="generator" content="@campus template, B-Lex, 2005-02-27,2008-05-29 10:14,WebHare Application Portal v2.33.99">
+<meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+<link rel="stylesheet" type="text/css" href="program.doc/webhare.css">
+</head>
+
+
+<body onload="on_load()" onkeyup="on_key_up(event)" bgcolor="#FFFFFF" onLoad="javascript:atcampus_paginaInit(1);"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<span onclick="return false" style="text-decoration:underline; color:blue" name="top"></span>
+<p class="onzichtbaar"><span onclick="return false" style="text-decoration:underline; color:blue" href="#content"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Jump to the content</span></span></p>
+<table width="100%" cellpadding="0" cellspacing="0" border="0">
+  <tr>
+    <td bgcolor="#598B04"
+       
+    >
+      
+    <div id="top_small">
+       <div class="smallheadingplacer"><table cellspacing="0" cellpadding="0" border="0"><tr><td valign="middle" align="left" style="height:54px;"><h1><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >IWQoS 2008</span></h1></td></tr></table></div>
+    </div>
+
+    </td>
+  </tr>
+  <tr>
+    <td bgcolor="#ffffff"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+  </tr>
+  <tr>
+    <td bgcolor="#ffffff" class="pathbar" >
+      <table cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td width="153">
+                
+                    <img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="153" height="20" border="0"></td>
+                
+        <td bgcolor="#ffffff" width="1" height="20"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="20" border="0"></td>
+        <td width="37" height="20"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="37" height="20" border="0"></td>
+        <td class="path"><span onclick="return false" style="text-decoration:underline; color:blue" class="path" href="http://iwqos08.ewi.utwente.nl/"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span> <span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >&gt; Program</span></td></tr>
+      </table>
+    </td>
+  </tr>
+  <!-- tr>
+    <td height="28"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="28" border="0"></td>
+  </tr -->
+</table>
+
+<table cellpadding="0" cellspacing="0" border="0">
+  <tr>
+    <td width="150" valign="top">
+      <table width="150" cellspacing="0" cellpadding="0" border="0">
+        
+          <tr>
+            <td><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="150" height="29" border="0"></td>
+          </tr>
+          <tr>
+            <td align="right"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.utwente.nl/en/"><img onmousedown="imd(this)" alt="Home University of Twente" src="http://www.utwente.nl/repository/atcampus/images/utlogo_en.gif" width="114" height="52" border="0"></span></td>
+          </tr>
+        
+        <tr>
+          <td height="13"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+        </tr>
+        <tr>
+  <td height="1" bgcolor="#cccccc"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+</tr>
+<tr>
+  <td align="right" height="17" valign="middle">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://iwqos08.ewi.utwente.nl/Call%20for%20papers/" class="menulink"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Call for papers</span></span><tr>
+  <td height="1" bgcolor="#cccccc"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+</tr>
+<tr>
+  <td align="right" height="17" valign="middle">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://iwqos08.ewi.utwente.nl/Committees/" class="menulink"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></span><tr>
+  <td height="1" bgcolor="#cccccc"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+</tr>
+<tr>
+  <td align="right" height="17" valign="middle">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://iwqos08.ewi.utwente.nl/Paper%20submission/" class="menulink"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Paper submission</span></span><tr>
+  <td height="1" bgcolor="#cccccc"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+</tr>
+<tr>
+  <td align="right" height="17" valign="middle">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://iwqos08.ewi.utwente.nl/Program/" class="menulink"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span><tr>
+  <td height="1" bgcolor="#cccccc"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+</tr>
+<tr>
+  <td align="right" height="17" valign="middle">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://iwqos08.ewi.utwente.nl/Registration/" class="menulink"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span><tr>
+  <td height="1" bgcolor="#cccccc"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+</tr>
+<tr>
+  <td align="right" height="17" valign="middle">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://iwqos08.ewi.utwente.nl/Travel/" class="menulink"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Travel</span></span><tr>
+  <td height="1" bgcolor="#cccccc"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+</tr>
+<tr>
+  <td align="right" height="17" valign="middle">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://iwqos08.ewi.utwente.nl/Camera%20ready/" class="menulink"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Camera ready</span></span><tr>
+  <td height="1" bgcolor="#cccccc"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+</tr>
+<tr>
+  <td align="right" height="17" valign="middle">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://iwqos08.ewi.utwente.nl/Previous%20workshops/" class="menulink"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Previous workshops</span></span><tr>
+  <td height="1" bgcolor="#cccccc"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+</tr>
+<tr>
+  <td align="right" height="17" valign="middle">
+<span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><tr>
+  <td height="1" bgcolor="#cccccc"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+</tr>
+<tr>
+  <td align="right" height="17" valign="middle">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://iwqos08.ewi.utwente.nl/contact/" class="menulink"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/lefticons/contact.gif" width="14" height="12" border="0"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Contact</span></span>
+  </td>
+</tr>
+<tr>
+  <td height="1" bgcolor="#cccccc"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+</tr>
+<tr>
+  <td align="right" height="17" valign="middle">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://iwqos08.ewi.utwente.nl/index.doc/_sitemap.html" class="menulink"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/lefticons/sitemap.gif" width="14" height="12" border="0"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Sitemap</span></span>
+  </td>
+</tr>
+<tr>
+  <td height="1" bgcolor="#cccccc"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+</tr>
+<tr>
+  <td align="right" height="17" valign="middle">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.utwente.nl/repository/atcampus/utils/consilio.shtml?folder=13334" class="menulink"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/lefticons/search.gif" width="14" height="12" border="0"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Search</span></span>
+  </td>
+</tr>
+<tr>
+<td height="1" bgcolor="#cccccc"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+</tr>
+<tr>
+<td align="right" height="17" valign="middle"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+</tr>
+<tr>
+  <td height="1" bgcolor="#cccccc"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+</tr>
+<tr>
+  <td align="right" height="17" valign="middle">
+
+  <script language="javascript" type="text/javascript">
+    <!--
+      renderOpenPrintableWindow2('http://www.utwente.nl/repository/atcampus/images/printer.gif','http://iwqos08.ewi.utwente.nl/Program/program.doc/_printableversion.html','Printable version','http://www.utwente.nl/repository/atcampus/images/newwindow-gray.gif','(opens in a new window)');
+    // -->
+  </script>
+  <noscript>
+    <span onclick="return false" style="text-decoration:underline; color:blue" href="http://iwqos08.ewi.utwente.nl/Program/program.doc/_printableversion.html" target="_blank" class="menulink"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/printer.gif" width="14" height="12" border="0"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="3" height="1" border="0"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Printable version&nbsp;</span><img onmousedown="imd(this)" src="http://www.utwente.nl/repository/atcampus/images/newwindow-gray.gif" width="8" height="7" alt="(opens in a new window)" border="0" style="vertical-align:baseline"></span>
+  </noscript>
+  </td>
+</tr>
+<tr>
+<td height="1" bgcolor="#cccccc"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+</tr>
+
+      </table>
+    </td>
+    <td width="40" valign="top"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="40" height="1" border="0"></td>
+    <td valign="top" width="527" id="content">
+      <img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="28" border="0"><br>
+      <span onclick="return false" style="text-decoration:underline; color:blue" name="content"></span>      <table width="527" cellpadding="0" cellspacing="0" border="0">        <tr>          <td valign="top"><h2><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></h2></td>        </tr>        <tr>          <td height="25"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="25" border="0"></td>        </tr>      </table><!-- start content --><p class="wh-heading3" style="padding:12pt 0 17.4pt;">
+<span onclick="return false" style="text-decoration:underline; color:blue" name="monday"></span><span lang="en-gb"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Monday</span></span></p>
+<p class="wh-normal"><b><span lang="en-gb"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >08:00 &#8211; 10:00, 12:00 &#8211; 13:00</span>  </span></b><b><i><span lang="en-gb"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></i></b></p>
+<p class="wh-normal" style="padding:0 0 14.4pt;"><span lang="en-gb"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2 (entrance)</span></span></p>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >09:00 &#8211; 9:15  Opening</span></span></i></b></p>
+<p class="wh-normal" style="padding:0 0 14.4pt;"><span lang="en-gb"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2</span></span></p>
+<p class="wh-normal"><i><span lang="en-gb"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Scientific director of the Centre for Telematics and Information Technology (CTIT):</span></span></i></p>
+<p class="wh-normal" style="padding:0 0 14.4pt;"><i><span lang="en-gb"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Prof. dr.</span> </span></i><b><i><span lang="en-gb"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Peter Apers</span></span></i></b></p>
+<p class="wh-normal">
+<span onclick="return false" style="text-decoration:underline; color:blue" name="OLE_LINK3"></span><i><span lang="en-gb"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >General chair IWQoS 2008:</span> </span></i></p>
+<p class="wh-normal" style="padding:0 0 14.4pt;"><i><span lang="en-gb"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Prof. dr. ir.</span> </span></i><b><i><span lang="en-gb"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Boudewijn Haverkort</span></span></i></b></p>
+<p class="wh-normal"><i><span lang="en-gb"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >PC chairs of IWQoS 2008:</span> </span></i></p>
+<p class="wh-normal" style="padding:0 0 14.4pt;"><i><span lang="en-gb"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Prof. dr.</span> </span></i><b><i><span lang="en-gb"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Gunnar Karlsson</span></span></i></b><i><span lang="en-gb"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >, Prof. dr.</span> </span></i><b><i><span lang="en-gb"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Hans van den Berg</span></span></i></b></p>
+<p class="wh-normal"><i><span lang="en-gb"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Local chair of IWQoS 2008:</span> </span></i></p>
+<p class="wh-normal" style="padding:0 0 14.4pt;"><i><span lang="en-gb"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Dr. ir.</span> </span></i><b><i><span lang="en-gb"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Georgios Karagiannis</span></span></i></b></p>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >09:15 &#8211; 10:15  Invited Presentation</span></span></i></b><i><span lang="en-gb"> </span></i></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><span lang="en-gb"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2</span></span></p>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 12pt;"><i><span style="font-family:Symbol;font-size:83%;" lang="en-gb"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></i></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 12pt;"><span onclick="return false" style="text-decoration:underline; color:blue" href="../Call%20for%20papers/abstract_blake.pdf"><i><span lang="en-gb"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >QoS Deployment Trends in Next Generation Packet Networks</span></span></i></span><i><span lang="en-gb"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >,</span> </span></i><span lang="en-gb"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >by</span> </span><b><span lang="en-gb"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Steven Blake</span></span></b><span lang="en-gb"> <span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >(Extreme Networks)</span></span></p></td>
+ </tr>
+</table>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >10:15 &#8211; 10:45  Coffee break</span></span></i></b></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><span lang="en-gb"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2 (entrance)</span></span></p>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >10:45 &#8211; 12:15  Session 1: Peer-to-Peer Networks and Applications</span></span></i></b></p>
+<p class="wh-normal"><span lang="en-gb"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2</span> </span></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><b><span lang="en-gb"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Session chair:</span></span></b><b><i><span lang="en-gb"> </span></i></b><b><i><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Michael Menth</span></i></b><i> <span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >(University of Wuerzburg)</span></i></p>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Evolution and Enhancement of BitTorrent Network Topologies</span></i><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Cameron Dale</span></b> <span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >(Simon Fraser University),</span> <b><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Liu Jiangchuan</span></b> <span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >(Simon Fraser University),</span> <b><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Joseph Peters</span></b> <span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >(Simon Fraser University),</span> <b><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Bo Li</span></b> <span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >(Hong Kong University of Science and Technology)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Performance and Quality-of-Service Analysis of a Live P2P Video Multicast Session on the Internet</span></i><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Sachin Agarwal</span></b> <span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >(Deutsche Telekom A.G., Laboratories),</span> <b><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Jatinder Singh</span></b> <span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >(Deutsche Telekom A.G., Laboratories),</span> <b><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Aditya Mavlankar</span></b> <span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >(Stanford University),</span> <b><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Pierpaolo Baccichet</span></b> <span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >(Stanford University),</span> <b><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Bernd Girod</span></b> <span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >(Stanford University)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 12pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 12pt;"><i><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Reputation-assisted Utility Maximization Algorithms for Peer-to-Peer Networks</span></i><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >George Iosifidis</span></b> <span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >(University of Thessaly),</span> <b><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Iordanis Koutsopoulos</span></b> <span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >(University of Thessaly)</span></p></td>
+ </tr>
+</table>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >12:15 &#8211; 13:45  Lunch</span></span></i></b></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><span lang="en-gb"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Building: Faculty Club</span></span></p>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >13:45 &#8211; 15:15  Session 2: Web Systems and Service Oriented Architectures</span></span></i></b></p>
+<p class="wh-normal"><span lang="en-gb"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2</span> </span></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><b><span lang="en-gb"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Session chair:</span> </span></b><b><i><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Rob van der Mei</span></i></b><b> </b><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >(CWI)</span></p>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >SLA-based Service Composition in Enterprise Computing</span></i><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Kaiqi Xiong</span></b> <span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >(North Carolina State University),</span> <b><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Harry Perros</span></b> <span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >(North Carolina State University)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >A Negotiation Mechanism for Advance Resource Reservation using the Alternate Offers Protocol</span></i><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Srikumar Venugopal</span></b> <span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >(University of Melbourne),</span> <b><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Xingchen Chu</span> </b><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >(University of Melbourne),</span> <b><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Rajkumar Buyya</span></b> <span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >(University of Melbourne)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 12pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 12pt;"><i><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Self-* overload control for distributed web systems</span></i><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Novella Bartolini</span></b> <span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >(University of Rome "La Sapienza),</span> <b><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Giancarlo Bongiovanni</span></b> <span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >(University of Rome "La Sapienza"),</span> <b><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Simone Silvestri</span></b> <span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >(University of Rome "La Sapienza")</span></p></td>
+ </tr>
+</table>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >15:15 &#8211; 15:45  Coffee break</span></span></i></b></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><span lang="en-gb"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2 (entrance)</span></span></p>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >15:45 &#8211; 16:45  Session 3: Short Papers I</span></span></i></b></p>
+<p class="wh-normal"><span lang="en-gb"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2</span> </span></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><b><span lang="en-gb"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Session chair:</span> </span></b><b><i><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Boudewijn Haverkort</span></i></b><b> </b><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >(University of Twente)</span></p>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >On the Speedup Required to Achieve 100% Throughput for Multicast Traffic over Crossbar Switches</span></i><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Can Emre Koksal</span></b> <span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >(The Ohio State University)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Obtaining High Throughput in Networks with Tiny Buffers</span></i><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Neda Beheshti</span></b> <span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >(Stanford University),</span> <b><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Yashar Ganjali</span></b> <span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >(University of Toronto),</span> <b><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Ashish Goel</span></b> <span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >(Stanford University),</span> <b><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Nick McKeown</span></b> <span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >(Stanford University)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Extensible modular design and implementation of hybrid packet schedulers</span></i><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Douglas Comer</span></b> <span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >(Cisco Systems, Purdue University),</span> <b><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Maxim Martynov</span></b> <span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >(Cisco Systems)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 12pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 12pt;"><i><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Scaling laws for file dissemination in P2P networks with random contacts</span></i><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Rundesindo Nunez-Queija</span></b> <span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >(CWI),</span> <b><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Balakrishna Prabhu</span></b> <span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >(LAAS-CNRS)</span></p></td>
+ </tr>
+</table>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >16:45 &#8211; 17:45  Session 4: Buffer Sizing in Routers</span></span></i></b></p>
+<p class="wh-normal"><span lang="en-gb"><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2</span> </span></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><b><span lang="en-gb"><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Session chair:</span> </span></b><b><i><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Bong Dae Choi</span></i></b><b> </b><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >(Korea University)</span></p>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Routers With Very Small Buffers: Anomalous Loss Performance for Mixed Real-Time and TCP Traffic</span></i><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Arun Vishwanath</span></b> <span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >(University of New South Wales),</span> <b><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Vijay Sivaraman</span></b> <span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >(University of New South Wales)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 12pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 12pt;"><i><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >ABS: Adaptive Buffer Sizing for Heterogeneous Networks</span></i><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Yueping Zhang</span> </b><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >(NEC Laboratories America, Inc.),</span> <b><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Dmitri Loguinov</span></b> <span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >(Texas A&#38;M University)</span></p></td>
+ </tr>
+</table>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >17:45 &#8211; 19:00  Reception</span> </span></i></b></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><span lang="en-gb"><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel-Canteen</span></span></p>
+<p class="wh-heading3" style="padding:12pt 0 15pt;">
+<span onclick="return false" style="text-decoration:underline; color:blue" name="tuesday"></span><span lang="en-gb"><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday</span></span></p>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >08:00 &#8211; 09:00, 12:30 &#8211; 13:00  Registration</span></span></i></b></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><span lang="en-gb"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2 (entrance)</span></span></p>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >8:30 &#8211; 10:00  Session 5: Congestion Control</span></span></i></b></p>
+<p class="wh-normal"><span lang="en-gb"><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2</span> </span></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><b><span lang="en-gb"><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Session chair:</span> </span></b><b><i><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Ted Szymanski</span></i></b><b> </b><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >(McMaster University)</span></p>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Making a Delay-based Protocol Adaptive to Heterogeneous Environments</span></i><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Kiran Kotla</span></b> <span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >(Texas A&#38;M University),</span> <b><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Narasimha Reddy</span></b> <span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >(Texas A &#38; M University),</span> </p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Performance Evaluation of PCN-Based Admission Control</span></i><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Michael Menth</span></b> <span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >(University of Wuerzburg),</span> <b><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Frank Lehrieder</span></b> <span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >(University of Wuerzburg)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 12pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 12pt;"><i><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Towards Experimental Evaluation of Explicit Congestion Control</span></i><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Saurabh Jain</span></b> <span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >(Cisco),</span> <b><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Yueping Zhang</span></b> <span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >(NEC Laboratories Inc.),</span> <b><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Dmitri Loguinov</span></b> <span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >(Texas A&#38;M University)</span></p></td>
+ </tr>
+</table>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >10:00 &#8211; 10:30  Coffee break</span></span></i></b></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><span lang="en-gb"><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2 (entrance)</span></span></p>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >10:30 &#8211; 12:30 Session 6:  Wireless and Sensor Networks</span></span></i></b></p>
+<p class="wh-normal"><span lang="en-gb"><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2</span> </span></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><b><span lang="en-gb"><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >Session chair:</span> </span></b><b><i><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Zvi Rosberg</span> </i></b><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >(CSIRO ICT Centre)</span></p>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Delay Analysis of Bandwidth Request in Truncated Binary Exponential Backoff Mechanism over Error-Free/Error-Prone Channels in IEEE 802.16e</span></i><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Eunju Hwang</span></b> <span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >(Korea University),</span> <b><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Kyung Jae Kim</span></b> <span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >(Korea University),</span> <b><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Andrey Lyakhov</span></b> <span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >(IITP, RAS),</span> <b><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Bong Dae Choi</span></b> <span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >(Korea Univ.)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Dynamic Control of Tunable Sub-optimal Algorithms for Scheduling of Time-varying Wireless Networks</span></i><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Mahdi Lotfinezhad</span></b> <span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >(University of Toronto),</span> <b><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Ben Liang</span></b> <span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >(University of Toronto),</span> <b><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Elvino Sousa</span></b> <span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >(University of Toronto)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Collaborative Target Detection in Wireless Sensor Networks with Reactive Mobility</span></i><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Rui Tan</span></b> <span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >(City University of Hong Kong),</span> <b><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Guoliang Xing</span></b> <span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >(City University of Hong Kong),</span> <b><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Jianping Wang</span></b> <span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >(City University of Hong Kong),</span> <b><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Hing Cheung So</span></b> <span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >(City University of Hong  Kong)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >Achieving Energy Efficiency with Transmission Pushbacks in Sensor Networks</span></i><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >Sha Liu</span></b> <span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >(Ohio State University),</span> <b><span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >Rahul Srivastava</span></b> <span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >(Ohio State University),</span> <b><span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >Can Emre Koksal</span></b> <span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >(The Ohio State University),</span> <b><span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >Prasun Sinha</span></b> <span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >(The Ohio State University)</span></p></td>
+ </tr>
+</table>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >12:30 &#8211; 14:00  Lunch</span></span></i></b></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><span lang="en-gb"><span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >Building: Faculty Club</span></span></p>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >14:00 &#8211; 15:30  Session 7: Mobile Networking</span></span></i></b></p>
+<p class="wh-normal"><span lang="en-gb"><span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2</span> </span></p>
+<p class="wh-normal" style="padding:0 0 14.4pt;"><b><span lang="en-gb"><span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >Session chair:</span> </span></b><b><i><span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >Georgios Karagiannis</span></i></b><b> </b><span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >(University of Twente)</span></p>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >Transcasting: Cost-Efficient Video Multicast for Heterogeneous Mobile Terminals</span></i><span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >Morihiko Tamai</span></b> <span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >(Nara Institute of Science and Technology),</span> <b><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >Keiichi Yasumoto</span></b> <span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >(Nara Institute of Science and Technology),</span> <b><span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >Naoki Shibata</span></b> <span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >(Shiga University),</span> <b><span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >Minoru Ito</span></b> <span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >(Nara Institute of Science and Technology),</span> <b><span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >Klara Nahrstedt</span></b> <span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >(University of Illinois at Urbana Champaign)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >Performance of TCP in Multi-Hop Access Networks</span></i><span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >Yang Su</span></b> <span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >(ETH Zurich),</span> <b><span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >Peter Steenkiste</span></b> <span class="coloringspan" id="282" onmousedown="md(this)" onmouseup="mu(this)" >(Carnegie Mellon University),</span> <b><span class="coloringspan" id="283" onmousedown="md(this)" onmouseup="mu(this)" >Thomas Gross</span></b> <span class="coloringspan" id="284" onmousedown="md(this)" onmouseup="mu(this)" >(ETH Zurich)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 12pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="285" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 12pt;"><i><span class="coloringspan" id="286" onmousedown="md(this)" onmouseup="mu(this)" >Architecture of Achieving QoS for Multiple Flows per Node in WLANs</span></i><span class="coloringspan" id="287" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="288" onmousedown="md(this)" onmouseup="mu(this)" >Weihua (Helen) Xi</span></b> <span class="coloringspan" id="289" onmousedown="md(this)" onmouseup="mu(this)" >(University of Bristol),</span> <b><span class="coloringspan" id="290" onmousedown="md(this)" onmouseup="mu(this)" >Alistair Munro</span></b> <span class="coloringspan" id="291" onmousedown="md(this)" onmouseup="mu(this)" >(University of Bristol),</span> <b><span class="coloringspan" id="292" onmousedown="md(this)" onmouseup="mu(this)" >Michael Barton</span></b> <span class="coloringspan" id="293" onmousedown="md(this)" onmouseup="mu(this)" >(University of Bristol)</span></p></td>
+ </tr>
+</table>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="294" onmousedown="md(this)" onmouseup="mu(this)" >15:30 &#8211; 16:00  Coffee break</span></span></i></b></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><span lang="en-gb"><span class="coloringspan" id="295" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2 (entrance)</span></span></p>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="296" onmousedown="md(this)" onmouseup="mu(this)" >16:00 &#8211; 16:30  Session 8: Short Papers II</span></span></i></b></p>
+<p class="wh-normal"><span lang="en-gb"><span class="coloringspan" id="297" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2</span></span></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><b><span lang="en-gb"><span class="coloringspan" id="298" onmousedown="md(this)" onmouseup="mu(this)" >Session chair:</span> </span></b><b><i><span class="coloringspan" id="299" onmousedown="md(this)" onmouseup="mu(this)" >Thomas Gross</span> </i></b><span class="coloringspan" id="300" onmousedown="md(this)" onmouseup="mu(this)" >(ETH Zurich)</span></p>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="301" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="302" onmousedown="md(this)" onmouseup="mu(this)" >Stochastically Guaranteed Routing for Additive Link Metrics with Unknown Distributions</span></i><span class="coloringspan" id="303" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="304" onmousedown="md(this)" onmouseup="mu(this)" >Suleyman Uludag</span></b> <span class="coloringspan" id="305" onmousedown="md(this)" onmouseup="mu(this)" >(The University of Michigan - Flint),</span> <b><span class="coloringspan" id="306" onmousedown="md(this)" onmouseup="mu(this)" >Ziyneti E. Uludag</span></b> <span class="coloringspan" id="307" onmousedown="md(this)" onmouseup="mu(this)" >(The University of Michigan - Flint),</span> <b><span class="coloringspan" id="308" onmousedown="md(this)" onmouseup="mu(this)" >Anthony Howell</span></b> <span class="coloringspan" id="309" onmousedown="md(this)" onmouseup="mu(this)" >(The University of Michigan - Flint),</span> <b><span class="coloringspan" id="310" onmousedown="md(this)" onmouseup="mu(this)" >Fred Baker</span></b> <span class="coloringspan" id="311" onmousedown="md(this)" onmouseup="mu(this)" >(Cisco),</span> <b><span class="coloringspan" id="312" onmousedown="md(this)" onmouseup="mu(this)" >King-Shan Lui</span></b> <span class="coloringspan" id="313" onmousedown="md(this)" onmouseup="mu(this)" >(University of Hong Kong)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 12pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="314" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 12pt;"><i><span class="coloringspan" id="315" onmousedown="md(this)" onmouseup="mu(this)" >Performance Evaluation of Pre-Congestion Notification</span></i><span class="coloringspan" id="316" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="317" onmousedown="md(this)" onmouseup="mu(this)" >Xinyang Zhang</span></b> <span class="coloringspan" id="318" onmousedown="md(this)" onmouseup="mu(this)" >(Cornell University),</span> <b><span class="coloringspan" id="319" onmousedown="md(this)" onmouseup="mu(this)" >Anna Charny</span></b> <span class="coloringspan" id="320" onmousedown="md(this)" onmouseup="mu(this)" >(Cisco Systems)</span></p></td>
+ </tr>
+</table>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="321" onmousedown="md(this)" onmouseup="mu(this)" >16:30 &#8211; 17:30  Invited Presentation</span></span></i></b><i><span lang="en-gb"> </span></i></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><span lang="en-gb"><span class="coloringspan" id="322" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2</span></span></p>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 12pt;"><i><span style="font-family:Symbol;font-size:83%;" lang="en-gb"><span class="coloringspan" id="323" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></i></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 12pt;"><span onclick="return false" style="text-decoration:underline; color:blue" href="../Call%20for%20papers/abstract_hutchison.pdf"><i><span lang="en-gb"><span class="coloringspan" id="324" onmousedown="md(this)" onmouseup="mu(this)" >QoS: (Still) a Grand Challenge?</span></span></i></span><i><span lang="en-gb"> </span></i><span lang="en-gb"><span class="coloringspan" id="325" onmousedown="md(this)" onmouseup="mu(this)" >by</span></span><i><span lang="en-gb"> </span></i><b><span lang="en-gb"><span class="coloringspan" id="326" onmousedown="md(this)" onmouseup="mu(this)" >David Hutchison</span></span></b><span lang="en-gb"> <span class="coloringspan" id="327" onmousedown="md(this)" onmouseup="mu(this)" >(Lancaster University)</span></span></p></td>
+ </tr>
+</table>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="328" onmousedown="md(this)" onmouseup="mu(this)" >19:00 - ..  Dinner</span></span></i></b></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><span lang="en-gb"><span class="coloringspan" id="329" onmousedown="md(this)" onmouseup="mu(this)" >Location: Restaurant &#8220;De Jaargetijden&#8221;</span></span></p>
+<p class="wh-heading3" style="padding:12pt 0 15pt;">
+<span onclick="return false" style="text-decoration:underline; color:blue" name="wednesday"></span><span lang="en-gb"><span class="coloringspan" id="330" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday</span></span></p>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="331" onmousedown="md(this)" onmouseup="mu(this)" >08:30 &#8211; 10:00  Session 9: Traffic Filtering, Identification and Characterization</span></span></i></b></p>
+<p class="wh-normal"><span lang="en-gb"><span class="coloringspan" id="332" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2</span></span></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><b><span lang="en-gb"><span class="coloringspan" id="333" onmousedown="md(this)" onmouseup="mu(this)" >Session chair:</span> </span></b><b><i><span class="coloringspan" id="334" onmousedown="md(this)" onmouseup="mu(this)" >Gerhard Hasslinger</span></i></b><b> </b><span class="coloringspan" id="335" onmousedown="md(this)" onmouseup="mu(this)" >(T-Systems)</span></p>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="336" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="337" onmousedown="md(this)" onmouseup="mu(this)" >Dynamic Balancing of Packet Filtering Workloads on Distributed Firewalls</span></i><span class="coloringspan" id="338" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="339" onmousedown="md(this)" onmouseup="mu(this)" >Guanhua Yan</span> </b><span class="coloringspan" id="340" onmousedown="md(this)" onmouseup="mu(this)" >(Los Alamos National Laboratory),</span> <b><span class="coloringspan" id="341" onmousedown="md(this)" onmouseup="mu(this)" >Songqing Chen</span></b> <span class="coloringspan" id="342" onmousedown="md(this)" onmouseup="mu(this)" >(George Mason University),</span> <b><span class="coloringspan" id="343" onmousedown="md(this)" onmouseup="mu(this)" >Stephan Eidenbenz</span></b> <span class="coloringspan" id="344" onmousedown="md(this)" onmouseup="mu(this)" >(Los Alamos National Laboratory)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="345" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="346" onmousedown="md(this)" onmouseup="mu(this)" >Application Identification Based on Network Behavioral Profiles</span></i><span class="coloringspan" id="347" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="348" onmousedown="md(this)" onmouseup="mu(this)" >Yan Hu</span></b> <span class="coloringspan" id="349" onmousedown="md(this)" onmouseup="mu(this)" >(Chinese University of Hong Kong),</span> <b><span class="coloringspan" id="350" onmousedown="md(this)" onmouseup="mu(this)" >Dah Ming Chiu</span></b> <span class="coloringspan" id="351" onmousedown="md(this)" onmouseup="mu(this)" >(Chinese University of Hong Kong),</span> <b><span class="coloringspan" id="352" onmousedown="md(this)" onmouseup="mu(this)" >John C.S. Lui</span></b> <span class="coloringspan" id="353" onmousedown="md(this)" onmouseup="mu(this)" >(Chinese University of Hong Kong)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 12pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="354" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 12pt;"><i><span class="coloringspan" id="355" onmousedown="md(this)" onmouseup="mu(this)" >Statistics and Social Network of YouTube Videos,</span></i> <b><span class="coloringspan" id="356" onmousedown="md(this)" onmouseup="mu(this)" >Xu Cheng</span></b> <span class="coloringspan" id="357" onmousedown="md(this)" onmouseup="mu(this)" >(Simon Fraser University),</span> <b><span class="coloringspan" id="358" onmousedown="md(this)" onmouseup="mu(this)" >Cameron Dale</span></b> <span class="coloringspan" id="359" onmousedown="md(this)" onmouseup="mu(this)" >(Simon Fraser University),</span> <b><span class="coloringspan" id="360" onmousedown="md(this)" onmouseup="mu(this)" >Liu Jiangchuan</span></b> <span class="coloringspan" id="361" onmousedown="md(this)" onmouseup="mu(this)" >(Simon Fraser University)</span></p></td>
+ </tr>
+</table>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="362" onmousedown="md(this)" onmouseup="mu(this)" >10:00 &#8211; 10:30  Coffee break</span></span></i></b></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><span lang="en-gb"><span class="coloringspan" id="363" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2 (entrance)</span></span></p>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="364" onmousedown="md(this)" onmouseup="mu(this)" >10:30 &#8211; 11:30  Session 10: Quality of Experience</span></span></i></b></p>
+<p class="wh-normal"><span lang="en-gb"><span class="coloringspan" id="365" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2</span></span></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><b><span lang="en-gb"><span class="coloringspan" id="366" onmousedown="md(this)" onmouseup="mu(this)" >Session chair:</span> </span></b><b><i><span class="coloringspan" id="367" onmousedown="md(this)" onmouseup="mu(this)" >Anna Charny</span> </i></b><i><span class="coloringspan" id="368" onmousedown="md(this)" onmouseup="mu(this)" >(</span></i><span class="coloringspan" id="369" onmousedown="md(this)" onmouseup="mu(this)" >Cisco)</span></p>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="370" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="371" onmousedown="md(this)" onmouseup="mu(this)" >Packet Loss in Real-Time Services: Markovian Models Generating QoE Impairments</span></i><span class="coloringspan" id="372" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="373" onmousedown="md(this)" onmouseup="mu(this)" >Oliver Hohlfeld</span></b> <span class="coloringspan" id="374" onmousedown="md(this)" onmouseup="mu(this)" >(Darmstadt University of Technology),</span> <b><span class="coloringspan" id="375" onmousedown="md(this)" onmouseup="mu(this)" >R&#252;diger Geib</span></b> <span class="coloringspan" id="376" onmousedown="md(this)" onmouseup="mu(this)" >(T-Systems),</span> <b><span class="coloringspan" id="377" onmousedown="md(this)" onmouseup="mu(this)" >Gerhard Hasslinger</span> </b><span class="coloringspan" id="378" onmousedown="md(this)" onmouseup="mu(this)" >(T-Systems)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 12pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="379" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 12pt;"><i><span class="coloringspan" id="380" onmousedown="md(this)" onmouseup="mu(this)" >TCP-ROME: A Transport-Layer Approach to Enhance Quality of Experience for Online Media Streaming</span></i><span class="coloringspan" id="381" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="382" onmousedown="md(this)" onmouseup="mu(this)" >Ju-Won Park</span></b> <span class="coloringspan" id="383" onmousedown="md(this)" onmouseup="mu(this)" >(Gwangju Institute of Science and Technology),</span> <b><span class="coloringspan" id="384" onmousedown="md(this)" onmouseup="mu(this)" >JongWon Kim</span> </b><span class="coloringspan" id="385" onmousedown="md(this)" onmouseup="mu(this)" >(Gwangju Institute of Science and Technology),</span> <b><span class="coloringspan" id="386" onmousedown="md(this)" onmouseup="mu(this)" >Roger Karrer</span></b> <span class="coloringspan" id="387" onmousedown="md(this)" onmouseup="mu(this)" >(Deutsche Telekom Laboratories, TU Berlin)</span></p></td>
+ </tr>
+</table>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="388" onmousedown="md(this)" onmouseup="mu(this)" >11:30 &#8211; 13:00  Session 11: End-to-end QoS Provisioning</span></span></i></b></p>
+<p class="wh-normal"><span lang="en-gb"><span class="coloringspan" id="389" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2</span></span></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><b><span lang="en-gb"><span class="coloringspan" id="390" onmousedown="md(this)" onmouseup="mu(this)" >Session chair:</span> </span></b><b><i><span class="coloringspan" id="391" onmousedown="md(this)" onmouseup="mu(this)" >Gunnar Karlsson</span></i></b><b> </b><span class="coloringspan" id="392" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span lang="de"><span class="coloringspan" id="393" onmousedown="md(this)" onmouseup="mu(this)" >KTH, Royal Institute of Technology</span></span><span class="coloringspan" id="394" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="395" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="396" onmousedown="md(this)" onmouseup="mu(this)" >Edge-to-Edge Bailout Forward Contracts for Single-Domain Internet Services</span></i><span class="coloringspan" id="397" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="398" onmousedown="md(this)" onmouseup="mu(this)" >Weini Liu</span></b> <span class="coloringspan" id="399" onmousedown="md(this)" onmouseup="mu(this)" >(Rensselaer Polytechnic Institute),</span> <b><span class="coloringspan" id="400" onmousedown="md(this)" onmouseup="mu(this)" >Hasan Karaoglu</span></b> <span class="coloringspan" id="401" onmousedown="md(this)" onmouseup="mu(this)" >(University of Nevada - Reno),</span> <b><span class="coloringspan" id="402" onmousedown="md(this)" onmouseup="mu(this)" >Aparna Gupta</span></b> <span class="coloringspan" id="403" onmousedown="md(this)" onmouseup="mu(this)" >(Decision Sciences &#38; Engineering Systems, Rensselaer Polytechnic Institute),</span> <b><span class="coloringspan" id="404" onmousedown="md(this)" onmouseup="mu(this)" >Murat Yuksel</span></b> <span class="coloringspan" id="405" onmousedown="md(this)" onmouseup="mu(this)" >(University of Nevada - Reno),</span> <b><span class="coloringspan" id="406" onmousedown="md(this)" onmouseup="mu(this)" >Koushik Kar</span></b> <span class="coloringspan" id="407" onmousedown="md(this)" onmouseup="mu(this)" >(Rensselaer Polytechnic Institute)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 14.4pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="408" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 14.4pt;"><i><span class="coloringspan" id="409" onmousedown="md(this)" onmouseup="mu(this)" >Control Plane for End-to-End QoS Guarantee: A Theory and its Application</span></i><span class="coloringspan" id="410" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="411" onmousedown="md(this)" onmouseup="mu(this)" >Zvi Rosberg</span></b> <span class="coloringspan" id="412" onmousedown="md(this)" onmouseup="mu(this)" >(CSIRO, ICT Centre)</span></p></td>
+ </tr>
+</table>
+
+<table cellspacing="0" cellpadding="0" border="0" width="100%">
+ <tr>
+  <td width="48" nowrap valign="top"><p style="margin:0;text-indent:18pt;width:36pt;padding:0 0 12pt;"><span style="font-family:Symbol;font-size:83%;" lang="en-us"><span class="coloringspan" id="413" onmousedown="md(this)" onmouseup="mu(this)" >&#183;</span></span></p></td>
+  <td width="100%" valign="top"><p class="wh-normal" style="padding:0 0 12pt;"><i><span class="coloringspan" id="414" onmousedown="md(this)" onmouseup="mu(this)" >Flexible QoS Route Selection with Diverse Objectives and Constraints</span></i><span class="coloringspan" id="415" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <b><span class="coloringspan" id="416" onmousedown="md(this)" onmouseup="mu(this)" >Anthony McAuley</span></b> <span class="coloringspan" id="417" onmousedown="md(this)" onmouseup="mu(this)" >(Telcordia),</span> <b><span class="coloringspan" id="418" onmousedown="md(this)" onmouseup="mu(this)" >Latha Kant</span></b> <span class="coloringspan" id="419" onmousedown="md(this)" onmouseup="mu(this)" >(Telcordia),</span> <b><span class="coloringspan" id="420" onmousedown="md(this)" onmouseup="mu(this)" >Kyriakos Manousakis</span></b> <span class="coloringspan" id="421" onmousedown="md(this)" onmouseup="mu(this)" >(Telcordia)</span></p></td>
+ </tr>
+</table>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="422" onmousedown="md(this)" onmouseup="mu(this)" >13:00 &#8211; 13:15  Closing session</span></span></i></b></p>
+<p class="wh-normal" style="padding:0 0 12pt;"><span lang="en-gb"><span class="coloringspan" id="423" onmousedown="md(this)" onmouseup="mu(this)" >Building: Spiegel 2</span></span></p>
+<p class="wh-normal"><b><i><span lang="en-gb"><span class="coloringspan" id="424" onmousedown="md(this)" onmouseup="mu(this)" >13:15  Lunch</span></span></i></b></p>
+<p class="wh-normal" style="padding:0 0 14.4pt;"><span lang="en-gb"><span class="coloringspan" id="425" onmousedown="md(this)" onmouseup="mu(this)" >Building: Faculty Club</span></span></p><!-- end content -->
+    </td>
+  </tr>
+</table>
+
+<table cellpadding="0" cellspacing="0" border="0" width="717">
+  <tr>
+    <td height="25" colspan="4"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+  </tr>
+  
+  <tr valign="bottom">
+    <td class="tekstgrijs" width="100" height="18" align="center">
+      <span class="coloringspan" id="426" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>
+    </td>
+    <td width="50" height="18" align="right" class="brothers">
+      <span onclick="return false" style="text-decoration:underline; color:blue" class="brothers" href="#top"><span class="coloringspan" id="427" onmousedown="md(this)" onmouseup="mu(this)" >Top</span> <img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/top.gif" width="14" height="13" border="0"></span>
+    </td>
+    <td height="18" width="40"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="1" height="1" border="0"></td>
+    <td height="18" width="527">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr valign="bottom">
+          <td class="brothers">
+            <span class="coloringspan" id="428" onmousedown="md(this)" onmouseup="mu(this)" >Last modified on 05/29/2008 12:14:26 by</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.utwente.nl/repository/atcampus/utils/comment.shtml?file=87432"><span class="coloringspan" id="429" onmousedown="md(this)" onmouseup="mu(this)" >Webmaster</span></span><br>
+            <span class="coloringspan" id="430" onmousedown="md(this)" onmouseup="mu(this)" >&copy; Universiteit Twente</span></td>
+          <td valign="top" align="right" height="17" nowrap>
+
+  <script language="javascript" type="text/javascript">
+    <!--
+      renderOpenPrintableWindow2('http://www.utwente.nl/repository/atcampus/images/printer.gif','http://iwqos08.ewi.utwente.nl/Program/program.doc/_printableversion.html','Printable version','http://www.utwente.nl/repository/atcampus/images/newwindow-gray.gif','(opens in a new window)');
+    // -->
+  </script>
+  <noscript>
+    <span onclick="return false" style="text-decoration:underline; color:blue" href="http://iwqos08.ewi.utwente.nl/Program/program.doc/_printableversion.html" target="_blank" class="menulink"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/printer.gif" width="14" height="12" border="0"><img onmousedown="imd(this)" alt="" src="http://www.utwente.nl/repository/atcampus/images/spacer.gif" width="3" height="1" border="0"><span class="coloringspan" id="431" onmousedown="md(this)" onmouseup="mu(this)" >Printable version&nbsp;</span>

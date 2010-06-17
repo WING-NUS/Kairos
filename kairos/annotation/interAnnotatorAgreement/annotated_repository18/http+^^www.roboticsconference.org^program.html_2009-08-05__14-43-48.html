@@ -1,0 +1,804 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/10/annotation/annotated_repository/http+^^www.roboticsconference.org^program.html_2009-08-05__14-43-48.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/10/annotation/annotated_repository/http+^^www.roboticsconference.org^program.html_2009-08-05__14-43-48.yaml created on Thu Aug 13 13:56:59 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+ <title>RSS2009: Technical Program</title>
+  <link rel="stylesheet" type="text/css" href="css/style.css" />
+ <!--[if IE]>
+ <link rel="stylesheet" type="text/css" href="css/ie.css">
+ <![endif]-->
+
+ <style type="text/css">
+  .paper {
+   margin: .5em;
+  }
+  .paperid {
+   color: #666666;
+  }
+  .papertitle {
+   font-style: italic;
+  }
+  .paperauthors {
+  }
+ </style>
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<div class="header">
+<div style="text-align: center"><img onmousedown="imd(this)" src="img/r.gif" alt="RSS 2009" /></div>
+</div>
+
+<div class="content">
+
+<h2><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Technical Program</span></h2>
+
+<div class="menu">
+<ul>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" class="menu home" href="index.html"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></li>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="invited.html"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talks</span></span></li>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="papercall.html"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span></li>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="workshopcall.html"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Call for Workshops</span></span></li>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="authors.html"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Author Instructions</span></span></li>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="sponsors.html"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors / Cooperations</span></span></li>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" class="menu" href="http://www.roboticsproceedings.org"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings of Past Meetings</span></span></li>
+ <li class="label"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Events</span></li>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" class="menu here><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >" href="program.html">Technical Program</span></span></li>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="http://www.roboticsproceedings.org/rss05/"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Conference Proceedings</span></span></li>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="workshops.html"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></li>
+
+ <li class="label"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></li>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="orgcom.html"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Organizing Committee</span></span></li>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="progcom.html"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></span></li>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="conference.html"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Conference Board</span></span></li>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="advisory.html"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Advisory Board</span></span></li>
+
+ <li class="label"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Attending</span></li>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="registration.html"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></li>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="students.html"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Students</span></span></li>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="accommodations.pdf" target="_blank"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Accommodations</span></span></li>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="TravelKit.pdf" target="_blank"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Visiting</span></span></li>
+
+ <li class="label"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Contact</span></li>
+ <li class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="organizers.html"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Organizers</span></span></li>
+<li class="last"><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="poster.pdf"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Poster</span></span><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >/</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="real" target="_blank" href="flyer.pdf"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Flyer</span></span></li>
+</ul>
+</div>
+
+
+<p><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >AT RSS, poster and oral presentations are of the same quality.  The
+assignment is based on a variety of factors including the area
+balance, etc., and is not related to the quality.  In the past best
+paper awards have often come out of the poster presentations.</span></p>
+
+<p><b><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Robotics: Science and Systems 2009</span></b> <span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >will be hosted by the</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="real" href="http://www.washington.edu/"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >University of
+Washington</span></span> <span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >in Seattle, Washington, USA, from</span> <b><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Sunday,June 28
+through Wednesday, July 1, 2009</span></p>
+
+<ul>
+ <li> <span style="font-weight: bold"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span> <span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >will run all day 
+  Sunday and Monday morning.</span></li>
+ <li> <span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >The</span> <span style="font-weight: bold"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >main conference track</span></span> 
+  <span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >begins Monday afternoon and continues through Wednesday.</span></li>
+</ul>
+
+<table cellpadding="2" cellspacing="0">
+<tr valign="top">
+ <td class="tpdate" colspan="3"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Sunday, June 28, 2009</span></td>
+</tr>
+
+<tr valign="top">
+ <td><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >all day</span></td>
+ <td width="20%"><span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.html"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></td>
+ <td></td>
+</tr>
+
+<tr valign="top">
+ <td class="tpdate" colspan="3"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Monday, June 29, 2009</span></td>
+</tr>
+
+<tr valign="top">
+ <td><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&ndash;&nbsp;12:00</span></td>
+ <td width="20%"><span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.html"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></td>
+ <td></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >1:30&nbsp;&ndash;&nbsp;1:40</span></td>
+ <td width="20%"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Welcome</span></td>
+ <td></td>
+</tr>
+<tr valign="top" class="tpsession">
+ <td><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Session 1</span></td>
+ <td><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Gaurav Sukhatme</span></td>
+ <td></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >1:40&nbsp;&ndash;&nbsp;2:40</span></td>
+ <td width="20%"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="talk-dickenson.html"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Visually-Mediated Behaviors of the Fruit Fly</span></span><br /><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Michael Dickinson</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >2:40&nbsp;&ndash;&nbsp;3:10</span></td>
+ <td><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Poster Spotlight I</span></td>
+ <td><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Poster 1-9</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >3:10&nbsp;&ndash;&nbsp;3:40</span></td>
+ <td><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Poster Spotlight II</span></td>
+ <td><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Poster 10-19</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >3:40&nbsp;&ndash;&nbsp;4:00</span></td>
+ <td><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td>
+ <td></td>
+</tr>
+<tr valign="top" class="tpsession">
+ <td><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Session 2</span></td>
+ <td><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Tamim Asfour</span></td>
+ <td></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >4:00&nbsp;&ndash;&nbsp; 4:30</span></td>
+ <td><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Oral 1</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p1.html"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Cooperative Manipulation and Transportation with Aerial Robots</span></span><br /><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Nathan Michael, Jonathan Fink, Vijay Kumar</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >4:30&nbsp;&ndash;&nbsp; 5:00</span></td>
+ <td><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Oral 2</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p2.html"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Learning of 2D Grasping Strategies from Box-Based 3D Object Approximations</span></span><br /><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Sebastian Geidenstam, Kai Huebner, Daniel Banksell, Danica  Kragic</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >5:00&nbsp;&ndash;&nbsp; 5:30</span></td>
+ <td><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Oral 3</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p3.html"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >LQR-Trees: Feedback Motion Planning  on Sparse Randomized Trees</span></span><br /><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Russ Tedrake</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >5:30&nbsp;&ndash;&nbsp; 6:00</span></td>
+ <td><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Oral 4</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p4.html"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Human Motion Database with a Binary Tree and Node Transition Graphs</span></span><br /><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Katsu Yamane, Yoshifumi Yamaguchi, Yoshihiko Nakamura</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >6:00&nbsp;&ndash;&nbsp;6:30</span></td>
+ <td><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></td>
+ <td></td>
+</tr>
+<tr valign="top" class="tpsession">
+ <td><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Session 3</span></td>
+ <td><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >POSTER SESSION</span></td>
+ <td></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >6:30&nbsp;&ndash;&nbsp;9:30</span></td>
+ <td><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Poster 1</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p5.html"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Explicit Parametrizations of the Configuration Spaces of Anthropomorphic Multi-Linkage Systems</span></span><br /><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Li Han, Lee Rudolph</span></td>
+</tr>
+<tr valign="top">
+ <td></td>
+ <td><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Poster 2</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p6.html"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Approximating Displacement with the Body Velocity Integral</span></span><br /><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Ross Hatton, Howie Choset</span></td>
+</tr>
+<tr valign="top">
+ <td></td>
+ <td><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Poster 3</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p7.html"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Tactile Texture Recognition with a 3-Axial Force MEMS integrated Artificial Finger</span></span><br /><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Florian De Boissieu, Christelle Godin, Bernard Guilhamat, Christine Serviere, Dominique David, Daniel Baudois</span></td>
+</tr>
+<tr valign="top">
+ <td></td>
+ <td><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Poster 4</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p8.html"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >On the Complexity of the Set of Three-Finger Caging Grasps of Convex Polygons</span></span><br /><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Mostafa Vahedi, Frank van der Stappen</span></td>
+</tr>
+<tr valign="top">
+ <td></td>
+ <td><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Poster 5</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p9.html"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >On the Consistency of Multi-Robot Cooperative Localization</span></span><br /><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Guoquan Huang, Nikolas Trawny, Anastasios Mourikis, Stergios Roumeliotis</span></td>
+</tr>
+<tr valign="top">
+ <td></td>
+ <td><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Poster 6</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p10.html"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Inner Sphere Trees for Proximity and Penetration Queries</span></span><br /><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Rene Weller, Gabriel Zachmann</span></td>
+</tr>
+<tr valign="top">
+ <td></td>
+ <td><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Poster 7</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p11.html"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Using the Distribution Theory to Simultaneously Calibrate the Sensors of a Mobile Robot</span></span><br /><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Agostino Martinelli</span></td>
+</tr>
+<tr valign="top">
+ <td></td>
+ <td><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Poster 8</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p12.html"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Planning Motion in Similar Evnironments</span></span><br /><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Jyh-Ming Lien, Yanyan Lu</span></td>
+</tr>
+<tr valign="top">
+ <td></td>
+ <td><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Poster 9</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p13.html"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Robust Visual Homing with Landmark Angles</span></span><br /><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >John Lim, Nick Barnes</span></td>
+</tr>
+<tr valign="top">
+ <td></td>
+ <td><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Poster 10</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p14.html"><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Rut Detection and Following for Autonomous Ground Vehicles</span></span><br /><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Camilo Ordonez, Oscar Chuy, Emmanuel Collins</span></td>
+</tr>
+<tr valign="top">
+ <td></td>
+ <td><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Poster 11</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p15.html"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Unsupervised Discovery of Object Classes from Range Data using Latent Dirichlet Allocation</span></span><br /><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Felix Endres, Christian Plagemann, Cyrill Stachniss , Wolfram Burgard</span></td>
+</tr>
+<tr valign="top">
+ <td></td>
+ <td><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Poster 12</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p16.html"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Towards Cyclic Production Systems for Modular Robotics and Rapid Manufacturing</span></span><br /><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Matt Moses, Hiroshi Yamaguchi, Greg CHIRIKJIAN</span></td>
+</tr>
+<tr valign="top">
+ <td></td>
+ <td><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Poster 13</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p17.html"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Setpoint Regulation for Stochastically Interacting Robots</span></span><br /><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Nils Napp, Samuel Burden, Eric Klavins</span></td>
+</tr>
+<tr valign="top">
+ <td></td>
+ <td><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Poster 14</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p18.html"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Centralized Path Planning for Multiple Robots: Optimal Decoupling into Sequential Plans</span></span><br /><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Jur van den Berg, Jack Snoeyink, Ming Lin, Dinesh MANOCHA</span></td>
+</tr>
+<tr valign="top">
+ <td></td>
+ <td><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Poster 15</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p19.html"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Accurate Rough Terrain Estimation with Space-Carving Kernels</span></span><br /><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Raia Hadsell, Drew Bagnell, Martial Hebert</span></td>
+</tr>
+<tr valign="top">
+ <td></td>
+ <td><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Poster 16</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p20.html"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >View-Based Maps</span></span><br /><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Kurt Konolige, Michael Colander, James Bowman, Patrick Mihelich, JD Chen, Pascal Fua, Vincent Lepetit</span></td>
+</tr>
+<tr valign="top">
+ <td></td>
+ <td><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Poster 17</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p21.html"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Generalized-ICP</span></span><br /><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Aleksandr Segal, Dirk Haehnel, Sebastian Thrun</span></td>
+</tr>
+<tr valign="top">
+ <td></td>
+ <td><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Poster 18</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p22.html"><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >3D Laser Scan Classification Using Web Data and Domain Adaptation</span></span><br /><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Kevin Lai, Dieter Fox</span></td>
+</tr>
+<tr valign="top">
+ <td></td>
+ <td><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Poster 19</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p23.html"><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Adaptive Relative Bundle Adjustment</span></span><br /><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Gabe Sibley, Christopher Mei, Ian Reid, Paul Newman</span></td>
+</tr>
+
+
+<tr valign="top">
+ <td class="tpdate" colspan="3"><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday, June 30, 2009</span></td>
+</tr>
+
+<tr valign="top" class="tpsession">
+ <td><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Session 4</span></td>
+ <td><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Chair: John Leonard</span></td>
+ <td></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >8:30&nbsp;&ndash;&nbsp;9:30</span></td>
+ <td><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="talk-delaney.html"><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Next Generation Ocean Sciences: The Leading Edge of an Environmental Renaissance</span></span><br /><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >John Delaney</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >9:30&nbsp;&ndash;&nbsp; 10:00</span></td>
+ <td><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Oral 5</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p24.html"><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Underwater Human-Robot Interaction via Biological Motion Identification</span> </span><br /><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Junaed Sattar, Gregory  Dudek</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >10:00&nbsp;&ndash;&nbsp; 10:30</span></td>
+ <td><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Oral 6</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p25.html"><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Robustness of the Unscented Kalman Filter for State and Parameter Estimation in an Elastic Transmission</span></span><br /><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Edvard Naerum, H. Hawkeye King, Blake Hannaford</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >10:30&nbsp;&ndash;&nbsp;10:50</span></td>
+ <td><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td>
+ <td></td>
+</tr>
+<tr valign="top" class="tpsession">
+ <td><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Session 5</span></td>
+ <td><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Tetsunari Inamura</span></td>
+ <td></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >10:50&nbsp;&ndash;&nbsp; 11:20</span></td>
+ <td><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Oral 7</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p26.html"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >POMDPs for Robotic Tasks with Mixed Observability</span></span><br /><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Sylvie Ong, David Hsu, Wee Sun Lee</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >11:20&nbsp;&ndash;&nbsp; 11:50</span></td>
+ <td><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Oral 8</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p27.html"><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Policy Search via the Signed Derivative</span></span><br /><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >J. Zico Kolter, Andrew Ng</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >11:50&nbsp;&ndash;&nbsp; 12:20</span></td>
+ <td><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Oral 9</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p28.html"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Non-Parametric Learning to Aid Path Planning over Slopes</span></span><br /><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Sisir Karumanchi, Thomas Allen, Tim Bailey, Steve Scheding</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >12:20&nbsp;&ndash;&nbsp;2:20</span></td>
+ <td><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Lunch + Lab Tours</span></td>
+ <td></td>
+</tr>
+<tr valign="top" class="tpsession">
+ <td><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Session 6</span></td>
+ <td><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Danica Kragic</span></td>
+ <td></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >2:20&nbsp;&ndash;&nbsp;3:20</span></td>
+ <td><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="talk-ernst.html"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >The Puzzle of Human Multisensory Perception: Optimal Integration for Action</span></span><br /><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Marc Ernst</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >3:20&nbsp;&ndash;&nbsp; 3:50</span></td>
+ <td><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Oral 10</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p29.html"><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Learning GP-BayesFilters via Gaussian Process Latent Variable Models</span></span><br /><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Jonathan Ko, Dieter Fox</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >3:50&nbsp;&ndash;&nbsp; 4:20</span></td>
+ <td><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Oral 11</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p30.html"><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >3D Relative Pose Estimation from Six Distances</span></span><br /><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Nikolas Trawny, Xun Zhou, Stergios Roumeliotis</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >4:20&nbsp;&ndash;&nbsp;</span></td>
+ <td><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Banquet Transportation via Bus and Ferry</span></td>
+ <td></td>
+</tr>
+
+<tr valign="top">
+ <td class="tpdate" colspan="3"><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, July 1, 2009</span></td>
+</tr>
+<tr valign="top" class="tpsession">
+ <td><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Session 7</span></td>
+ <td><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Eric Klavins</span></td>
+ <td></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >8:30&nbsp;&ndash;&nbsp;9:30</span></td>
+ <td><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="talk-doyle.html"><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Rules of engagement: The architecture of robust, evolvable networks</span></span><br /><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >John C. Doyle</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >9:30&nbsp;&ndash;&nbsp; 10:00</span></td>
+ <td><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Oral 12</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p31.html"><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >An Ab-initio Tree-based Exploration to Enhance Sampling of Low-energy Protein Conformations</span></span><br /><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Amarda Shehu</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >10:00&nbsp;&ndash;&nbsp; 10:30</span></td>
+ <td><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Oral 13</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p32.html"><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Cellular Muscle Actuators with Variable Resonant Frequencies</span></span><br /><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Thomas Secord, Harry Asada</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >10:30&nbsp;&ndash;&nbsp;10:50</span></td>
+ <td><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td>
+ <td></td>
+</tr>
+<tr valign="top" class="tpsession">
+ <td><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Session 8</span></td>
+ <td><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Hugh Durrant-Whyte</span></td>
+ <td></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >10:50&nbsp;&ndash;&nbsp; 11:20</span></td>
+ <td><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Oral 14</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p33.html"><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >Positioning Unmanned Aerial Vehicles as Communication Relays for Surveillance Tasks</span></span><br /><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Oleg Burdakov, Patrick Doherty, Kaj Holmberg, Jonas Kvarnstr&ouml;m, Per-Magnus Olsson</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >11:20&nbsp;&ndash;&nbsp; 11:50</span> </td>
+ <td><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >Oral 15</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p34.html"><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Efficient, Guaranteed Search with Multi-Agent Teams</span></span><br /><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Geoffrey Hollinger, Athanasios Kehagias, Sanjiv Singh</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >11:50&nbsp;&ndash;&nbsp; 12:20</span></td>
+ <td><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Oral 16</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p35.html"><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Time-Extended Multi-Robot Coordination for Domains with Precedence Constraints</span></span><br /><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >Edward Jones, Bernardine Dias, Anthony Stentz</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >12:20&nbsp;&ndash;&nbsp;1:45</span></td>
+ <td><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></td>
+ <td></td>
+</tr>
+<tr valign="top" class="tpsession">
+ <td><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Session 9</span></td>
+ <td><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Blake Hannaford</span></td>
+ <td></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >1:45&nbsp;&ndash;&nbsp;2:30</span></td>
+ <td><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Early Career Spotlight Talk</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="talk-kuchenbecker.html"><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Haptography: Creating Authentic Haptic Feedback from Recordings of Real Interactions</span></span><br /><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Katherine Kuchenbecker</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >2:30&nbsp;&ndash;&nbsp; 3:00</span></td>
+ <td><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Oral 17</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p36.html"><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >Bridging the gap between passivity and transparency</span></span><br /><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Michel Franken, Stefano Stramigioli, Rob Reilink, Cristian Secchi, Alessandro Macchelli</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >3:00&nbsp;&ndash;&nbsp; 3:30</span></td>
+ <td><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Oral 18</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p37.html"><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Feedback Control for Steering Needles Through 3D Deformable Tissue Using Helical Paths</span></span><br /><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >Kris Hauser, Ron Alterovitz, Nuttapong Chentanez, Allison Okamura, Ken Goldberg</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >3:30&nbsp;&ndash;&nbsp;3:50</span></td>
+ <td><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td>
+ <td></td>
+</tr>
+<tr valign="top" class="tpsession">
+ <td><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Session 10</span></td>
+ <td><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Jose Neira</span></td>
+ <td></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >3:50&nbsp;&ndash;&nbsp; 4:20</span></td>
+ <td><span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >Oral 19</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p38.html"><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Large Scale Graph-Based SLAM using Aerial Images as Prior Information</span></span><br /><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >Bastian Steder, Rainer K&uuml;mmerle, Christian Dornhege, Alexander Kleiner, Giorgio Grisetti, Wolfram Burgard</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >4:20&nbsp;&ndash;&nbsp; 4:50</span></td>
+ <td><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >Oral 20</span></td>
+ <td><span onclick="return false" style="text-decoration:underline; color:blue" class="tplink" href="http://www.roboticsproceedings.org/rss05/p39.html"><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >Highly Scalable Apppearance-Only SLAM - FAB-MAP 2.0</span></span><br /><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >Mark Cummins, Paul Newman</span></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >4:50&nbsp;&ndash;&nbsp;5:00</span></td>
+ <td><span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >Award Presentation</span></td>
+ <td></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >5:00&nbsp;&ndash;&nbsp;5:30</span></td>
+ <td><span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >Wrap Up, Discussion</span></td>
+ <td></td>
+</tr>
+<tr valign="top">
+ <td><span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >5:30&nbsp;&ndash;&nbsp;</span></td>
+ <td><span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >Adjourn</span>

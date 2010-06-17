@@ -1,0 +1,669 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml"><!-- InstanceBegin template="/Templates/template.dwt" codeOutsideHTMLIsLocked="false" -->
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^samt2007.ge.imati.cnr.it^industry.html_2009-08-05__14-28-46.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^samt2007.ge.imati.cnr.it^industry.html_2009-08-05__14-28-46.yaml created on Wed Aug 05 17:31:27 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+	<!-- InstanceBeginEditable name="Title" -->
+		<title>SAMT 2007</title>
+	<!-- InstanceEndEditable -->
+	<link href="samt2007.css" rel="stylesheet" type="text/css" />
+	<script type="text/javascript" src="yadm.js"></script>
+	<noscript>
+		<link href="samt2007nojs.css" rel="stylesheet" type="text/css" />
+	</noscript>
+	
+	<script type="text/javascript">
+		function newEmail( username, hostname, name )
+		{
+			var linktext = username + "@" + hostname;
+			if ( name != "" )
+				linktext = name;
+				
+			document.write("<a href=" + "mail" + "to:" + username + "@" + hostname + " class=\"tl\">" + linktext + "</a>");
+		}
+	</script>
+
+<script language=javascript>function WindowOpen(address,name) { thisWin=window.open(address,name, 'toolbar=no,scrollbars=yes,location=no,status=no,menubar=yes,resizable=yes,width=650,height=800');thisWin.focus();void(0);}
+/*
+  Local javascript functions
+*/
+function AutoWindowOpen(address,name) {
+        if (window.name=="Registration") name="Registration";
+        else if (window.name=="Registration") name="Registration";
+        else if (window.name=="Registration") name="Registration";
+        thisWin=window.open(address,name, 'toolbar=no,scrollbars=yes,location=no,status=no,menubar=yes,resizable=yes,width=650,height=800');
+        thisWin.focus();
+        void(0);
+}
+</script>
+
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+	<div id="wrapper">
+		<div id="header"></div>
+		
+		<div id="menu">
+			<ul id="nav">
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html" title=""><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></li>
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="topics.html" title=""><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Topics</span></span></li>
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="dates.html" title=""><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></li>
+				<li><span><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></span>
+					<ul>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="or-committee.html" title=""><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Organizing Committee</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="prog-committee.html" title=""><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="steer-committee.html" title=""><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Steering Board</span></span></li>
+					</ul>
+				</li>
+				<li><span><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Calls</span></span>
+					<ul>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="cfp.html" title=""><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="cfss.html" title=""><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Call for Special Sessions</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="call_tutorials.html" title""><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Call for Tutorials</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="call_workshops.html" title=""><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Call for Workshops</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="call_pd.html" title=""><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Call for Posters &amp; Demos</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="call2008.html" title=""><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >SAMT 2008 Call</span></span></li>
+					</ul>
+				</li>
+				<li><span><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Submission</span></span>
+					<ul>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="submission.html" title=""><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Main Track</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="call_pd.html" title=""><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Posters &amp; Demos</span></span></li>
+					</ul>
+				</li>
+				<li><span><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Publications</span></span>
+					<ul>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings.html"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="papers.html"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers</span></span></li>
+					</ul>
+				</li>
+				<li><span><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Sponsorship</span></span>
+					<ul>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="sponsors.html"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="sponsorship.html"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Opportunities</span></span></li>
+					</ul>
+				</li>
+				<li><span><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span>
+					<ul>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="short_program.html" title=""><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Short Program</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="program.html" title=""><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Detailed Program</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="sessions.html" title=""><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Special Sessions</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="projects.html" title=""><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Projects and Demos</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials.html" title=""><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.html" title=""><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="industry.html" title=""><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Industry Day</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="socialevent.html" title=""><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Social Event</span></span></li>
+					</ul>
+				</li>
+				<li><span><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talks</span></span>
+					<ul>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="keynote.html" title=""><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Speakers</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="european.html" title=""><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >EC Representatives</span></span></li>
+					</ul>
+				</li>
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="registration_info.html" title=""><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></li>
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="venue.html" title=""><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Venue</span></span></li>
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="accommodation.html" title=""><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation</span></span></li>
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="localinfo.html" title=""><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Local Information</span></span></li>
+			</ul>
+		</div>
+		
+		<div id="announcements">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aimatshape.net"><img onmousedown="imd(this)" alt="AIM@SHAPE" hspace=6 src="images/sponsors/aimatshape.png"></span>
+<img onmousedown="imd(this)" alt="KSPACE" hspace=6 src="images/sponsors/kspace.jpg">
+<img onmousedown="imd(this)" alt="CNR" hspace=6 src="images/sponsors/Cnrlogo.gif">
+<img onmousedown="imd(this)" alt="ICT" hspace=6 src="images/sponsors/ict.jpg">
+
+		  <div class="box">
+				<!-- <div style="text-decoration:underline"><b>Approaching Deadlines</b></div>
+
+				<div style="text-align: left; font-size: 11px;">
+					
+					<b>[09.10]</b> <span onclick="return false" style="text-decoration:underline; color:blue" href="../registration_info.html">Early registration deadline</span> <br />
+					
+				</div>
+		  		
+				<br /> -->
+		  
+				<div style="text-decoration:underline"><b><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Important News</span></b></div>
+
+				<div style="text-align: left; font-size: 11px;">
+				
+					<b><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >[12.12]</span></b> <span onclick="return false" style="text-decoration:underline; color:blue" href="photos.html"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Photos online !</span></span> <br />
+					<b><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >[24.10]</span></b> <span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.html"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >LSAS workshop cancelled</span></span> <br />
+					<b><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >[12.10]</span></b> <span onclick="return false" style="text-decoration:underline; color:blue" href="industry.html"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Industry Day</span></span> <br />
+					<b><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >[02.10]</span></b> <span onclick="return false" style="text-decoration:underline; color:blue" href="program.html"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Conference Program</span></span> <br />
+					<b><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >[20.09]</span></b> <span onclick="return false" style="text-decoration:underline; color:blue" href="call_pd.html"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Call for Posters&Demos</span></span> <br />
+					<b><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >[17.09]</span></b> <span onclick="return false" style="text-decoration:underline; color:blue" href="registration_info.html"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Registration Active</span></span> <br />
+					<b><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >[13.09]</span></b> <span onclick="return false" style="text-decoration:underline; color:blue" href="accommodation.html"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation Info Added</span></span> <br />
+					<b><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >[12.09]</span></b> <span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials.html"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial T2 Cancelled</span></span> <br />
+					<b><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >[05.09]</span></b> <span onclick="return false" style="text-decoration:underline; color:blue" href="papers.html"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers Online</span></span> <br />
+					<b><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >[22.02]</span></b> <span onclick="return false" style="text-decoration:underline; color:blue" href="dates.html"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Deadline Update</span></span> <br />
+					<b><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >[09.01]</span></b> <span onclick="return false" style="text-decoration:underline; color:blue" href="index.html"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >New site is up</span></span> <br />
+				</div>
+
+		  </div>			
+	  </div>
+
+		<div id="content">
+			<!-- InstanceBeginEditable name="Content" -->
+	<div id="pagetitle"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Industry Day at SAMT 2007</span></div>
+
+<div id="header2"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Industry Day</span></div>
+
+<p><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >SAMT 2007 addresses the need of bringing semantics closer to multimedia analysis and understanding, thus examining how knowledge can penetrate into the retrieval process of audiovisual content. The media industry is one of the most immediate candidates to benefit from the future maturity of such technologies, but several other industrial sectors can be influenced as well. Although contents and their use are different, the need to store, browse and search information opportunely is common to all the fields.</span>
+</p><p>
+<span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >The Industry Day will present different experiences working with multimedia content  giving the possibility to compare the methodologies used, and showing how problems and solutions traditionally applied to broadcasting media are also applicable to several sectors, where the content is not only audiovisual but also includes 3D digital shapes.</span> 
+</p><p>
+<span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >It is easy to observe that multimedia, if seen in the broader sense, are adopted in every day life in several fields, such as medicine, security, and gaming. According to the application context, the user can be interested in different views of the digital content. Any view refers to specific semantics to be preserved and retrieved, although the technological approach to formalise and exploit such knowledge can be common to the contexts.</span> 
+</p><p>
+<span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >The Industry Day is thus organised to enable content and solution providers, broadcasters, professional content users, and related industrial practitioners to share and exchange experience about relevant multimedia and semantic analysis technologies and associated commercial software in various sectors.</span>
+</p><p>
+<span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >A number of presentations from internationally renowned experts in multimedia and knowledge technologies are complemented with talks from prestigious representatives from media users in specialised fields giving an overview both from the research and commercial point of view, matching the industry needs to expected technology advances. The possibility of illustrating the use of emerging technologies and for demonstrating relevant existing commercial applications will be given.</span>
+</p>
+<p><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Potential benefits to delegates include:</span></p>
+			<div class="storycontent">
+				<ul>
+
+<li><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >learning about key advances in integration of multimedia and knowledge technologies from leading experts in these areas</span></li>
+<li><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >learning about the requirements in different application contexts, which will inspire new research directions and development perspectives</span></li>
+<li><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >discovering the practical benefits of implementing these technologies in their work flows, products and applications</span></li>
+<li><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >attending demonstrations of existing applications that may be applicable to their own work</span></li>
+
+</ul>
+</div>
+
+<div id="header3"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >To participate</span></div>
+<p>
+<span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >The participation to the Industry Day is free of charge.
+Pre-registration is recommended: please send an email to</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:samt07-id@ge.imati.cnr.it"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >samt07-id@ge.imati.cnr.it</span></span><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >.</span>
+</p>
+
+
+
+
+
+
+<div id="header3"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></div>
+
+<p>
+<span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Click</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="images/industryabstracts.pdf"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >here</span></span> <span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >to download the program in pdf format (includes abstracts of the presentations).</span>
+</p>
+		
+<table width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" class="programme">
+<tr>
+<th colspan="2" id="head" style="text-align: left; padding-left: 10px; width: 200px;"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Room: Atlantico</span></th>
+</tr>
+<tr>
+<th id="break"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >08:00 - 09:30</span></th>
+<td id="break"><b><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></b></td>
+</tr>
+
+<tr>
+<th id="keynote"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >09:30 - 09:40</span></th>
+<td id="keynote">
+<div id="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/SAMT07-opening.pdf"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Opening</span></span></div>
+<div id="talker"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Franca Giannini (IMATI - CNR)</span></div>
+</td>
+</tr>
+
+<tr><th id="session"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >09:40 - 10:10</span></th>
+<td><div class="storycontent"><ul><li>
+<div id="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/SAMT07-motorola.pdf"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Commercialisation of semantic multimedia technologies</span></span></div>
+<div id="authors"><span id="author"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Paola Hobson (Motorola)</span></span></div>
+</li></ul></div></td></tr>
+
+<tr><th id="session"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >10:10 - 10:40</span></th>
+<td><div class="storycontent"><ul><li>
+<div id="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/SAMT07-GiuntiLabs.pdf"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Innovation in Learning Content Management, Mobile, Virtual and Location Based delivery</span></span></div>
+<div id="authors"><span id="author"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Giancarlo Bo (Giunti Labs)</span></span></div>
+</li></ul></div></td></tr>
+
+<tr><th id="session"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >10:40 - 11:10</span></th>
+<td><div class="storycontent"><ul><li>
+<div id="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/SAMT07-Alinari.pdf"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Innovative services and technologies supporting the professional photo value chain</span></span></div>
+<div id="authors"><span id="author"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Sam H. Minelli (Alinari 24 Ore)</span> </span></div>
+</li></ul></div></td></tr>
+
+<tr>
+<th id="break"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >11:10 - 11:30</span></th>
+<td id="break"><b><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></b></td>
+</tr>
+
+<tr><th id="session"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >11:30 - 12:00</span></th>
+<td><div class="storycontent"><ul><li>
+<div id="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/SAMT07-telecom.pdf"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Knowledge and multimedia technologies to enhance TV watching experience</span></span></div>
+<div id="authors"><span id="author"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Rossana Simeoni and Marina Geymonat (Telecom Italia Lab)</span></span></div>
+</li></ul></div></td></tr>
+
+<tr><th id="session"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >12:00 - 12:30</span></th>
+<td><div class="storycontent"><ul><li>
+<div id="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/SAMT07-RAI.pdf"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >TV news item retrieval based upon automatic documentation tools. How this issue is addressed by Rai and the results obtained within the EU PrestoSpace project</span></span></div>
+<div id="authors"><span id="author"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Laurent Boch (Rai)</span></span></div>
+</li></ul></div></td></tr>
+
+<tr><th id="session"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >12:30 - 13:00</span></th>
+<td><div class="storycontent"><ul><li>
+<div id="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/SAMT07-SISMAT.pdf"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >The use of media content annotation applied in advertisement campaigns tracking: analysis of a real use case</span></span></div>
+<div id="authors"><span id="author"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Marco Masetti (Softeco Sismat)</span></span></div>
+</li></ul></div></td></tr>
+
+<tr>
+<th id="break"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >13:00 - 14:00</span></th>
+<td id="break"><b><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></b></td>
+</tr>
+
+<tr><th id="session"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >14:10 - 14:30</span></th>
+<td><div class="storycontent"><ul><li>
+<div id="title"><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Communication of the  Director of ICT Department</span></div>
+<div id="authors"><span id="author"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Francesco Beltrame (CNR)</span></span></div>
+</li></ul></div></td></tr>
+
+<tr><th id="session"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >14:30 - 15:00</span></th>
+<td><div class="storycontent"><ul><li>
+<div id="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/SAMT07-Elsag.pdf"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >People Tracking & Scene Understanding in security Applications</span></span></div>
+<div id="authors"><span id="author"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Giovanni Garibotto (Elsag Datamat)</span></span></div>
+</li></ul></div></td></tr>
+
+<tr><th id="session"><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >15:00 - 15:30</span></th>
+<td><div class="storycontent"><ul><li>
+<div id="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/SAMT07-giugiaro.pdf"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Research and synthesis of information and concepts. Italdesign - Giugiaro Case History</span></span></div>
+<div id="authors"><span id="author"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Luca Jozzo (Italdesign Giugiaro)</span></span></div>
+</li></ul></div></td></tr>
+
+<tr>
+<th id="break"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >15:30 - 16:00</span></th>
+<td id="break"><b><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></b></td>
+</tr>
+
+<tr><th id="session"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >16:00 - 16:30</span></th>
+<td><div class="storycontent"><ul><li>
+<div id="title"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Rich Media in Information Analysis</span></div>
+<div id="authors"><span id="author"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Stefano Valenzi (FAST)</span></span></div>
+</li></ul></div></td></tr>
+
+<tr><th id="session"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >16:30 - 17:00</span></th>
+<td><div class="storycontent"><ul><li>
+<div id="title"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >An integrated approach to multimedia analysis</span></div>
+<div id="authors"><span id="author"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Gabriele Sani (Autonomy)</span></span></div>
+</li></ul></div></td></tr>
+
+<tr><th id="session"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >17:00 - 17:30</span></th>
+<td><div class="storycontent"><ul><li>
+<div id="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/SAMT07-IdealIst.pdf"><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Other ways for SMEs to get involved in FP7</span></span></div>
+<div id="authors"><span id="author"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Bent Egebart (Whyse aps)</span></span></div>
+</li></ul></div></td></tr>
+
+<tr>
+<th id="keynote"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >17:30 - 17:45</span></th>
+<td id="keynote">
+<div id="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="slides/SAMT07-conclusions.pdf"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Wrap up & Conclusions</span></span></div>
+<div id="talker"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Chiara Catalano (IMATI - CNR)</span></div>
+</td>
+</tr>
+
+</table>
+<br />
+
+
+
+<div id="header3"><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Organisers</span></div>
+<ul>
+<li><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Franca Giannini, IMATI-CNR</span></li>
+<li><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Chiara Catalano, IMATI-CNR</span></li>
+</ul>		
+	<!-- InstanceEndEditable -->
+		</div>
+
+		<div id="footer"><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Hosted by IMATI-GE / CNR (2007)</span>

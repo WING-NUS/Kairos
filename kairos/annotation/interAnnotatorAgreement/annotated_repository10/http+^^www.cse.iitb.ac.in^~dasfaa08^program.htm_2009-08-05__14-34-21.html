@@ -1,0 +1,919 @@
+<html>
+
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/1/annotation/annotated_repository/http+^^www.cse.iitb.ac.in^~dasfaa08^program.htm_2009-08-05__14-34-21.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/1/annotation/annotated_repository/http+^^www.cse.iitb.ac.in^~dasfaa08^program.htm_2009-08-05__14-34-21.yaml created on Thu Aug 13 13:55:35 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<meta http-equiv="Content-Language" content="en-us">
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
+<meta name="GENERATOR" content="Microsoft FrontPage 5.0">
+<meta name="ProgId" content="FrontPage.Editor.Document">
+
+<title>Conference Program</title>
+
+
+<style>
+<!--
+.font6
+	{color:windowtext;
+	font-size:10.0pt;
+	font-weight:700;
+	font-style:normal;
+	text-decoration:none;
+	font-family:"Times New Roman", serif;
+	}
+.font5
+	{color:windowtext;
+	font-size:11.0pt;
+	font-weight:400;
+	font-style:normal;
+	text-decoration:none;
+	font-family:"Times New Roman", serif;
+	}
+.font8
+	{color:#3366FF;
+	font-size:10.0pt;
+	font-weight:400;
+	font-style:normal;
+	text-decoration:none;
+	font-family:"Times New Roman", serif;
+	}
+.font7
+	{color:#3366FF;
+	font-size:10.0pt;
+	font-weight:400;
+	font-style:normal;
+	text-decoration:none;
+	font-family:"Times New Roman", serif;
+	}
+.font9
+	{color:windowtext;
+	font-size:10.0pt;
+	font-weight:700;
+	font-style:italic;
+	text-decoration:none;
+	font-family:"Times New Roman", serif;
+	}
+-->
+</style><meta name="Microsoft Border" content="tl, default">
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span><!--msnavigation--><table border="0" cellpadding="0" cellspacing="0" width="100%"><tr><td>
+<table border="1" cellpadding="0" cellspacing="0" style="border-collapse: collapse; border-width: 0" bordercolor="#111111" width="100%" id="AutoNumber2">
+  <tr>
+    <td width="1%" style="border-style: none; border-width: medium" rowspan="2">
+    <img onmousedown="imd(this)" border="0" src="dafsaa_small.jpg" width="150" height="150"></td>
+    <td width="5%" style="border-style: none; border-width: medium"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+    <td width="231%" style="border-style: none; border-width: medium" rowspan="2" bgcolor="#CCCC99">
+    <img onmousedown="imd(this)" border="0" src="dasfaa08.jpg" width="800" height="150"></td>
+  </tr>
+  <tr>
+    <td width="5%" style="border-style: none; border-width: medium"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+  </tr>
+  <tr>
+    <td width="5%" colspan="2" style="border-style: none; border-width: medium"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+  </tr>
+</table>
+
+</td></tr><!--msnavigation--></table><!--msnavigation--><table dir="ltr" border="0" cellpadding="0" cellspacing="0" width="100%"><tr><td valign="top" width="1%">
+
+<p>
+<script language="JavaScript"><!--
+MSFPhover = 
+  (((navigator.appName == "Netscape") && 
+  (parseInt(navigator.appVersion) >= 3 )) || 
+  ((navigator.appName == "Microsoft Internet Explorer") && 
+  (parseInt(navigator.appVersion) >= 4 ))); 
+function MSFPpreload(img) 
+{
+  var a=new Image(); a.src=img; return a; 
+}
+// --></script>
+<script language="JavaScript">
+<!--if(MSFPhover) { MSFPnav1n=MSFPpreload("_derived/home_cmp_global110_vbtn_p.gif"); MSFPnav1h=MSFPpreload("_derived/home_cmp_global110_vbtn_a.gif"); }
+// --></script>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="index.html" language="JavaScript" onmouseover="if(MSFPhover) document['MSFPnav1'].src=MSFPnav1h.src" onmouseout="if(MSFPhover) document['MSFPnav1'].src=MSFPnav1n.src"><img onmousedown="imd(this)" src="_derived/home_cmp_global110_vbtn_p.gif" width="140" height="50" border="0" alt="Home" name="MSFPnav1"></span>
+<br><script language="JavaScript">
+<!--if(MSFPhover) { MSFPnav2n=MSFPpreload("_derived/Officers.htm_cmp_global110_vbtn_p.gif"); MSFPnav2h=MSFPpreload("_derived/Officers.htm_cmp_global110_vbtn_a.gif"); }// --></script>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="Officers.htm" language="JavaScript" onmouseover="if(MSFPhover) document['MSFPnav2'].src=MSFPnav2h.src" onmouseout="if(MSFPhover) document['MSFPnav2'].src=MSFPnav2n.src"><img onmousedown="imd(this)" src="_derived/Officers.htm_cmp_global110_vbtn_p.gif" width="140" height="50" border="0" alt="Conference Officers" name="MSFPnav2"></span>
+
+
+<br><script language="JavaScript">
+<!--if(MSFPhover) { MSFPnav3n=MSFPpreload("_derived/PC.htm_cmp_global110_vbtn_p.gif"); MSFPnav3h=MSFPpreload("_derived/PC.htm_cmp_global110_vbtn_a.gif"); }
+// --></script>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="PC.htm" language="JavaScript" onmouseover="if(MSFPhover) document['MSFPnav3'].src=MSFPnav3h.src" onmouseout="if(MSFPhover) document['MSFPnav3'].src=MSFPnav3n.src"><img onmousedown="imd(this)" src="_derived/PC.htm_cmp_global110_vbtn_p.gif" width="140" height="50" border="0" alt="PC Committee" name="MSFPnav3"></span>
+
+
+<br><script language="JavaScript">
+<!--if(MSFPhover) { MSFPnav4n=MSFPpreload("_derived/program.htm_cmp_global110_vbtn_p.gif"); MSFPnav4h=MSFPpreload("_derived/program.htm_cmp_global110_vbtn_a.gif"); }// --></script>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="program.htm" language="JavaScript" onmouseover="if(MSFPhover) document['MSFPnav4'].src=MSFPnav4h.src" onmouseout="if(MSFPhover) document['MSFPnav4'].src=MSFPnav4n.src"><img onmousedown="imd(this)" src="_derived/program.htm_cmp_global110_vbtn_p.gif" width="140" height="50" border="0" alt="Conference Program" name="MSFPnav4"></span>
+
+
+<br><script language="JavaScript">
+<!--if(MSFPhover) { MSFPnav9n=MSFPpreload("_derived/keynotes.htm_cmp_global110_vbtn_p.gif"); MSFPnav9h=MSFPpreload("_derived/keynotes.htm_cmp_global110_vbtn_a.gif"); }// --></script>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="keynotes.htm" language="JavaScript" onmouseover="if(MSFPhover) document['MSFPnav9'].src=MSFPnav9h.src" onmouseout="if(MSFPhover) document['MSFPnav9'].src=MSFPnav9n.src"><img onmousedown="imd(this)" src="_derived/keynotes.htm_cmp_global110_vbtn_p.gif" width="140" height="50" border="0" alt="keynotes" name="MSFPnav9"></span>
+
+<br><script language="JavaScript">
+<!--if(MSFPhover) { MSFPnav9n=MSFPpreload("_derived/research.htm_cmp_global110_vbtn_p.gif"); MSFPnav9h=MSFPpreload("_derived/research.htm_cmp_global110_vbtn_a.gif"); }// --></script>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="research.htm" language="JavaScript" onmouseover="if(MSFPhover) document['MSFPnav9'].src=MSFPnav9h.src" onmouseout="if(MSFPhover) document['MSFPnav9'].src=MSFPnav9n.src"><img onmousedown="imd(this)" src="_derived/research.htm_cmp_global110_vbtn_p.gif" width="140" height="50" border="0" alt="research" name="MSFPnav9"></span>
+
+<br><script language="JavaScript">
+<!--if(MSFPhover) { MSFPnav9n=MSFPpreload("_derived/short.htm_cmp_global110_vbtn_p.gif"); MSFPnav9h=MSFPpreload("_derived/short.htm_cmp_global110_vbtn_a.gif"); }// --></script>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="short.htm" language="JavaScript" onmouseover="if(MSFPhover) document['MSFPnav9'].src=MSFPnav9h.src" onmouseout="if(MSFPhover) document['MSFPnav9'].src=MSFPnav9n.src"><img onmousedown="imd(this)" src="_derived/short.htm_cmp_global110_vbtn_p.gif" width="140" height="50" border="0" alt="short papers" name="MSFPnav9"></span>
+
+
+<br><script language="JavaScript">
+<!--if(MSFPhover) { MSFPnav5n=MSFPpreload("_derived/tutorial.htm_cmp_global110_vbtn_p.gif"); MSFPnav5h=MSFPpreload("_derived/tutorial.htm_cmp_global110_vbtn_a.gif"); }// --></script>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="tutorial.htm" language="JavaScript" onmouseover="if(MSFPhover) document['MSFPnav5'].src=MSFPnav5h.src" onmouseout="if(MSFPhover) document['MSFPnav5'].src=MSFPnav5n.src"><img onmousedown="imd(this)" src="_derived/tutorial.htm_cmp_global110_vbtn_p.gif" width="140" height="50" border="0" alt="Tutorials" name="MSFPnav5"></span>
+
+<br><script language="JavaScript">
+<!--if(MSFPhover) { MSFPnav6n=MSFPpreload("_derived/demo.htm_cmp_global110_vbtn_p.gif"); MSFPnav6h=MSFPpreload("_derived/demo.htm_cmp_global110_vbtn_a.gif"); }// --></script>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="demo.htm" language="JavaScript" onmouseover="if(MSFPhover) document['MSFPnav6'].src=MSFPnav5h.src" onmouseout="if(MSFPhover) document['MSFPnav6'].src=MSFPnav6n.src"><img onmousedown="imd(this)" src="_derived/demo.htm_cmp_global110_vbtn_p.gif" width="140" height="50" border="0" alt="Demostrations" name="MSFPnav6"></span>
+
+<br><script language="JavaScript">
+<!--if(MSFPhover) { MSFPnav9n=MSFPpreload("_derived/panel.htm_cmp_global110_vbtn_p.gif"); MSFPnav9h=MSFPpreload("_derived/panel.htm_cmp_global110_vbtn_a.gif"); }// --></script>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="panel.htm" language="JavaScript" onmouseover="if(MSFPhover) document['MSFPnav9'].src=MSFPnav9h.src" onmouseout="if(MSFPhover) document['MSFPnav9'].src=MSFPnav9n.src"><img onmousedown="imd(this)" src="_derived/panel.htm_cmp_global110_vbtn_p.gif" width="140" height="50" border="0" alt="panel" name="MSFPnav9"></span>
+
+
+<br><script language="JavaScript">
+<!--if(MSFPhover) { MSFPnav9n=MSFPpreload("_derived/industrial.htm_cmp_global110_vbtn_p.gif"); MSFPnav9h=MSFPpreload("_derived/industrial.htm_cmp_global110_vbtn_a.gif"); }// --></script>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="industrial.htm" language="JavaScript" onmouseover="if(MSFPhover) document['MSFPnav9'].src=MSFPnav9h.src" onmouseout="if(MSFPhover) document['MSFPnav9'].src=MSFPnav9n.src"><img onmousedown="imd(this)" src="_derived/industrial.htm_cmp_global110_vbtn_p.gif" width="140" height="50" border="0" alt="industrial" name="MSFPnav9"></span>
+
+
+<br><script language="JavaScript">
+<!--if(MSFPhover) { MSFPnav7n=MSFPpreload("_derived/registration.htm_cmp_global110_vbtn_p.gif"); MSFPnav7h=MSFPpreload("_derived/registration.htm_cmp_global110_vbtn_a.gif"); }// --></script>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="registration.htm" language="JavaScript" onmouseover="if(MSFPhover) document['MSFPnav7'].src=MSFPnav7h.src" onmouseout="if(MSFPhover) document['MSFPnav7'].src=MSFPnav7n.src"><img onmousedown="imd(this)" src="_derived/registration.htm_cmp_global110_vbtn_p.gif" width="140" height="50" border="0" alt="Registration" name="MSFPnav7"></span>
+
+<br><script language="JavaScript">
+<!--if(MSFPhover) { MSFPnav9n=MSFPpreload("_derived/workshop.htm_cmp_global110_vbtn_p.gif"); MSFPnav9h=MSFPpreload("_derived/workshop.htm_cmp_global110_vbtn_a.gif"); }// --></script>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="workshop.htm" language="JavaScript" onmouseover="if(MSFPhover) document['MSFPnav9'].src=MSFPnav9h.src" onmouseout="if(MSFPhover) document['MSFPnav9'].src=MSFPnav9n.src"><img onmousedown="imd(this)" src="_derived/workshop.htm_cmp_global110_vbtn_p.gif" width="140" height="50" border="0" alt="workshop" name="MSFPnav9"></span>
+
+
+
+<br><script language="JavaScript">
+<!--if(MSFPhover) { MSFPnav10n=MSFPpreload("_derived/venue.htm_cmp_global110_vbtn_p.gif"); MSFPnav10h=MSFPpreload("_derived/venue.htm_cmp_global110_vbtn_a.gif"); }// --></script>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="venue.htm" language="JavaScript" onmouseover="if(MSFPhover) document['MSFPnav10'].src=MSFPnav10h.src" onmouseout="if(MSFPhover) document['MSFPnav10'].src=MSFPnav10n.src"><img onmousedown="imd(this)" src="_derived/venue.htm_cmp_global110_vbtn_p.gif" width="140" height="50" border="0" alt="Venue" name="MSFPnav10"></span>
+
+<br><script language="JavaScript">
+<!--if(MSFPhover) { MSFPnav8n=MSFPpreload("_derived/accomodation.htm_cmp_global110_vbtn_p.gif"); MSFPnav8h=MSFPpreload("_derived/accomodation.htm_cmp_global110_vbtn_a.gif"); }// --></script>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="accomodation.htm" language="JavaScript" onmouseover="if(MSFPhover) document['MSFPnav8'].src=MSFPnav8h.src" onmouseout="if(MSFPhover) document['MSFPnav8'].src=MSFPnav8n.src"><img onmousedown="imd(this)" src="_derived/accomodation.htm_cmp_global110_vbtn_p.gif" width="140" height="50" border="0" alt="Accommodation" name="MSFPnav8"></span>
+</p>
+
+
+<!--msnavigation--></td>
+<td valign="top" width="24"></td><!--msnavigation--><td valign="top">
+
+<!--msnavigation--></td>
+
+<td valign= "top">
+		 <h2> <span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Conference Program</span> </h2>
+<table bgcolor="#ffffff" border="3" bordercolor="#000000" width="80%" >
+	<tbody>
+		<tr><td><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >day/time</span></td> <td><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Auditorium</span> </td><td><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Conference Room-1</span> </td><td><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Conference Room-2</span> </td><td><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Conference Room-3</span> </td><td><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Lecture Hall  (Internet room)</span> </td></tr>
+		
+		<tr><td colspan="10" align="middle" ><h3><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >1st Day: March 19 (Wednesday), 2008</span></h3></td></tr>
+<tr><td><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >9.00 AM-9.30 AM</span></td> <td><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Inauguration session</span> </td><td><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >NA</span></td><td><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >NA</span></td><td><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td><td><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td></tr>
+		<tr><td><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >9.30 AM-11.00 AM</span></td> <td><span onclick="return false" style="text-decoration:underline; color:blue" href="keynotes.htm#kn1"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Keynote-1</span></span> <span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >(K1)</span> </td><td><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >NA</span></td><td><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >NA</span></td><td><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td><td><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td></tr>
+		<tr><td colspan="10" align="middle"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span> </td></tr>
+		<tr><td><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >11.30 AM-1.00 PM</span></td> <td><span onclick="return false" style="text-decoration:underline; color:blue" href="industrial.htm"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Invited Industrial Session-1</span></span> <span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >(I1)</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorial.htm#tut1"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial-1</span></span> <span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >(T1a)</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="research.htm#rsxs"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Research Session (XML Schema)</span></span> <span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >(F1)</span></td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="short.htm#spqt"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Short papers (Queries &amp; Transactions)</span></span> <span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >(S1)</span> </td><td><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td></tr>
+		<tr><td colspan="10" align="middle"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Lunch (1.00 PM-2.00 PM)</span></td></tr>
+		<tr><td><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >2.00 PM-3.30 PM</span></td> <td><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorial.htm#tut1"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial-1</span></span> <span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >(T1b)</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="research.htm#rsdm"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Research Session (Data Mining)</span></span> <span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >(F2)</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="#ws"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Workshop-1</span> </span><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >(W1a)</span> </td><td><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td></tr>
+		<tr><td colspan="10" align="middle"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span> </td></tr>
+		<tr><td><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >4.00 PM-5.30 PM</span></td> <td><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td><td><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="research.htm#rssd"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Research Session (Spatial Data)</span></span> <span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >(F3)</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="#ws"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Workshop-1</span></span> <span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >(W1b)</span> </td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="demo.htm"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Demos</span></span> <span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >(D1)</span> </td></tr>
+<tr><td colspan="10" align="middle"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Reception (6.30 PM onwards)</span></td></tr>
+
+		<tr><td colspan="10" align="middle"><h3><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >2nd Day: March 20 (Thursday), 2008</span></h3></td></tr>
+		<tr><td><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >9.00 AM-10.30 AM</span></td> <td><span onclick="return false" style="text-decoration:underline; color:blue" href="keynotes.htm#kn2"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Keynote-2</span></span> <span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >(K2)</span> </td><td><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >NA</span></td><td><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >NA</span></td><td><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td><td><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td></tr>
+<tr><td colspan="10" align="middle"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span> </td></tr>
+		<tr><td><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >11.00 AM-12.30 PM</span></td> <td><span onclick="return false" style="text-decoration:underline; color:blue" href="panel.htm"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Panel</span></span> <span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >(P)</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorial.htm#tut2"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial-2</span> </span><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >(T2a)</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="research.htm#rsic"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Research Session (Indexes and Cubes)</span></span> <span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >(F4)</span></td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="short.htm#spxd"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Short papers (XML Databases)</span></span><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >(S2)</span></td><td><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td></tr>
+			<tr><td colspan="10" align="middle"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Lunch (12.30 PM-1.30 PM)</span></td></tr>
+			<tr><td><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >1.30 PM-3.00 PM</span></td> <td><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorial.htm#tut2"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial-2</span> </span> <span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >(T2b)</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="research.htm#rsds"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Research Session (Data Streams)</span></span> <span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >(F5)</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="short.htm#spdm"> <span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Short papers (Data Mining)</span> </span> <span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >(S3)</span></td><td><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td></tr>
+<tr><td colspan="10" align="middle"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span> </td></tr>
+		<tr><td><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >3.30 PM-5.00 PM</span></td> <td><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td><td><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="research.htm#rspt"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Research Session (P2P and Transactions)</span></span> <span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >(F6)</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="short.htm#spwi"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Short papers(Warehouses and Industrial Applications)</span></span> <span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >(S4)</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="demo.htm"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Demos</span></span> <span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >(D2)</span> </td></tr>
+		<tr><td colspan="10" align="middle"><span onclick="return false" style="text-decoration:underline; color:blue" href="industrial.htm#st"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Special talk</span></span> <span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >(5.15 PM - 6.00 PM)</span></td></tr>
+<tr><td colspan="10" align="middle"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Banquet (6.30 PM onwards)</span></td></tr>
+		<tr><td colspan="10" align="middle"><h3><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >3rd Day: March 21 (Friday), 2008</span></h3></td></tr>
+		<tr><td><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >9.00 AM-10.30 AM</span></td> <td><span onclick="return false" style="text-decoration:underline; color:blue" href="keynotes.htm#kn3"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Keynote-3</span></span> <span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >(K3)</span></td><td><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >NA</span></td><td><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >NA</span></td><td><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td><td><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td></tr>
+	<tr><td colspan="10" align="middle"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span> </td></tr>
+	<tr><td><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >11.00 AM-12.30 PM</span></td> <td><span onclick="return false" style="text-decoration:underline; color:blue" href="industrial.htm"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Invited Industrial Session-2</span></span> <span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >(I2)</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorial.htm#tut3"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial-3</span> </span><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >(T3a)</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="research.htm#rsxp"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Research Session (XML Processing)</span></span> <span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >(F7)</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="short.htm#spmd"> <span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Short papers (Mobile and Distributed Data)</span></span> <span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >(S5)</span></td><td><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td></tr>
+			<tr><td colspan="10" align="middle"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Lunch (12.30 PM-1.30 PM)</span></td></tr>
+			<tr><td><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >1.30 PM-3.00 PM</span></td> <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#ss1"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Sponsor Session-1</span></span> <span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >(N1)</span> </td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorial.htm#tut3"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial-3</span></span> <span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >(T3b)</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="research.htm#rspp"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Research Session (Pattern Processing)</span></span> <span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >(F8)</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="#ws"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Workshop-2</span></span> <span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >(W2a)</span> </td><td><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td></tr>
+<tr><td colspan="10" align="middle"><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span> </td></tr>
+		<tr><td><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >3.30 PM-5.00 PM</span></td> <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#ss2"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Sponsor Session-2</span></span> <span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >(N2)</span> </td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="#sbs"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Student Soap-box session</span></span> <span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >(SPB)</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="research.htm#rsit"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Research Session (IR Techniques)</span></span> <span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >(F9)</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="#ws"><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Workshop-2</span></span> <span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >(W2b)</span></td><td><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >NA</span> </td></tr>
+
+
+</tbody></table>
+
+
+<h2><span onclick="return false" style="text-decoration:underline; color:blue" name="kn"><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Keynotes</span> </span></h2>
+		<ul>
+			<li><b><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >K1</span></b><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >: Storage and Index Design for Community Systems</span>
+			<br/><b><i><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Beng-Chin Ooi, National U. of Singapore</span></i></b>
+			<br/><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Krithi Ramamritham, IIT Bombay</span>			
+			<p/>	
+			<li><b><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >K2</span></b><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >: Self-Tuning Database Systems: Past, Present and Future</span>
+			<br/><b><i><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Surajit Chaudhuri, Microsoft Research, USA</span></i></b>
+			<br/><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Jayant Haritsa, IISc Bangalore, India</span>
+			<p/>
+<li><b><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >K3</span></b><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >: The Business of Managing Data: Implications for Research</span>
+     <br/><b><i><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Anand Deshpande, Persistent Systems, India</span></i></b>			
+     <br/>	<span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Mukesh Mohania, IBM Research, India</span>
+	
+		</ul>
+
+
+
+		<h2><span onclick="return false" style="text-decoration:underline; color:blue" name="tut"><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span></h2>
+		<ul>
+			<li><b><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >T1</span></b><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >: Stream Processing: Going Beyond Database Management Systems</span>
+			<br/><b><i><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Sharma Chakravarthy (U. of Texas at Arlington, USA)</span></i></b>
+			<br/><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Kian-lee Tan, NUS Singapore</span> 
+<p/>
+			<li><b><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >T2</span></b><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >: The Semantic Web: Semantics for Data and Services on the Web</span>
+			<br/><b><i> <span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Vipul Kashyap (Partners HealthCare System, USA), Christoph Bussler (BEA Systems, USA)</span></i></b>
+			<br/><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: S. Sudarshan, IIT Bombay</span>
+<p/>
+			<li><b><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >T3</span></b><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >: Preference Query Formulation and Processing: Ranking and Skyline query approaches</span>
+			<br/><b><i><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Seung-won Hwang (POSTECH, Korea), Wolf-Tilo Balke (L3S Research Center, Germany)</span></i></b>
+			<br/><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Srinath Srinivasa, IIIT Bangalore, India</span>
+		</ul>
+<h2><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Invited Industrial Sessions</span></h2>
+<ul>
+	<span onclick="return false" style="text-decoration:underline; color:blue" name="is1"/>
+		<li><b><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >I1</span></b><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >: Invited Industrial session-1</span>
+		<p/><b><i><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Anand Deshpande, Persistent Systems, India</span></i></b>
+		<ol>
+			<li> <span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >C. Mohan, IBM Fellow and IBM India Chief Scientist, IBM Research</span>
+			<li><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Sivakumar Ramamurthy, Managing Director, Intel India</span>
+		</ol>
+			<p/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" name="is2"/>
+		<li><b><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >I2</span></b><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >: Invited Industrial session-2</span>
+		<p/><b><i><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Jayant Haritsa, IISc, Banglore, India</span></i></b>
+		<ol>
+		<li><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Sanjeev Kumar, General Manager, BEA</span>
+		<li><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Vishal Daga, Director, Netezza</span>
+	</ol>
+</ul>
+
+<h2> <span onclick="return false" style="text-decoration:underline; color:blue" name="panels"><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Panel</span></span></h2>
+
+	<b><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >P</span></b><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >: Is there really anything beyond Frequent Patterns, Classification 
+			and Clustering in Data Mining?</span>
+			<p/><b><i><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Moderator: Vikram Pudi, IIIT Hyderabad, India</span></i></b>
+			<span onclick="return false" style="text-decoration:underline; color:blue" name="ws">
+<h2><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></h2>
+		<ul>
+			<li><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >W1:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://arg.vsb.cz/ah3d/2008/index.html"><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Analysis of high-dimensional discrete data</span></span>
+			<li><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >W2:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.itee.uq.edu.au/~shazia/Research/Data%20Quality/Workshop"><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Managing Data Quality in Collaborative Information Systems</span></span>
+		</ul>
+
+	</span>
+
+		<h2><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Full papers</span></h2>
+		<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="rsxs"><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >F1: XML Schemas</span></span> </h3>
+		<p/><b><i><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: P Sreenivasa Kumar, IIT Madras, India</span></i></b>
+		<ol>
+			<li> <span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Holistic Constraint-Preserving Transformation from Relational Schema to XML Schema</span>
+			<br/><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Rui Zhou, Chengfei Liu, Jianxin Li (Swinburne U. of Technology, Australia)</span>
+			<li><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >An Optimized Two-Step Solution for Updating XML Views</span>
+			<br/>  <span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Ling Wang, Ming Jiang, Elke Rundensteiner, Murali Mani (Worcester Polytechnic Inst., USA)</span>
+			<li><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Even an Ant Can Create an XSD</span>
+			<br/><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Ondrej Vosta, Irena Mlynkova, Jaroslav Pokorny (Charles U., Czech Republic)</span>
+		</ol>
+		<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="rsdm"><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >F2: Data Mining</span></span> </h3>
+		<p/><b><i><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Jeffrey Xu Yu, CUHK, Hong Kong</span></i></b>
+		<ol>
+			<li>  <span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >A User Driven Data Mining Process Model and Learning System</span> 
+			<br/><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Esther Ge, Richi Nayak, Yue Xu, Yuefeng Li (Queensland U. of Technology, Australia)</span>
+			<li><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Mining of Recurrent Rules from a Sequence Database</span>
+			<br/> <span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >David Lo, Siau-Cheng Khoo (National U. of Singapore), Chao Liu (U. of Illinois, Urbana-Champaign, USA)</span>
+			<li><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Uniqueness Mining</span>
+			<br/> <span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Rohit Paravastu, Hanuma Kumar, Vikram Pudi (IIIT Hyderabad, India)</span>
+		</ol>
+
+
+            
+
+		<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="rssd"><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >F3: Spatial Data</span></span> </h3>
+		<p/><b><i><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Xiaofang Zhou, U. of Queensland, Australia</span></i></b>
+		<ol>
+			<li><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Discovering Spatial Interaction Patterns</span>
+			<br/><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Chang Sheng, Wynne Hsu, Mong Li Lee, Anthony Tung (National U. of Singapore)</span>
+
+			<li> <span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Topological Relationships Between Map Geometries</span>
+			<br/><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Mark McKenney, Markus Schneider (U. of Florida, USA)</span>
+
+			<li> <span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >MBR Models for Uncertainty Regions of Moving Objects</span>
+			<br/><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Shayma Alkobaisi, Wan D. Bae, Seon Ho Kim (U. of Denver, USA), Byunggu Yu (U. of District of Columbia, USA)</span>
+		</ol>
+
+		<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="rsic"><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >F4: Indexes and Cubes</span> </span></h3>
+		<p/><b><i><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Kamal Karlapalem, IIIT Hyderabad, India</span></i></b>
+		<ol>
+			<li> <span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >Summarization Graph Indexing: Beyond Frequent Structure-based Approach</span>
+			<br/> <span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >Lei Zou (Huazhong U. of Science and Technology, China),  Lei Chen (Hong Kong U. of Science and Technology, China), Huaming Zhang (U. of Alabama, Huntsville, USA), YanSheng Lu, Qiang Lou (Huazhong U. of Science and Technology, China)</span>
+
+			<li> <span onclick="return false" style="text-decoration:underline; color:blue" href="bestPaper.htm"><b><i><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Best Paper</span></i></b><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >:</span> </span><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Bulk-Loading the ND-Tree in Non-ordered Discrete Data Spaces</span>
+			<br/> <span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Hyun-Jeong Seok (U. of Michigan, USA), Gang Qian, Qiang Zhu, Alexander Oswald (U. of Central Oklahoma, USA), Sakti Pramanik (Michigan State U., USA)</span>
+
+			<li> <span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >An Incremental Maintenance Scheme of Data Cubes</span>
+			<br/>  <span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >Dong Jin, Tatsuo Tsuji, Takayuki Tsuchida, Ken Higuchi (U. of Fukui, Japan)</span>
+		</ol>
+
+		<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="rsds"><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >F5: Data Streams</span></span></h3>
+		<p/><b><i><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Vikram Pudi, IIIT Hyderabad, India</span></i></b>
+<ol>
+      	<li>  <span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >A Data Partition Based Near Optimal Scheduling Algorithm for Wireless Multi-Channel Data Broadcast</span>        
+         <br/>    <span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Ping Yu, Weiwei Sun, Yongrui Qin, Zhuoyao Zhang, Bole Shi (Fudan U., China)</span>
+
+     	<li> <span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >A Test Paradigm for Detecting Changes in Transactional Data Streams</span>       
+          <br/>   <span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Willie Ng, Manoranjan Dash (Nanyang Technological U., Singapore)</span>
+
+      	<li> <span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Teddies: Trained Eddies for Reactive Stream Processing</span>
+           <br/>  <span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Kajal Claypool (Oracle Corporation, USA), Mark Claypool (Worcester Polytechnic Inst., USA)</span>
+</ol>
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="rspt"><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >F6: P2P and Transactions</span></span> </h3>
+<p/><b><i><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: N L Sarda, IIT Bombay, India</span></i></b>
+<ol>
+      	<li> <span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >Flood Little, Cache More: Effective Result-reuse in P2P IR Systems</span>
+          <br/>   <span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Christian Zimmer, Srikanta Bedathur, Gerhard Weikum (MPI for Informatics, Germany)</span>
+
+     	<li> <span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >Load Balancing for Moving Object Management in a P2P Network</span> 
+ <br/>  <span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Mohammed Eunus Ali, Egemen Tanin, Rui Zhang, Lars Kulik (U. of Melbourne, Australia)</span>
+          
+
+    	<li>  <span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Serializable Executions with Snapshot Isolation: Modifying Application Code or Mixing Isolation Levels?</span>
+          <br/>   <span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >Mohammad Alomari, Michael Cahill, Alan Fekete, Uwe Roehm (U. of Sydney, Australia)</span>
+</ol>
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="rsxp"><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >F7: XML Processing</span></span> </h3>
+<p/><b><i><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Laurent S Mignet, IBM Research, India</span></i></b>
+ <ol> 
+      	<li>  <span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >SemanticTwig: A Semantic Approach to Optimize XML Query Processing</span>        
+          <br/>   <span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >Zhifeng Bao,  Tok Wang Ling (National U. of Singapore), Jiaheng Lu (U. of California, Irvine, USA), Bo Chen (National U. of Singapore)</span>
+ 
+     	<li>  <span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Approximate XML Query Answers in DHT-Based P2P Networks</span>
+          <br/>   <span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >Weimin He, Leonidas Fegaras (U. of Texas, Arlington, USA)</span>
+
+      	<li>  <span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Top-k Search across Heterogeneous XML Data Sources</span>
+         <br/>    <span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >Jianxin Li, Chengfei Liu (Swinburne U. of Technology, Australia), Jeffrey Xu Yu (Chinese U. of Hong Kong, China), Rui Zhou (Swinburne U. of Technology, Australia)</span>
+ </ol>     
+ <h3><span onclick="return false" style="text-decoration:underline; color:blue" name="rspp"><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >F8: Complex Pattern Processing</span></span> </h3>
+ <p/><b><i><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Naveen Kumar, Delhi U., India</span></i></b>
+<ol>
+      	<li>  <span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >Example-Based Robust DB-Outlier Detection for High Dimensional Data</span>
+         <br/>    <span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >Yuan Li, Hiroyuki Kitagawa (U. of Tsukuba, Japan)</span>
+
+     	<li> <span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >A Novel Fingerprint Matching Method by Excluding Elastic Distortion</span>
+          <br/>   <span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >Keming Mao, Guoren Wang (Northeastern U., China)</span>
+
+     	<li>  <span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >Approximate Clustering of Time Series Using Compact Model-based Descriptions</span>
+           <br/>  <span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >Hans-Peter Kriegel, Peer Kroger, Alexey Pryakhin, Matthias Renz, Andrew Zherdin (Ludwig Maximilians U., Germany)</span>
+</ol>
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="rsit"><span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >F9: IR Techniques</span> </span></h3>
+<p/><b><i><span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Neelima Gupta, Delhi U., India</span></i></b>
+<ol>
+     	<li> <span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >An Approach for Extracting Bilingual Terminology from Wikipedia</span>
+          <br/>   <span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >Maike Erdmann, Kotaro Nakayama, Takahiro Hara, Shojiro Nishio (Osaka U., Japan)</span>
+
+      	<li>  <span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >Cost-Effective Search Strategy Framework for Automatic Dictionary Construction</span>  
+           <br/>  <span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >Hideki Kawai, Hironori Mizuguchi, Masaaki Tsuchida (NEC Research, Japan)</span>
+
+     	<li> <span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >Learning Bayesian Network Structure from Incomplete Data without any Assumption</span> 
+	<br/> <span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >Celine Fiot (U. Montpellier II, France), G. A. Putri Saptawati (Institut Teknologi Bandung, Indonesia), Anne Laurent, Maguelonne Teisseire (U. Montpellier II, France)</span>
+ </ol> 
+
+ <h2><span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >Short Papers</span></h2>
+
+ <h3> <span onclick="return false" style="text-decoration:underline; color:blue" name="spqt"><span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >S1: Queries and Transactions</span> </span></h3>
+ <p/><b><i><span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Theo Haerder, U. of Kaiserslautern, Germany</span></i></b>
+ <ol>
+	 <li> <span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >Ranking Database Queries With User Feedback: A Neural Network Approach</span>
+          <br/>    <span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >Nevedita Mallick, Ganesh Agarwal, Srinivasan Turuvekere (U. of Illinois, Urbana-Champaign, USA)</span> 
+
+        <li> <span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >Supporting Keyword Queries on Structured Databases with Limited Search Interfaces</span>   
+          <br/>    <span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >Nurcan Yuruk, Xiaowei Xu (U. of Arkansas, Little Rock, USA), Chen Li (U. of California, Irvine, USA), Jeffrey Xu Yu (Chinese U. of Hong Kong, China)</span>
+
+       <li> <span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >Automated Data Discovery in Similarity Score Queries</span>
+          <br/>    <span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >Fatih Altiparmak, Ali Tosun, Hakan Ferhatosmanoglu, Ahmet Sacan (Ohio State U., USA)</span>
+
+        <li>  <span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Algorithms for Node Disjoint Subgraph Homeomorphism Determination</span>
+         <br/>     <span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >Yanghua Xiao, Wentao Wu, Wei Wang, Zhenying He (Fudan U., China)</span>
+
+       <li>  <span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >The Chronon Based Model for Temporal Databases</span>
+          <br/>    <span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >Anurag D, Anup Sen (IIM Calcutta, India)</span>
+
+       <li> <span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >Main Memory Commit Processing: The Impact of Priorities</span>
+           <br/>   <span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >Heine Kolltveit, Svein-Olaf Hvasshovd (NTNU, Norway)</span>
+      
+   </ol> 
+   <h3> <span onclick="return false" style="text-decoration:underline; color:blue" name="spxd"><span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >S2: XML Databases</span></span></h3>
+   <p/><b><i><span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Vasudha Bhatnagar, Delhi U., India</span></i></b>
+ <ol>
+        <li>  <span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >Exploiting ID References for Effective Keyword Search in XML Database</span>
+           <br/>  <span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >Bo Chen (National U. of Singapore), Jiaheng Lu (U. of California, Irvine, USA),  Tok Wang Ling (National U. of Singapore)</span>
+
+       <li>  <span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >Storage techniques for multi-versioned XML documents</span>
+            <br/>  <span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >Laura Irina Rusu, Wenny Rahayu (LaTrobe U., Australia), David Taniar (Monash U., Australia)</span>
+
+        <li> <span class="coloringspan" id="282" onmousedown="md(this)" onmouseup="mu(this)" >Twig'n Join: Progressive Query Processing of Multiple XML Streams</span> 
+            <br/>  <span class="coloringspan" id="283" onmousedown="md(this)" onmouseup="mu(this)" >Wee Hyong Tok, Stephane Bressan, Mong Li Lee (National U. of Singapore)</span>
+
+        <li>  <span class="coloringspan" id="284" onmousedown="md(this)" onmouseup="mu(this)" >TwigBuffer: Avoiding Useless Intermediate Solutions Completely in Twig Joins</span>
+            <br/>  <span class="coloringspan" id="285" onmousedown="md(this)" onmouseup="mu(this)" >Jiang Li, Junhu Wang (Griffith U., Australia)</span> 
+
+        <li> <span class="coloringspan" id="286" onmousedown="md(this)" onmouseup="mu(this)" >An Approach for XML Similarity Join using Tree Serialization</span> 
+            <br/>  <span class="coloringspan" id="287" onmousedown="md(this)" onmouseup="mu(this)" >Lianzi Wen, Toshiyuki Amagasa, Hiroyuki Kitagawa (U. of Tsukuba, Japan)</span>
+
+        <li> <span class="coloringspan" id="288" onmousedown="md(this)" onmouseup="mu(this)" >A Holistic Algorithm for Efficiently Evaluating Xtwig Joins</span>
+           <br/>   <span class="coloringspan" id="289" onmousedown="md(this)" onmouseup="mu(this)" >Bo Ning, Guoren Wang (Northeastern U., China), Jeffrey Xu Yu (Chinese U. of Hong Kong,China)</span>
+</ol> 
+
+<h3> <span onclick="return false" style="text-decoration:underline; color:blue" name="spdm"><span class="coloringspan" id="290" onmousedown="md(this)" onmouseup="mu(this)" >S3: Data Mining</span></span></h3>
+<p/><b><i><span class="coloringspan" id="291" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Yasuhiko Morimoto, Hiroshima U., Japan</span></i></b>
+ <ol>
+        <li>   <span class="coloringspan" id="292" onmousedown="md(this)" onmouseup="mu(this)" >Association Rules Induced by Item and Quantity Purchased</span>
+          <br/>    <span class="coloringspan" id="293" onmousedown="md(this)" onmouseup="mu(this)" >Animesh Adhikari (S P Chowgule College, Goa, India), P. R. Rao (Goa U., India)</span>
+
+       <li> <span class="coloringspan" id="294" onmousedown="md(this)" onmouseup="mu(this)" >An Indexed Trie Approach to Incremental Mining of Closed Frequent Itemsets based on a Galois Lattice Framework</span>
+           <br/>   <span class="coloringspan" id="295" onmousedown="md(this)" onmouseup="mu(this)" >Kalpana Balasubrahmanyan (Avinashilingam U., India), R Nadarajan, Senthil Babu (PSG College of Technology, India)</span>
+
+       <li><span class="coloringspan" id="296" onmousedown="md(this)" onmouseup="mu(this)" >Efficiently Mining Recent Frequent Patterns over Online Data Streams</span>
+         <br/>     <span class="coloringspan" id="297" onmousedown="md(this)" onmouseup="mu(this)" >Guohui Li, Hui Chen (Huazhong U. of Science and Technlogy, China), LihChyun Shu (National Cheng Kung U., Taiwan)</span>
+
+       <li> <span class="coloringspan" id="298" onmousedown="md(this)" onmouseup="mu(this)" >Index-Supported Similarity Search using Multiple Representations</span>
+         <br/>     <span class="coloringspan" id="299" onmousedown="md(this)" onmouseup="mu(this)" >Johannes Assfalg, Hans-Peter Kriegel, Peter Kunath, Alexey Pryakhin, Michael Kats (Ludwig Maximilians U., Germany)</span>
+
+        <li> <span class="coloringspan" id="300" onmousedown="md(this)" onmouseup="mu(this)" >Distance Based Feature Selection for Clustering Microarray Data</span>
+           <br/>   <span class="coloringspan" id="301" onmousedown="md(this)" onmouseup="mu(this)" >Manoranjan Dash (Nanyang Technological U., Singapore)</span>     
+
+       <li>  <span class="coloringspan" id="302" onmousedown="md(this)" onmouseup="mu(this)" >Knowledge Transferring Based on Implicit Link Analysis</span>
+           <br/>   <span class="coloringspan" id="303" onmousedown="md(this)" onmouseup="mu(this)" >Xiao Ling, Wenyuan Dai, Gui-Rong Xue, Yong Yu (Shanghai Jiaotong U., China)</span>
+</ol> 
+ 
+
+  <h3> <span onclick="return false" style="text-decoration:underline; color:blue" name="spwi"><span class="coloringspan" id="304" onmousedown="md(this)" onmouseup="mu(this)" >S4: Data Warehouses and Industrial Applications</span></span></h3>
+  <p/><b><i><span class="coloringspan" id="305" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: P Krishna Reddy, IIIT Hyderabad, India</span></i></b>
+  <ol>
+        <li> <span class="coloringspan" id="306" onmousedown="md(this)" onmouseup="mu(this)" >Redundant Array of Inexpensive Nodes for DWS</span>
+           <br/>   <span class="coloringspan" id="307" onmousedown="md(this)" onmouseup="mu(this)" >Jorge Vieira (Critical Software SA, Portugal), Marco Vieira (U. of Coimbra, Portugal), Marco Costa (Critical Software SA, Portugal), Henrique Madeira (U. of Coimbra, Portugal)</span>
+
+       <li>  <span class="coloringspan" id="308" onmousedown="md(this)" onmouseup="mu(this)" >Load-Balancing for WAN Data Warehouses</span>
+          <br/>    <span class="coloringspan" id="309" onmousedown="md(this)" onmouseup="mu(this)" >Pedro Furtado (U. Coimbra, Portugal)</span> 
+
+       <li> <span class="coloringspan" id="310" onmousedown="md(this)" onmouseup="mu(this)" >Enabling Privacy-Preserving e-Payment Processing</span>
+           <br/>   <span class="coloringspan" id="311" onmousedown="md(this)" onmouseup="mu(this)" >Mafruz Ashrafi, See-Kiong Ng (Inst. for Infocomm Research, Singapore)</span>
+
+       <li> <span class="coloringspan" id="312" onmousedown="md(this)" onmouseup="mu(this)" >Managing and Correlating Historical Events using an Event Timeline Datatype</span>
+         <br/>     <span class="coloringspan" id="313" onmousedown="md(this)" onmouseup="mu(this)" >Abhishek Biswas, Bhupalam Sagar (Amrita School of Engineering, India), Jagannathan Srinivasan (Oracle, USA)</span>
+
+       <li> <span class="coloringspan" id="314" onmousedown="md(this)" onmouseup="mu(this)" >Online Collaborative Stock Control and Selling Among E-retailers</span>
+         <br/>     <span class="coloringspan" id="315" onmousedown="md(this)" onmouseup="mu(this)" >Tao-Chung Lin, Toly Chen (Feng Chia U., Taiwan)</span>
+
+       <li> <span class="coloringspan" id="316" onmousedown="md(this)" onmouseup="mu(this)" >AutoSeek: A Tool for Mining Automotive Warranty Claims Data for Effective Root Cause Analysis</span>
+         <br/>     <span class="coloringspan" id="317" onmousedown="md(this)" onmouseup="mu(this)" >Ashish Sureka (Infosys, India)</span>
+</ol> 
+<h3> <span onclick="return false" style="text-decoration:underline; color:blue" name="spmd"><span class="coloringspan" id="318" onmousedown="md(this)" onmouseup="mu(this)" >S5: Mobile and Distributed Data</span></span></h3>
+<p/><b><i><span class="coloringspan" id="319" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Rajeev Gupta, IBM Research, India</span></i></b>
+ <ol>
+       <li> <span class="coloringspan" id="320" onmousedown="md(this)" onmouseup="mu(this)" >A Similarity Search of Trajectory Data using Textual Information Retrieval Techniques</span>
+        <br/>      <span class="coloringspan" id="321" onmousedown="md(this)" onmouseup="mu(this)" >Yu Suzuki, Jun Ishiduka, Kyoji Kawagoe (Ritsumeikan U., Japan)</span>
+ 
+       <li> <span class="coloringspan" id="322" onmousedown="md(this)" onmouseup="mu(this)" >Constrained k-Nearest Neighbor Query Processing over Moving Object Trajectories</span>
+           <br/>   <span class="coloringspan" id="323" onmousedown="md(this)" onmouseup="mu(this)" >Yunjun Gao, Gencai Chen (Zhejiang U., China), Qing Li (City U. of Hong Kong, China), Chun Li, Chun Chen (Zhejiang U., China)</span>
+
+        <li>  <span class="coloringspan" id="324" onmousedown="md(this)" onmouseup="mu(this)" >Location Update Strategies for Network-Constrained Moving Objects</span>
+          <br/>    <span class="coloringspan" id="325" onmousedown="md(this)" onmouseup="mu(this)" >Zhiming Ding (ISCAS, Beijing, China), Xiaofang Zhou (U. of Queensland, Australia)</span>
+
+       <li> <span class="coloringspan" id="326" onmousedown="md(this)" onmouseup="mu(this)" >A P2P Meta-Index for Spatio-Temporal Moving Object Databases</span>
+           <br/>   <span class="coloringspan" id="327" onmousedown="md(this)" onmouseup="mu(this)" >Cecilia Hernandez, Andrea Rodriguez (U. of Concepcion, Chile), Mauricio Marin (Yahoo! Research, Chile)</span>
+
+        <li> <span class="coloringspan" id="328" onmousedown="md(this)" onmouseup="mu(this)" >An Update Propagation Strategy Considering Access Frequency in Peer-to-Peer Networks</span>
+          <br/>    <span class="coloringspan" id="329" onmousedown="md(this)" onmouseup="mu(this)" >Toshiki Watanabe, Akimitsu Kanzaki, Takahiro Hara, Shojiro Nishio (Osaka U., Japan)</span>
+
+        <li>  <span class="coloringspan" id="330" onmousedown="md(this)" onmouseup="mu(this)" >Towards Automated Analysis of Connections Network in Distributed Stream Processing System</span>
+	<br/>    <span class="coloringspan" id="331" onmousedown="md(this)" onmouseup="mu(this)" >Marcin Gorawski, Pawel Marks (Silesian U. of Technology, Poland)</span>
+      </ol>    
+ 
+
+      <h2><span onclick="return false" style="text-decoration:underline; color:blue" name="demo"><span class="coloringspan" id="332" onmousedown="md(this)" onmouseup="mu(this)" >Demos</span></span></h2>
+      <span class="coloringspan" id="333" onmousedown="md(this)" onmouseup="mu(this)" >(D1 &amp; D2)</span>
+      <ol>
+       <li> <span class="coloringspan" id="334" onmousedown="md(this)" onmouseup="mu(this)" >RAIN: Always On Data Warehousing</span>
+       <br/> <span class="coloringspan" id="335" onmousedown="md(this)" onmouseup="mu(this)" >Jorge Vieira (Critical Software SA, Portugal), Marco Vieira (U. of Coimbra, Portugal), Marco Costa (Critical Software SA, Portugal), Henrique Madeira (U. of Coimbra, Portugal)</span>
+
+        <li><span class="coloringspan" id="336" onmousedown="md(this)" onmouseup="mu(this)" >Data Compression for Incremental Data Cube Maintenance</span>
+        <br/><span class="coloringspan" id="337" onmousedown="md(this)" onmouseup="mu(this)" >Tatsuo Tsuji, Dong Jin, Ken Higuchi (U. of Fukui, Japan)</span>
+
+        <li><span class="coloringspan" id="338" onmousedown="md(this)" onmouseup="mu(this)" >A Bilingual Dictionary Extracted from the Wikipedia Link Structure</span>
+       <br/> <span class="coloringspan" id="339" onmousedown="md(this)" onmouseup="mu(this)" >Maike Erdmann, Kotaro Nakayama, Takahiro Hara, Shojiro Nishio (Osaka U., Japan)</span>
+
+       <li> <span class="coloringspan" id="340" onmousedown="md(this)" onmouseup="mu(this)" >A Search Engine for Browsing the Wikipedia Thesaurus</span>
+       <br/> <span class="coloringspan" id="341" onmousedown="md(this)" onmouseup="mu(this)" >Kotaro Nakayama, Takahiro Hara, Shojiro Nishio (Osaka U., Japan)</span>
+
+       <li> <span class="coloringspan" id="342" onmousedown="md(this)" onmouseup="mu(this)" >An Interactive Predictive Data Mining System for Informed Decision</span>
+       <br/> <span class="coloringspan" id="343" onmousedown="md(this)" onmouseup="mu(this)" >Esther Ge, Richi Nayak (Queensland U. of Technology, Australia)</span>
+
+       <li> <span class="coloringspan" id="344" onmousedown="md(this)" onmouseup="mu(this)" >Analysis of Time Series Using Compact Model-Based Descriptions</span>
+       <br/> <span class="coloringspan" id="345" onmousedown="md(this)" onmouseup="mu(this)" >Hans-Peter Kriegel, Peer Kroger, Alexey Pryakhin, Matthias Renz (Ludwig-Maximilians-U., Germany)</span>
+
+        <li><span class="coloringspan" id="346" onmousedown="md(this)" onmouseup="mu(this)" >Collecting Data Streams from a Distributed Radio-based Measurement System</span>
+       <br/> <span class="coloringspan" id="347" onmousedown="md(this)" onmouseup="mu(this)" >Marcin Gorawski, Pawel Marks, Michal Gorawski (Silesian U. of Technology, Poland)</span>
+
+       <li> <span class="coloringspan" id="348" onmousedown="md(this)" onmouseup="mu(this)" >A Web Visualization Tool for Historical Analysis of Geo-referenced Multidimensional Data</span>
+       <br/> <span class="coloringspan" id="349" onmousedown="md(this)" onmouseup="mu(this)" >Sonia Fernandes Silva (Etruria Telematica, Italy)</span>
+</ol>
+
+<h2><span class="coloringspan" id="350" onmousedown="md(this)" onmouseup="mu(this)" >Sponsor Sessions</span></h2>
+<ul>
+	<span onclick="return false" style="text-decoration:underline; color:blue" name="ss1"/>
+		<li><b><span class="coloringspan" id="351" onmousedown="md(this)" onmouseup="mu(this)" >N1</span></b><span class="coloringspan" id="352" onmousedown="md(this)" onmouseup="mu(this)" >: Sponsor session-1</span>
+		<p/><b><i><span class="coloringspan" id="353" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Krithi Ramamritham, IIT Bombay, India</span></i></b>
+		<br/>
+	<br/><span class="coloringspan" id="354" onmousedown="md(this)" onmouseup="mu(this)" >Yahoo India: 30 mins</span>
+	<br/><span class="coloringspan" id="355" onmousedown="md(this)" onmouseup="mu(this)" >Persistent: 30 mins</span>
+	<br/><span class="coloringspan" id="356" onmousedown="md(this)" onmouseup="mu(this)" >Satyam: 20 mins</span>
+	<p/>
+	<span onclick="return false" style="text-decoration:underline; color:blue" name="ss2"/>
+		<li><b><span class="coloringspan" id="357" onmousedown="md(this)" onmouseup="mu(this)" >N2</span></b><span class="coloringspan" id="358" onmousedown="md(this)" onmouseup="mu(this)" >: Sponsor session-2</span>
+		<p/><b><i><span class="coloringspan" id="359" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Mukesh Mohania, IBM Research, India</span></i></b>
+		<br/>
+		<br/><span class="coloringspan" id="360" onmousedown="md(this)" onmouseup="mu(this)" >Google India: 20 mins</span>
+	<br/><span class="coloringspan" id="361" onmousedown="md(this)" onmouseup="mu(this)" >TCS: 20 mins</span>
+	<br/><span class="coloringspan" id="362" onmousedown="md(this)" onmouseup="mu(this)" >IBM: 20 mins</span>
+	<br/><span class="coloringspan" id="363" onmousedown="md(this)" onmouseup="mu(this)" >GS Lab: 20 mins</span>
+</ul>
+
+<h2><span onclick="return false" style="text-decoration:underline; color:blue" name="sbs"><span class="coloringspan" id="364" onmousedown="md(this)" onmouseup="mu(this)" >Student soap-box session</span></span></h2>
+ <span class="coloringspan" id="365" onmousedown="md(this)" onmouseup="mu(this)" >(SPB)</span>
+ <p/><b><i><span class="coloringspan" id="366" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair:Srinath Srinivasa, IIIT Bangalore, India</span></i></b>
+ <p><b><span class="coloringspan" id="367" onmousedown="md(this)" onmouseup="mu(this)" >List of Accepted Talks</span></b>
+ <ol>
+	 <li> <span class="coloringspan" id="368" onmousedown="md(this)" onmouseup="mu(this)" >Yogita Sinkar. Scalable Server-less Video on demand Systems</span>
+<li>  <span class="coloringspan" id="369" onmousedown="md(this)" onmouseup="mu(this)" >Sebastian Gath. XML fulltext processing and visualization</span>
+<li>  <span class="coloringspan" id="370" onmousedown="md(this)" onmouseup="mu(this)" >Mandar R. Mutalikdesai. Exploratory Analysis of Co-citations in
+Hypertext Collections</span>
+<li>  <span class="coloringspan" id="371" onmousedown="md(this)" onmouseup="mu(this)" >Venu Gopal Reddy Mummadi. Exploring the Concepts of Social Networks
+for Efficient Web Resource Discovery</span>
+<li>  <span class="coloringspan" id="372" onmousedown="md(this)" onmouseup="mu(this)" >Rage Uday Kiran. Mining Rare Associations using Interval Based
+Support Constraints</span>
+<li>  <span class="coloringspan" id="373" onmousedown="md(this)" onmouseup="mu(this)" >Aditya Ramana Rachakonda. Mining Semantics from Lexical Cooccurrence Data</span>
+<li>  <span class="coloringspan" id="374" onmousedown="md(this)" onmouseup="mu(this)" >Akshi Kumar Khalid. Web Mining Framework for Ad-hoc Retrieval and Structuralizing User-Centric Web-Data</span>
+</ol>
+<p/> 
+
+
+
+<p><span class="coloringspan" id="375" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>

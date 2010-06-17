@@ -1,0 +1,513 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/9/annotation/annotated_repository/http+^^www.rm.is.tohoku.ac.jp^SIInt08^program.html_2009-08-05__14-43-45.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/9/annotation/annotated_repository/http+^^www.rm.is.tohoku.ac.jp^SIInt08^program.html_2009-08-05__14-43-45.yaml created on Thu Aug 13 13:57:49 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<META name="GENERATOR" content="IBM WebSphere Studio Homepage Builder Version 10.0.1.0 for Windows">
+<META http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<META http-equiv="Content-Style-Type" content="text/css">
+<TITLE>SI International 2008 - Program</TITLE>
+</HEAD>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<H3 align="center"><FONT color="#000099"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >2008 IEEE International Symposium on System Integration</span></FONT></H3>
+<H3 align="center"><FONT color="#000099"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >The First Symposium on</span><BR>
+</FONT><FONT color="#000099" size="+4"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >System Integration</span></FONT></H3>
+<P align="center"><img onmousedown="imd(this)" src="SICE_logo.gif" width="147" height="38" border="0"> <img onmousedown="imd(this)" width="126" height="42" src="clip_image003.jpg" v:shapes="_x0000_s1028"></P>
+<P align="center"><img onmousedown="imd(this)" width="462" height="40" src="clip_image001.gif" alt="SI International 2008&#13;&#10;" v:shapes="_x0000_s1033"></P>
+<P align="center"><FONT color="#000000"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Noyori Conference Hall, Nagoya University, Japan</span><BR>
+<span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Decenber 4th, 2008</span></FONT></P>
+<P align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html" target="_blank"><img onmousedown="imd(this)" src="button18.gif" width="90" height="21" border="0" alt=""></span>
+<span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="cfp.html"><img onmousedown="imd(this)" src="button19.gif" width="90" height="21" border="0" alt=""></span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="submission.html" target="_blank"><img onmousedown="imd(this)" src="button10.gif" width="90" height="21" border="0" alt=""></span>
+<span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="CPP-SIInternational2008_v2.pdf"><img onmousedown="imd(this)" src="image2.gif" border="0"></span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="registration.html"><img onmousedown="imd(this)" src="button11.gif" width="90" height="21" border="0" alt=""></span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="program.html"><img onmousedown="imd(this)" src="button13.gif" width="90" height="21" border="0" alt=""></span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="committee.html" target="_blank"><img onmousedown="imd(this)" src="button12.gif" width="90" height="21" border="0" alt=""></span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="local.html" target="_blank"><img onmousedown="imd(this)" src="button14.gif" width="90" height="21" border="0" alt=""></span></P>
+<H2><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Preliminary Program</span></H2>
+<TABLE border="1">
+  <TBODY>
+    <TR>
+      <TD><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >10:30am - 10:35</span></TD>
+      <TD><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Welcome Remarks</span><BR>
+      <span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; Toshio Fukuda (Nagoya Univ., Japan)</span></TD>
+    </TR>
+    <TR>
+      <TD><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >10:35am - 11:20</span></TD>
+      <TD><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Plenary Lecture:</span><BR>
+      <span onclick="return false" style="text-decoration:underline; color:blue" href="invited.html#PaulWerbos" target="_blank"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >The Chain of Optimization from Macro to Micro: Examples from Energy Policy,
+      Vehicle Design and Aerospace</span><BR>
+      <span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; Paul Werbos (NSF, USA)</span></span></TD>
+    </TR>
+    <TR>
+      <TD><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >11:20am - 12:10</span></TD>
+      <TD><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Lecture:</span><BR>
+      <span onclick="return false" style="text-decoration:underline; color:blue" href="invited.html#ShankarSastry" target="_blank"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Networked Embedded Systems: Sensor Nets and Beyond</span><BR>
+      <span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; Shankar Sastry (Univ. of California Berkeley, USA)</span></span></TD>
+    </TR>
+    <TR>
+      <TD><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >12:10pm - 13:00</span></TD>
+      <TD><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Lunch Break</span></TD>
+    </TR>
+    <TR>
+      <TD><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >13:00pm - 15:00</span></TD>
+      <TD><span onclick="return false" style="text-decoration:underline; color:blue" href="#PosterProg"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session (Regular Paper Presentation)</span></span></TD>
+    </TR>
+    <TR>
+      <TD><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >15:00pm - 15:45</span></TD>
+      <TD><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Plenary Lecture:</span><BR>
+      <span onclick="return false" style="text-decoration:underline; color:blue" href="invited.html#ChihMingHo"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >A Fused Micro/Nano Engineering and Biological System</span><BR>
+      <span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; Chih-Ming Ho (Univ. of California Los Angeles, USA)</span></span></TD>
+    </TR>
+    <TR>
+      <TD><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >15:45pm - 16:30</span></TD>
+      <TD><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Plenary Lecture:</span><BR>
+      <span onclick="return false" style="text-decoration:underline; color:blue" href="invited.html#HiroshiUeno" target="_blank"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >On-orbit Berthing Integration of &quot;Kibo&quot; at International Space
+      Station</span><BR>
+      <span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; Hiroshi Ueno (JAXA, Japan)</span></span></TD>
+    </TR>
+    <TR>
+      <TD><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >16:30pm - 16:45</span></TD>
+      <TD><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></TD>
+    </TR>
+    <TR>
+      <TD><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >16:45pm - 17:30</span></TD>
+      <TD><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Plenary Lecture:</span><BR>
+      <span onclick="return false" style="text-decoration:underline; color:blue" href="invited.html#MichelParent" target="_blank"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Automated Vehicles: the Future is Now</span><BR>
+      <span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; Michel Parent (INRIA, France)</span></span></TD>
+    </TR>
+    <TR>
+      <TD><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >17:30pm - 18:15</span></TD>
+      <TD><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Plenary Lecture:</span><BR>
+      <span onclick="return false" style="text-decoration:underline; color:blue" href="invited.html#MakotoIchikawa" target="_blank"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Digital Oil Field</span><BR>
+      <span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; Makoto Ichikawa (JOGMEC, Japan)</span></span></TD>
+    </TR>
+    <TR>
+      <TD><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >18:30pm -</span></TD>
+      <TD><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Small Party</span></TD>
+    </TR>
+  </TBODY>
+</TABLE>
+<H2><span onclick="return false" style="text-decoration:underline; color:blue" name="PosterProg"></span><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session Program (13:00-15:30pm; Regular Paper Presentation)</span></H2>
+<P><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >All the regular papers are presented by poster.</span></P>
+<P><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >P1 Optimal PID Control System of a Piezoelectric Micropositioner</span><BR>
+<span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Hsin-Jang Shieh (National Dong Hwa University, Taiwan), Yun-Jen Chiu (National Dong Central University, Taiwan), Yen-Ting Chen (National Dong Hwa University, Taiwan)</span></P>
+<P><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >P2 Progressive Mesh Object Registration</span><BR>
+<span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Kay Boehnke, Marius Otesteanu (Polytehnica University Timisoara, Romania)</span></P>
+<P><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >P3 Motion Planning for Producing a Give-way Behavior using Spatiotemporal
+RRT</span><BR>
+<span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Naoya Tokuse, Hiroto Sakahara, Fumio Miyazaki (Osaka University, Japan)</span></P>
+<P><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >P4 An Immune Approach to Autonomic Quality System for Complex Production
+System</span><BR>
+<span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Genbao Zhang, Haifeng Zeng, Guoqiang&nbsp;Wang (Chongqing University, China)</span></P>
+<P><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >P6 Human Operator's Weight Perception of an Object Vertically Lifted with
+a Power Assist System</span><BR>
+<span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >S. M. Mizanoor Rahman, Ryojun Ikeura, Masaya Nobe, Hideki Sawai (Mie University, Japan)</span></P>
+<P><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >P7&nbsp;Behavior-based&nbsp;Adaptive&nbsp;Controller</span><BR>
+<span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Hassab Elgawi Osman (Tokyo Institute of Technology, Japan)</span></P>
+<P><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >P8 Offline Parameter Estimation of Permanent Magnet Syncronous Machines
+by Means of LS Optimization</span><BR>
+<span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Andr'as Zentai, Tam'as Dab'oczi (Budapest University, Hungary)</span></P>
+<P><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >P9 Using Multi Dimensional Grid to Identify a Permanent Magnet Synchronous
+Machine Model</span><BR>
+<span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Andr'as Zentai, Tam'as Dab'oczi (Budapest University, Hungary)</span></P>
+<P><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >P10 Simulation of Walking Support System Using Humanoid Robot</span><BR>
+<span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Aiman Musa M. Omer (Waseda University, Japan), Hun-ok Lim (Kanagawa University,
+Japan), Atsuo Takanishi (Waseda University, Japan)</span></P>
+<P><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >P11 Robotics in Academic Medical Engineering Education</span><BR>
+<span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Sabina Jeschke Ursula Vollmer, Marc Wilke (University of Stuttgart, Germany),
+Akiko Kato (Technische Universität Berlin, Germany)</span></P>
+<P><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >P12 Safe Navigation in Unknown Dynamic Environments with Voronoi Based
+StRRT</span><BR>
+<span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Hiroto Sakahara (Osaka University, Japan), Yasuhiro Masutani (Osaka Electro-Communications
+University, Japan), Fumio Miyazaki (Osaka University, Japan)</span></P>
+<P><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >P13 Integration of 6D Object Localization and Obstacle Detection for Collision
+Free Robotic Manipulation</span><BR>
+<span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Thilo Grundmann (Siemens Corporate Technology Information and Communications,
+Germany), Zhixing Xue(Forschungszentrum Informatik, Germany), Jens Kuehnle(Fraunhofer
+IPA, Germany), Robert Eidenberger(Siemens Corporate Technology Information
+and Communications, Germany), Steffen Ruehl(Forschungszentrum Informatik,
+Germany), Alexander Verl(Fraunhofer IPA, Germany), Raoul D. Zoellner (Siemens
+Corporate Technology Information and Communications, Germany), J. Marius
+Zoellner(Forschungszentrum Informatik, Germany), Ruediger Dillmann (Forschungszentrum
+Informatik, Germany)</span></P>
+<P><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >P14 Novel MEMS INS/GPS Integration Scheme Using Parallel Kalman Filters</span><BR>
+<span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Tran Duc Tan, Luu Manh Ha, N. T. Long, H. H. Tue, N. P. Thuy (COLTECH,
+VNUH, Vietnam)</span></P>
+<P><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >P15 An Action Framework for Robots based on Distributed Knowledge Base</span><BR>
+<span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Fumio Ozaki, Jun'ichiro Ooga (Toshiba Corporation, Japan), Kunikatsu Takase
+(The University of Electro-Communications, Japan)</span></P>
+<P><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >P16 System Dynamics Simulation for Internet Marketing</span><BR>
+<span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Jiann-Horng Lin, Hsiu-Cheng Liu (I-Shou University, Taiwan)</span></P>
+<P><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >P17 Combining Sound and Optic Flow Cues to Reach a Sound Source Despite
+Lateral Obstacles</span><BR>
+<span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >F. Ruffier (University of the Mediterranean, France), T. Mukai, H. Nakashima
+(RIKEN, Japan), J. Serres, N. Franceschini (University of the Mediterranean,
+France)</span></P>
+<P><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >P18 Optical Configuration of an 11,424 Gate-count Dynamic Optically Reconfigurable
+Gate Array using a VCSEL</span><BR>
+<span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Daisaku Seto, Minoru Watanabe (Shizuoka University, Japan)</span></P>
+<P><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >P19 Programmable Optically Reconfigurable Gate Array Architecture Using
+a PAL-SLM</span><BR>
+<span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Shinya Kubota, Minoru Watanabe (Shizuoka University, Japan)</span></P>
+<P><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >P20 Robust Feature Detection for a Mobile Robot Using a Multi-View Single
+Camera</span><BR>
+<span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Jegoon Ryu, Deng Zhang, Toshihiro Nishimura (Waseda University, Japan)</span></P>
+<P><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >P21 Slipping Detection with Integrated Piezoelectric Vibration Tactile
+Sensors</span><BR>
+<span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Shota Kosaka, Masahiro Nakajima, Toshio Fukuda, Hideo Matsuura (Nagoya University, Japan)</span></P>
+<P><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >P22 Mobile Robotic Sensor Network Using Vision Tracking</span><BR>
+<span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Junji Takahashi, MD rokunuzzaman, Kosuke Sekiyama, Toshio Fukuda (Nagoya University, Japan)</span>

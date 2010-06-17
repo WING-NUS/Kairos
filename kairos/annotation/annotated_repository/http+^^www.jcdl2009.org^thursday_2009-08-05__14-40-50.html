@@ -1,0 +1,612 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.jcdl2009.org^thursday_2009-08-05__14-40-50.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.jcdl2009.org^thursday_2009-08-05__14-40-50.yaml created on Wed Aug 05 17:32:14 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>Thursday, June 18 | JCDL 2009</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="shortcut icon" href="/themes/zen/zen_jcdl/favicon.ico" type="image/x-icon" />
+  <link type="text/css" rel="stylesheet" media="all" href="/modules/modules/node/node.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/modules/modules/system/defaults.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/modules/modules/system/system.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/modules/modules/system/system-menus.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/modules/modules/user/user.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/sites/all/modules/fckeditor/fckeditor.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen_jcdl/html-elements.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen/tabs.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen_jcdl/zen.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen/messages.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen/block-editing.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen/wireframes.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen_jcdl/layout-garland.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen_jcdl/icons.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen_jcdl/zen-jcdl.css?s" />
+<link type="text/css" rel="stylesheet" media="print" href="/themes/zen/zen_jcdl/print.css?s" />
+<!--[if IE]>
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen/ie.css?s" />
+<![endif]-->
+  <!--[if IE]>
+              <link rel="stylesheet" href="/themes/zen/zen_jcdl/ie.css" type="text/css">
+      <![endif]-->
+  </head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)" class="not-front not-logged-in page-node node-type-page one-sidebar sidebar-left page-thursday section-thursday"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+  <div id="page">
+    <div id="header">
+
+      <div id="skip-nav"><span onclick="return false" style="text-decoration:underline; color:blue" href="#content"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Skip to Main Content</span></span></div>
+
+      <div id="logo-title">
+
+        <form action="/thursday"  accept-charset="UTF-8" method="post" id="search-theme-form">
+<div><div id="search" class="container-inline">
+  <div class="form-item" id="edit-search-theme-form-1-wrapper">
+ <label for="edit-search-theme-form-1"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Search this site:</span> </label>
+ <input type="text" maxlength="128" name="search_theme_form" id="edit-search-theme-form-1" size="15" value="" title="Enter the terms you wish to search for." class="form-text" />
+</div>
+<input type="submit" name="op" id="edit-submit" value="Search"  class="form-submit" />
+<input type="hidden" name="form_build_id" id="form-8b214f001949608d4f566baddba49efa" value="form-8b214f001949608d4f566baddba49efa"  />
+<input type="hidden" name="form_id" id="edit-search-theme-form" value="search_theme_form"  />
+</div>
+
+</div></form>
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="/" title="Home" rel="home">
+            <img onmousedown="imd(this)" src="/themes/zen/zen_jcdl/images/logo-jcdl.png" alt="Home" id="logo" />
+          </span>
+        
+        <div id="name-and-slogan">
+
+        
+        
+        </div> <!-- /name-and-slogan -->
+
+      </div> <!-- /logo-title -->
+              <div id="header-region">
+                            </div> <!-- /header-region -->
+      
+
+    </div> <!-- /header -->
+
+    <div id="container" class="clear-block">
+
+              <div id="sidebar-left" class="column sidebar">
+          <div id="block-menu-menu-jcdlmenu" class="block block-menu region-odd odd region-count-1 count-1"><div class="block-inner">
+
+      <h2 class="title"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >PARTICIPANTS</span></h2>
+  
+  <div class="content">
+    <ul class="menu"><li class="leaf first"><span onclick="return false" style="text-decoration:underline; color:blue" href="/registration" title="Registration"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/travelinfo" title="Travel Information"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Travel Information</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/accommodations" title="Accommodations"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Accommodations</span></span></li>
+<li class="leaf last"><span onclick="return false" style="text-decoration:underline; color:blue" href="/attractions" title="Area Attractions"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Area Attractions</span></span></li>
+</ul>  </div>
+
+  
+</div></div> <!-- /block-inner, /block -->
+<div id="block-menu-menu-agendamenu" class="block block-menu region-even even region-count-2 count-2"><div class="block-inner">
+
+      <h2 class="title"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >AGENDA</span></h2>
+  
+  <div class="content">
+    <ul class="menu"><li class="leaf first"><span onclick="return false" style="text-decoration:underline; color:blue" href="/keynote" title="Keynotes"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Keynotes</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/tutorials" title="Tutorials"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/workshops" title="Workshops"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></li>
+<li class="expanded active-trail"><span onclick="return false" style="text-decoration:underline; color:blue" href="/taxonomy/term/4" title="Schedule"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Schedule</span></span><ul class="menu"><li class="leaf first"><span onclick="return false" style="text-decoration:underline; color:blue" href="/schedule" title="At A Glance"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >At A Glance</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/sunday" title="Sunday, June 14"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Sunday, June 14</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/monday" title="Monday, June 15"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Monday, June 15</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/tuesday" title="Tuesday, June 16"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday, June 16</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/wednesday" title="Wednesday, June 17"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, June 17</span></span></li>
+<li class="leaf active-trail"><span onclick="return false" style="text-decoration:underline; color:blue" href="/thursday" title="Thursday, June 18" class="active"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, June 18</span></span></li>
+<li class="leaf last"><span onclick="return false" style="text-decoration:underline; color:blue" href="/friday" title="Friday, June 19"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Friday, June 19</span></span></li>
+</ul></li>
+<li class="expanded last"><span onclick="return false" style="text-decoration:underline; color:blue" href="/sessions" title="Sessions"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Sessions</span></span><ul class="menu"><li class="leaf first"><span onclick="return false" style="text-decoration:underline; color:blue" href="/fullpapers" title="Full Papers"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Full Papers</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/shortpapers" title="Short Papers"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Short Papers</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/demos" title="Demos"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Demos</span></span></li>
+<li class="leaf last"><span onclick="return false" style="text-decoration:underline; color:blue" href="/posters" title="Posters"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Posters</span></span></li>
+</ul></li>
+</ul>  </div>
+
+  
+</div></div> <!-- /block-inner, /block -->
+<div id="block-menu-menu-contributors" class="block block-menu region-odd odd region-count-3 count-3"><div class="block-inner">
+
+      <h2 class="title"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >FOR CONTRIBUTORS</span></h2>
+  
+  <div class="content">
+    <ul class="menu"><li class="leaf first"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.jcdl2009.org/sites/default/files/JCDL09-CFP.pdf" title="Brief Call for Papers (pdf)"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Brief Call for Papers (pdf)</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/cfp" title="Call for Papers"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Extended Call for Papers</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/23" title="Information about how contributions should be formatted"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Formatting Instructions</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/24" title="Information for applicants to the doctoral consortium"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Doctoral Consortium</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/29" title="Instructions on how to submit materials to JCDL 2009 for all venues"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Submission Instructions</span></span></li>
+<li class="leaf last"><span onclick="return false" style="text-decoration:underline; color:blue" href="/secondlife" title="Second Life Posters"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Second Life Posters</span></span></li>
+</ul>  </div>
+
+  
+</div></div> <!-- /block-inner, /block -->
+<div id="block-menu-menu-aboutmenu" class="block block-menu region-even even region-count-4 count-4"><div class="block-inner">
+
+      <h2 class="title"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >ABOUT</span></h2>
+  
+  <div class="content">
+    <ul class="menu"><li class="leaf first"><span onclick="return false" style="text-decoration:underline; color:blue" href="/organizingcommittee" title="Organizing Committee"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Organizing Committee</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/sponsors2" title="Sponsors 2"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></span></li>
+<li class="leaf last"><span onclick="return false" style="text-decoration:underline; color:blue" href="/programcommittee" title="Program Committee"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></span></li>
+</ul>  </div>
+
+  
+</div></div> <!-- /block-inner, /block -->
+        </div> <!-- /sidebar-left -->
+      
+      <div id="main" class="column"><div id="squeeze" class="clear-block">
+                        <div id="content">
+                      <h1 class="title"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, June 18</span></h1>
+                                                  <div id="node-45" class="node node-type-page"><div class="node-inner">
+
+  
+  
+  
+      <div class="meta">
+      
+              <div class="terms terms-inline"> <span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >in</span> <ul class="links inline"><li class="taxonomy_term_4 first last"><span onclick="return false" style="text-decoration:underline; color:blue" href="/taxonomy/term/4" rel="tag" title=""><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >schedule</span></span></li>
+</ul></div>
+          </div>
+  
+  <div class="content">
+    <p><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Find room locations in the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.meetattexas.com/floor-plans-overview.html"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >AT&amp;T Conference Center Floor Plan / Map</span></span><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >.</span></p>
+<p><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+<table cellspacing="2" cellpadding="2" border="1" style="text-align: left; width: 100%;">
+    <tbody>
+        <tr>
+            <td style="vertical-align: top;"><strong><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >7:30 am - 6:30 pm</span></strong></td>
+            <td style="vertical-align: top;"><strong><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Meeting Registration Desk</span></strong></td>
+            <td style="vertical-align: top;"><strong><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></strong></td>
+        </tr>
+        <tr>
+            <td style="vertical-align: top;"><strong><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >8:00 - 9:00 am</span></strong></td>
+            <td style="vertical-align: top;"><strong><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Conferee Break Area</span></strong></td>
+            <td style="vertical-align: top;"><strong><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Breakfast</span></strong></td>
+        </tr>
+        <tr>
+            <td style="vertical-align: top;"><strong><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >8:30 - 10:30 pm</span></strong></td>
+            <td style="vertical-align: top;"><strong><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >203</span><br />
+            </strong></td>
+            <td style="vertical-align: top;">
+            <p><strong><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Paper session 11</span><br />
+            </strong><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Session chair: Gene Golovchinsky</span></p>
+            <p><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Full paper #41</span><br />
+            <span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >How Do You Feel about &quot;Dancing Queen&quot;? Deriving Mood &amp; Theme Annotations from User Tags</span><br />
+            <span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Kerstin Bischoff, Claudiu S. Firan, Wolfgang Nejdl and Raluca Paiu</span></p>
+            <p><br />
+            <span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Full paper #116</span><br />
+            <span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Quality Assessment of Content Created Collaboratively by Web Communities: A Case Study of Wikipedia</span><br />
+            <span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Hasan Dalip, Marcos Andr&eacute; Gon&ccedil;alves, Marco Cristo and P&aacute;vel Calado</span></p>
+            <p><br />
+            <span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Short paper #55</span><br />
+            <span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Designing the Reading Experience for Scanned Multi-lingual Picture Books on Mobile Phones</span><br />
+            <span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Benjamin B. Bederson, Alex Quinn and Allison Druin</span></p>
+            <p><br />
+            <span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Short paper #40</span><br />
+            <span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Mobility, Digital Libraries and a Rural Indian Village</span><br />
+            <span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Matt Jones, Emma Thom, David Bainbridge and David Frohlich</span></p>
+            <p><br />
+            <span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Full paper #134</span><br />
+            <span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >What Do Exploratory Searchers Look at in a Faceted Search Interface?</span><br />
+            <span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Bill Kules, Robert Capra, Matt Banta and Tito Sierra</span><strong><br />
+            <br />
+            </strong></p>
+            </td>
+        </tr>
+        <tr>
+            <td style="vertical-align: top;"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            <td style="vertical-align: top;"><strong><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Amphitheater 204</span><br />
+            </strong></td>
+            <td style="vertical-align: top;">
+            <p><strong><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Paper session 12</span></strong></p>
+            <p><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Session chair: Joan Smith</span></p>
+            <p><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Full paper #150</span><br />
+            <span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Aligning METS with the OAI-ORE Data Model</span><br />
+            <span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Jerome McDonough</span></p>
+            <p><br />
+            <span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Full paper #112</span><br />
+            <span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >EverLast: A Distributed Architecture for Preserving the Web</span><br />
+            <span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Avishek Anand, Srikanta Bedathur, Klaus Berberich, Ralf Schenkel and Christos Tryfonopoulos</span></p>
+            <p><br />
+            <span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Short paper #91</span><br />
+            <span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >A Framework for Describing Web Repositories</span><br />
+            <span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Frank McCown and Michael Nelson</span></p>
+            <p><br />
+            <span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Short paper #129</span><br />
+            <span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Preserving Digital Data in Heterogeneous Environments</span><br />
+            <span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Gon&ccedil;alo Antunes, Jos&eacute; Barateiro, Manuel Cabral, Jos&eacute; Borbinha and Rodrigo Rodrigues</span></p>
+            <p><br />
+            <span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Short paper #145</span><br />
+            <span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Unsupervised Creation of Small World Networks for the Preservation of Digital Objects</span><br />
+            <span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Charles Cartledge and Michael Nelson</span></p>
+            <p><br />
+            <span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Short paper #164</span><br />
+            <span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Towards a Virtual Organization for Data Cyberinfrastructure</span><br />
+            <span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Christine Borgman, Geoffrey Bowker, Thomas Finholt and Jillian Wallis</span><br />
+            <strong><br />
+            </strong></p>
+            </td>
+        </tr>
+        <tr>
+            <td style="vertical-align: top;"><strong><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></strong><strong><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >10:30-11 am</span></strong></td>
+            <td style="vertical-align: top;"><strong><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Conferee Break Area</span><br />
+            </strong></td>
+            <td style="vertical-align: top;"><strong><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></strong></td>
+        </tr>
+        <tr>
+            <td style="vertical-align: top;"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><strong><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >11:00 - 12:30</span></strong> <strong><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >pm</span></strong></td>
+            <td style="vertical-align: top;"><strong><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Amphitheater 204</span><br />
+            </strong></td>
+            <td style="vertical-align: top;">
+            <p><strong><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Plenary</span></strong></p>
+            <p><strong><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Panel 2:</span> </strong><strong><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Google as Library Redux</span></strong></p>
+            <p><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Andrew Dillon (Moderator), Michael Lesk, Clifford Lynch, and Gretchen Hoffman</span></p>
+            <p><strong><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Handover to JCDL 2010</span></strong></p>
+            </td>
+        </tr>
+        <tr>
+            <td style="vertical-align: top;"><strong><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >12:30 - 2:00 pm</span></strong></td>
+            <td style="vertical-align: top;"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.meetattexas.com/tejas-dining-room.html"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Tejas Conference Dining</span></span><br />
+            </strong></td>
+            <td style="vertical-align: top;"><strong><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Closing Lunch</span><br />
+            </strong></td>
+        </tr>
+        <tr>
+            <td style="vertical-align: top;"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><strong><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >2:30 - 4 pm</span></strong></td>
+            <td style="vertical-align: top;"><strong><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >208</span></strong></td>
+            <td style="vertical-align: top;"><strong><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >JCDL 2009 and 2010 Planning Committee Debriefing</span>

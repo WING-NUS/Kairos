@@ -1,0 +1,717 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd" >
+<html xmlns="http://www.w3.org/1999/xhtml" ><!-- InstanceBegin template="/Templates/main.dwt" codeOutsideHTMLIsLocked="false" -->
+<!-- DW6 -->
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session1/6/annotation/annotated_repository/http+^^ipsn.acm.org^2009^program.html_2009-08-05__14-26-03.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session1/6/annotation/annotated_repository/http+^^ipsn.acm.org^2009^program.html_2009-08-05__14-26-03.yaml created on Thu Aug 13 13:48:19 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<!-- Copyright 2005 Macromedia, Inc. All rights reserved. -->
+<!-- InstanceBeginEditable name="doctitle" -->
+<title>Program</title>
+<!-- InstanceEndEditable -->
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="mm_health_nutr.css" type="text/css" />
+<script language="JavaScript" type="text/javascript">
+//--------------- LOCALIZEABLE GLOBALS ---------------
+var d=new Date();
+var monthname=new Array("January","February","March","April","May","June","July","August","September","October","November","December");
+//Ensure correct for language. English is "January 1, 2004"
+var TODAY = monthname[d.getMonth()] + " " + d.getDate() + ", " + d.getFullYear();
+//---------------   END LOCALIZEABLE   ---------------
+</script>
+<style type="text/css">
+<!--
+.STYLE1 {
+	font-size: 36px;
+	font-weight: bold;
+	font-family: "Courier New", Courier, monospace;
+}
+.STYLE2 {
+	font-size: 16px;
+	font-weight: bold;
+}
+.STYLE3 {
+	font-size: 12px;
+	font-weight: bold;
+}
+.STYLE6 {font-size: 12px; font-weight: bold; color: #000000; }
+.STYLE7 {font-size: 14px}
+.STYLE8 {font-size: 12px}
+.STYLE9 {font-family: Georgia, "Times New Roman", Times, serif}
+.STYLE10 {font-size: 12px; font-weight: bold; color: #000000; font-family: Georgia, "Times New Roman", Times, serif; }
+-->
+</style>
+<!-- InstanceBeginEditable name="head" -->
+<style type="text/css">
+<!--
+.STYLE11 {font-size: 18px}
+.style12 {
+	color: #FFFFFF;
+	font-size: 16px;
+	font-weight: bold;
+}
+.style13 {color: #000000}
+.style14 {color: #000000; font-size: 12px; }
+-->
+</style>
+<!-- InstanceEndEditable --><!-- InstanceParam name="main" type="boolean" value="true" -->
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)" bgcolor="#F4FFE4" ><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<center>
+<table width="1041" border="0" cellspacing="0" cellpadding="0">
+  <tr bgcolor="#D5EDB3">
+    <td width="602"  rowspan="2"><img onmousedown="imd(this)" src="sanfranciscogoldenGateBridge.jpg" width="602" height="174" /></td>
+    <td width="439" height="50"  align="center" valign="middle" nowrap="nowrap" id="logo"><span class="STYLE1"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >IPSN 2009</span> </span></td>
+  </tr>
+  <tr bgcolor="#D5EDB3">
+    <td height="94"  id="tagline" valign="middle" align="center"><p class="STYLE2"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >The 8th ACM/IEEE International Conference on Information Processing in Sensor Networks</span></p>
+        <p class="STYLE3"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >April 13-16, 2009, San Francisco, USA</span></p>
+      </td>
+  </tr>
+  <tr>
+  <td colspan="2">
+  <table>
+  <tr>
+    <td width="165" valign="top" bgcolor="#5C743D"><table border="0" cellspacing="0" cellpadding="0" width="165" id="navigation">
+      <tr>
+        <td width="165"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html" class="navText STYLE7"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></td>
+      </tr>
+      <tr>
+        <td width="165"><span onclick="return false" style="text-decoration:underline; color:blue" href="callforpapers.html" class="navText STYLE7"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span> </span></td>
+      </tr>
+      <tr>
+        <td width="165"><span onclick="return false" style="text-decoration:underline; color:blue" href="organizers.html" class="navText STYLE7"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Organizers</span></span></td>
+      </tr>
+      <tr>
+        <td width="165"><span onclick="return false" style="text-decoration:underline; color:blue" href="committees.html" class="navText STYLE7"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></span></td>
+      </tr>
+      <tr>
+        <td width="165"><span onclick="return false" style="text-decoration:underline; color:blue" href="program.html" class="navText STYLE7"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span></td>
+      </tr>
+      <tr>
+        <td width="165"><span onclick="return false" style="text-decoration:underline; color:blue" href="demos.html" class="navText STYLE7"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Demos &amp; Posters</span></span></td>
+      </tr>
+      <tr>
+        <td width="165"><span onclick="return false" style="text-decoration:underline; color:blue" href="registration.html" class="navText STYLE7"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></td>
+      </tr>
+      <tr>
+        <td width="165"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.virginia.edu/%7Ewhitehouse/ipsn09competition/" class="navText STYLE7"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Competitions</span></span></td>
+      </tr>
+      <tr>
+        <td width="165"><span onclick="return false" style="text-decoration:underline; color:blue" href="grants.html" class="navText STYLE7"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Travel Grants</span> </span></td>
+      </tr>
+      <tr>
+        <td width="165"><span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.html" class="navText STYLE7"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></td>
+      </tr>
+      <tr>
+        <td><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials.htm" class="navText STYLE7"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span></td>
+      </tr>
+      <tr>
+        <td width="165"><span onclick="return false" style="text-decoration:underline; color:blue" href="hotel.html" class="navText STYLE7"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Hotel &amp; Travel</span> </span></td>
+      </tr>
+    </table>
+      <br />
+      <span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+      <span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+      <span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+    </td>
+    <td width="10"><img onmousedown="imd(this)" src="mm_spacer.gif" alt="" width="50" height="1" border="0" /></td>
+    <td width="1047"  colspan="2" align="left" valign="top"><!-- InstanceBeginEditable name="EditRegion3" -->
+    <table width="828" border="1" bordercolor="#99FF00">
+      <tr>
+        <td colspan="2" class="pageName"><div align="center"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Advance Program (tentative)</span> </div></td>
+        </tr>
+      <tr>
+        <td colspan="2"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+        </tr>
+      <tr bgcolor="#00CCFF">
+        <td colspan="2"><div align="center"><span class="style12"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >April 13, 2009 (Monday)</span> </span></div></td>
+        </tr>
+      <tr>
+        <td width="176"><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >8:00 - 8:30</span></strong></span></div></td>
+        <td width="636"><div align="left"><span class="STYLE8 style13"><strong> <span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Opening Remarks</span> </strong></span></div></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >8:30 - 9:30</span></strong></span></div></td>
+        <td><div align="left" class="STYLE8 style13">
+          <p><strong> <span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Plenary</span> </strong></p>
+          <p><strong><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >&quot;Sensing and Control on a Planetary Scale&quot;, Raghunathan ``Raj'' Rajkumar, Carnegie Mellon University</span></strong></p>
+          </div></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >9:30 - 10:00</span></strong></span></div></td>
+        <td><span class="STYLE8 style13"><strong></strong></span>
+          <div align="left"><span class="STYLE8 style13"><strong> <span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Break</span> </strong></span></div></td></tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >10:00 - 11:30</span></strong></span></div></td>
+        <td><div align="left">
+          <p class="STYLE8 style13"><strong><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Session --- IP: Security</span> </strong></p>
+          <p class="STYLE8 STYLE8 style13">  <span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Secure and Highly-Available Aggregation Queries in Large-Scale Sensor Networks via Set Sampling.</span><br />
+<span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Haifeng Yu (National University of Singapore)</span></p>
+          <p class="STYLE8 style13"> <span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Dialog Codes for Secure Wireless Communications.</span><br />
+  <span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Anish Arora, Lifeng Sang (Ohio State)</span></p>
+          <p class="STYLE8 style13"> <span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Transient-based Identification of Wireless Sensor Nodes.</span><br />
+  <span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Boris Danev, Srdjan Capkun (ETH Zurich)</span></p>
+        </div></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >11:30 - 12:30</span></strong></span></div></td>
+        <td><div align="left"><span class="STYLE8 style13"><strong> <span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span> </strong></span></div></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >12:30 - 14:00</span></strong></span></div></td>
+        <td><div align="left">
+          <p class="style13 STYLE8"><strong><span class="STYLE8 style13"><strong><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Session ---</span></strong></span> <span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >IP: Time</span></strong></p>
+          <p class="STYLE8 STYLE8 style13"> <span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Recovering Temporal Integrity with Data Driven Time Synchronization.</span><br />
+<span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Martin Lukac, Paul Davis (UCLA), Rob Clayton (CalTech), Deborah Estrin (UCLA)</span></p>
+          <p class="STYLE8 style13"> <span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Gradient Clock Synchronization in Wireless Sensor Networks.</span><br />
+  <span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Philipp Sommer, Roger Wattenhofer (ETH Zurich)</span></p>
+          <p class="STYLE8 style13"> <span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Event-triggered distributed optimization in sensor networks.</span><br />
+  <span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Pu Wan, Michael D. Lemmon (Notre Dame)</span></p>
+        </div></td>
+      </tr>
+      <tr>
+        <td><div align="center" class="STYLE8 style13"><strong><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >14:00 - 14:30</span> </strong></div></td>
+        <td><div align="left" class="STYLE8 style13"><strong><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></strong></div></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >14:30 - 16:00</span> </strong></span></div></td>
+        <td><p class="STYLE8 style13"><strong><strong><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Session ---</span></strong> <span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >IP: Retasking</span> </strong></p>
+          <p class="STYLE8 style13 STYLE7 STYLE7 STYLE8 STYLE8"> <span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Archetype-Based Design: Sensor Network Programming for Application Experts, Not Just Programming Experts</span><br />
+ <span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Lan S. Bai, Robert P. Dick (University of   Michigan), Peter A. Dinda (Northwestern University).</span> <br />
+</p>
+          <p class="style14"> <span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Distributed Resource Management and Matching in Sensor Networks.</span><br />
+  <span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Jie Gao (Stony Brook), Leonidas Guibas, Nikola Milosavljevic (Stanford), Dengpan Zhou (Stony Brook)</span></p>
+          <p class="style14"> <span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Automating Sensor Network Rendezvous and Proxy Selection.</span><br />
+  <span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >David Chu, Joseph M. Hellerstein (UC Berkeley)</span></p></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >16:00 - 16:30</span> </strong></span></div></td>
+        <td><span class="STYLE8 style13"><strong><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></strong></span></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >16:30 - 18:00</span> </strong></span></div></td>
+        <td><p class="STYLE8 style13"><strong><strong><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Session ---</span></strong> <span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >IP: Delivery</span></strong></p>
+          <p class="STYLE8 STYLE8 style13"> <span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Predictive QoS Routing to Mobile Sinks in Wireless Sensor Networks.</span><br />
+<span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Branislav Kusy, HyungJune Lee, Martin Wicke, Nikola Milosavljevic, and Leonidas Guibas (Stanford University)</span></p>
+          <p class="STYLE8 style13"> <span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Greedy Routing with Guaranteed Delivery Using Ricci Flows.</span><br />
+  <span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Rik Sarkar, Xiaotian Yin, Jie Gao (Stony Brook), Feng Luo (Rutgers), David Gu (Stony Brook).</span></p>
+          <p class="STYLE8 style13"> <span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >On Hierarchical Routing in Wireless Sensor Networks.</span><br />
+  <span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Konrad Iwanicki, Maarten van Steen (VU Amsterdam)</span></p></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >18:00 - 20:30</span> </strong></span></div></td>
+        <td><span class="STYLE8 style13"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="demos.html"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Poster and Demo session</span> </span></strong></span></td>
+      </tr>
+      <tr>
+        <td><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+        <td><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+      </tr>
+      <tr bgcolor="#00CCFF">
+        <td colspan="2"><div align="center"><span class="style12"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >April 14, 2009 (Tuesday)</span> </span></div></td>
+        </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >8:30 - 9:30</span></strong></span></div></td>
+        <td><div align="left" class="STYLE8 style13">
+          <p><strong> <span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Plenary</span></strong></p>
+          <p><strong><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Distributed Architectures for Embedded Systems: Challenges for Real-Time Control, Albert Benveniste, IRISA/INRIA, Rennes Cedex, France</span></strong><br />
+                    </p>
+        </div></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >9:30 - 10:00</span></strong></span></div></td>
+        <td><span class="STYLE8 style13"><strong></strong></span>
+            <div align="left"><span class="STYLE8 style13"><strong> <span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Break</span> </strong></span></div></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >10:00 - 11:30</span></strong></span></div></td>
+        <td><div align="left">
+          <p class="style13 STYLE8"><strong><span class="STYLE8 style13"><strong><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Session ---</span></strong></span> <span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >SPOTS: Design</span> </strong></p>
+          <p class="style13 STYLE8"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Radio Interferometric Quasi Doppler Bearing Estimation.</span> <br/><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Janos Sallai, Peter Volgyesi, Akos Ledeczi (Vanderbilt University)</span></p>
+          <p class="STYLE8 style13"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Anti-Jamming for Embedded Wireless Networks.</span> <br/><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Miroslav Pajic, Rahul Mangharam (University of Pennsylvania)</span></p>
+          <p class="STYLE8 style13"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >SENESCOPE: A Design Tool for Cost Optimization of Wireless Sensor Nodes.</span> <br/><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Michael Niedermayer, Christian Richter, Jan Hefer, Stephan Guttowski, (Fraunhofer IZM), Herbert Reichl (TU Berlin)</span></p>
+          </div></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >11:30 - 12:30</span></strong></span></div></td>
+        <td><div align="left"><span class="STYLE8 style13"><strong> <span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span> </strong></span></div></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >12:30 - 14:00</span></strong></span></div></td>
+        <td><div align="left">
+          <p class="STYLE8 style13"><strong><strong><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Session ---</span></strong> <span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >SPOTS: Deployments</span></strong></p>
+          <p class="STYLE8 style13"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Design and Implementation of a High-Fidelity AC Metering Network.</span> <br/> <span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Xiaofan Jiang, Stephen Dawson-Haggerty, Prabal Dutta, David Culler (UC Berkeley)</span></p>
+          <p class="STYLE8 style13"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >PermaDAQ: A Scientific Instrument for Precision Sensing and Data Recovery under Extreme Conditions.</span> <br/> <span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Jan Beutel (ETH Zurich), Roman Lim, Andreas Meier, Lothar Thiele, Matthias Woehrle, Mustafa Yuecel (ETH Zurich), Stephan Gruber, Andreas Hasler (Uni Zurich), Christian Plessl (University Paderborn), Igor Talzi, Christian Tschudin (Uni Basel)</span></p>
+          <p><span class="STYLE8 style13"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Monitoring Heritage Buildings with Wireless Sensor Networks: The Torre Aquila Deployment.</span> <br/><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Matteo Ceriotti, Luca Mottola, Amy L. Murphy (Bruno Kessler Foundation), Gian Pietro Picco, Stefan Guna, Matteo Pozzi, Daniele Zonta, Paolo Zanon (University of Trento), Michele Corra (TRETEC)</span></span><br />
+          </p>
+          </div></td>
+      </tr>
+      <tr>
+        <td><div align="center" class="STYLE8 style13"><strong><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >14:00 - 14:30</span> </strong></div></td>
+        <td><div align="left" class="STYLE8 style13"><strong><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></strong></div></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >14:30 - 16:00</span> </strong></span></div></td>
+        <td><p class="style13 STYLE8"><strong><span class="STYLE8 style13"><strong><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Session ---</span></strong></span> <span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >SPOTS: Components</span></strong></p>
+          <p class="style13 STYLE8"><br />
+              <span class="STYLE8 style13"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Authenticating Node to Multi-user Communication in Shared Sensor Networks.</span> <br/> <span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Leonardo Oliveira (Unicamp), Aman Kansal, Bodhi Priyantha, Michel Goraczko, Feng Zhao (Microsoft Research)</span></span></p>
+          <p class="STYLE8 style13"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >PDA: Passive Distributed Assertions for Sensor Networks.</span> <br/><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Kay Romer (ETH Zurich)</span></p>
+          <p class="STYLE8 style13"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Enabling Large-Scale Storage in Sensor Networks with the Coffee File System.</span> <br/><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Nicolas Tsiftes, Adam Dunkels, Zhitao He, and Thiemo Voigt (SICS)</span></p>          </td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >16:00 - 16:30</span> </strong></span></div></td>
+        <td><span class="STYLE8 style13"><strong><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></strong></span></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >16:30 - 18:00</span> </strong></span></div></td>
+        <td><p class="style13 STYLE8"><strong><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >SPOTS: Panel</span></strong></p>
+          <p class="style13 STYLE8"><strong><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >10 years of WSN software: a retrospective and industry perspective</span> </strong></p>
+          <p class="STYLE8 style13"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Paul Kimelman (Luminary Micro)</span><br />
+  <span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Colin Miller (Microsoft 
+
+
+ .NET Micro Framework
+
+)</span><br />
+  <span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Cory Sharp (Sentilla)</span><br />
+  <span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Arshan Poursohi (Sun SPOT project)</span></p>
+          <p class="STYLE8 style13"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Moderator: Jack Stankovic (University of Virginia)</span></p>          </td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >18:00 - 19:00</span> </strong></span></div></td>
+        <td class="style14"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >IPSN business meeting --- 
+
+
+ open to everyone</span></td>
+      </tr>
+      <tr>
+        <td><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+        <td><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+      </tr>
+      <tr bgcolor="#00CCFF">
+        <td colspan="2"><div align="center"><span class="style12"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >April 15, 2009 (Wednesday)</span> </span></div></td>
+        </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >8:30 - 9:30</span></strong></span></div></td>
+        <td><div align="left" class="STYLE8 style13">
+          <p><strong> <span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Plenary</span> </strong></p>
+          <p><strong><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >&quot;From Galaxies to Sensor Networks: Science in an Exponential World&quot;, Alex Szalay, Almni Centennial Professor, Johns Hopkins University</span> </strong></p>
+        </div></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >9:30 - 10:00</span></strong></span></div></td>
+        <td><span class="STYLE8 style13"><strong></strong></span>
+            <div align="left"><span class="STYLE8 style13"><strong> <span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Break</span> </strong></span></div></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >10:00 - 11:30</span></strong></span></div></td>
+        <td><div align="left">
+          <p class="STYLE8 style13"><strong><strong><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Session ---</span></strong> <span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >IP: Services</span></strong></p>
+          <p class="STYLE8 STYLE8 style13"> <span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Application-Informed Radio Duty-Cycling in a Re-Taskable Multi-User Sensing System.</span><br />
+<span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Omprakash Gnawali (USC), Jongkeun Na (USC), Ramesh Govindan (USC)</span></p>
+          <p class="STYLE8 style13"> <span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Energy Efficient Sensor Data Logging with Amnesic Flash Storage.</span><br />
+  <span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Suman Nath (Microsoft Research)</span></p>
+          <p><span class="STYLE8 style13"> <span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Improving the Speed and Scalability of Distributed Simulations of Sensor</span><br />
+  <span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Networks, Zhong-Yi Jin, Rajesh Gupta (UCSD)</span></span><br />
+          </p>
+        </div></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >11:30 - 12:30</span></strong></span></div></td>
+        <td><div align="left"><span class="STYLE8 style13"><strong> <span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span> </strong></span></div></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >12:30 - 14:00</span></strong></span></div></td>
+        <td><div align="left">
+          <p class="style13 STYLE8"><strong><span class="STYLE8 style13"><strong><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Session ---</span></strong></span> <span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >IP: Space</span> </strong></p>
+          <p class="STYLE8 style13 STYLE8"> <span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Simultaneous Placement and Scheduling of Sensors.</span><br />
+<span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Andreas Krause (Caltech), Ram Rajagopal (UC Berkeley), Anupam Gupta (CMU), Carlos Guestrin (CMU)</span></p>
+          <p class="style14"> <span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Algebraic Approach to Recovering Topological Information in Distributed Camera Networks.</span><br />
+  <span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Edgar J. Lobaton (UC Berkeley), Parvez Ahammad (Janelia Farm, HHMI), S. Shankar Sastry (UC Berkeley)</span></p>
+          <p class="style14"> <span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Near-Optimal Bayesian Localization via Incoherence and Sparsity.</span><br />
+  <span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Volkan Cevher (Rice), Petros T. Boufounos (MERL), Richard G. Baraniuk (Rice),</span><br />
+  <span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Anna C. Gilbert, Martin J. Strauss (UMICH)</span></p>
+          <p></p>
+        </div></td>
+      </tr>
+      <tr>
+        <td><div align="center" class="STYLE8 style13"><strong><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >14:00 - 14:30</span> </strong></div></td>
+        <td><div align="left" class="STYLE8 style13"><strong><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></strong></div></td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >14:30 - 16:00</span> </strong></span></div></td>
+        <td><p class="STYLE8 style13"><strong><strong><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Session ---</span></strong> <span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >IP: Queries</span> </strong></p>
+          <p class="STYLE8 STYLE8 style13">  <span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Approximating Sensor Network Queries Using In-Network Summaries.</span><br />
+<span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Alexandra Meliou (UC Berkeley), Carlos Guestrin (Carnegie Mellon University),</span><br />
+<span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Joseph M. Hellerstein (UC Berkeley)</span></p>
+          <p class="STYLE8 style13"> <span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Sensor Ranking: A Primitive for Efficient Content-Based Sensor Search.</span><br />
+  <span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >B. Maryam Elahi, Kay Roemer, Benedikt Ostermaier (ETH Zurich),</span><br />
+  <span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Michael Fahrmair, Wolfgang Kellerer (DoCoMo Euro-Labs)</span></p>
+          <p class="STYLE8 style13"> <span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Peer-to-peer Estimation over Wireless Sensor Networks via Lipschitz Optimization.</span><br />
+  <span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Carlo Fischione (Royal Institute of Technology), Alberto Speranzon (United Technologies Research Center), Karl Henrik Johansson (Royal Institute of Technology), Alberto Sangiovanni-Vincentelli (UC Berkeley)</span></p>          </td>
+      </tr>
+      <tr>
+        <td><div align="center"><span class="STYLE8 style13"><strong><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >16:00 - 16:15</span></strong></span></div></td>
+        <td><span class="style13 STYLE8"><strong><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Closing Remarks</span> </strong></span></td>
+      </tr>
+      <tr>
+        <td><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+        <td><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+      </tr>
+      <tr bgcolor="#00CCFF">
+        <td colspan="2"><div align="center"><span class="style12"><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >April 16, 2009 (Thursday)</span> </span></div></td>
+        </tr>
+      <tr>
+        <td colspan="2"><div align="center"><span class="style13 STYLE8"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.html"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span> <span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >and</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials.htm"><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span>

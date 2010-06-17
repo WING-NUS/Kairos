@@ -1,0 +1,937 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN"
+   "http://www.w3.org/TR/html4/strict.dtd">
+<html> 
+
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.podc.org^podc2009^program.shtml_2009-08-05__14-43-21.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.podc.org^podc2009^program.shtml_2009-08-05__14-43-21.yaml created on Wed Aug 05 17:32:21 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+	<link href="podc2007.css" type="text/css" rel="stylesheet">
+	<title>PODC 2009 Program</title>
+	<script src="js/prototype.js" type="text/javascript"></script>
+	<script src="js/effects.js" type="text/javascript"></script>
+        <meta name = "description" content = "PODC 2009 conference">
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)" lang=EL><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span> 
+
+<table border=0 cellpadding=5>
+<tr>
+    <td colspan=1 width="220px" style="text-align:center"><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="http://www.acm.org"><img onmousedown="imd(this)" border="0" src="images/acmlogo.gif"></span></td>
+    <td align="center" width="850px">
+	    <img onmousedown="imd(this)" class="top_image" width="750px" src="images/24077238.DTPanoDec11web.jpg"
+	    alt="Copyright (c) Steve Pierpoint"> 
+    </td>
+</tr> 
+
+
+ <th rowspan="2" nowrap halign="left" valign="top">
+<div class="menu" align="left">
+	<div class="row_head"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Main Menu</span></div>
+	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="main.shtml"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></div>
+	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="scope.shtml"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Scope</span></span></div>
+	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="call_for_papers.shtml"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span></div>
+	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="important_dates.shtml"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></div>
+	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="program_committee.shtml"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></span></div>
+	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="conference_committee.shtml"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Conference Committee</span></span></div>
+	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="steering_committee.shtml"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Steering Committee</span></span></div>
+	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="submission.shtml"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Submission</span></span></div>
+	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="accepted.shtml"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers</span></span></div>
+	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="program.shtml"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span></div> 
+	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="registration.shtml"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></div>      	
+<!--    <div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="reception.shtml">Reception Information</span><b><font 
+color="green">(new!)</font></b></div> -->
+	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://podc-spaa09.cpsc.ucalgary.ca/"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Local Information</span></span></div> 
+      <div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" 
+href="http://podc-spaa09.cpsc.ucalgary.ca/accommodation.html"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation</span></span></div> 
+<!--	<div class="row_odd">&nbsp;&nbsp;&nbsp;&nbsp;<small><span onclick="return false" style="text-decoration:underline; color:blue" href="hotels.shtml">Accommodation</span></small></div>
+	<div class="row_odd">&nbsp;&nbsp;&nbsp;&nbsp;<small><span onclick="return false" style="text-decoration:underline; color:blue" href="venue.shtml">Conference Venue</span><b><font color="green">(new!)</font></b></small></div>
+	<div class="row_odd">&nbsp;&nbsp;&nbsp;&nbsp;<small><span onclick="return false" style="text-decoration:underline; color:blue" href="whiteboard.shtml">Conference Whiteboard</span></small></div>
+	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="visa_information.shtml">Visa Information</span></div> --> 
+	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="student_awards.shtml"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Student Travel Grants</span></span></div> 
+<!--	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="publication.shtml">Publication &amp; Awards</span></div> -->
+<!--	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.shtml">Workshops</span></div>
+<div class="row_odd">&nbsp;&nbsp;&nbsp;&nbsp;<small><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fields.utoronto.ca/cgi-bin/register?form_selection=concur-podc-wkshp">Registration</span></small></div>
+-->
+        <div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href=Dijkstra2009.shtml><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Dijkstra Prize</span></span></div> 
+	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="sponsors.shtml"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></span></div>
+        <div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="related.shtml"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Related Conferences</span></span></div>
+<!---	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="mailing_list.shtml">Mailing List</span></div> -->
+	<div class="row_odd"><span onclick="return false" style="text-decoration:underline; color:blue" href="#" onclick="window.open('http://www.podc.org/');"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >PODC Home Page</span></span></div> 
+</div>
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue"  href="http://research.microsoft.com/en-us/"><img onmousedown="imd(this)" border="0"
+src="images/logos/microsoft-logo-small.jpg" width="80" align="middle"></span> 
+<span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cpsc.ucalgary.ca/"><img onmousedown="imd(this)" border="0" src="images/logos/UofC-logo-small.jpg" 
+width="80" align="middle"></span> 
+</p>
+<p>
+</p><p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.sun.com/"><img onmousedown="imd(this)" border="0" 
+src="images/logos/sun-logo-small.jpg" 
+width="80" align="middle"> </span> <span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.google.com"><img onmousedown="imd(this)" border="0" 
+src="images/logos/google-logo-small.jpg" 
+width="80" align="middle"></span><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span>
+</p>
+<p>
+</p><p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.research.ibm.com/"><img onmousedown="imd(this)" border="0" 
+src="images/logos/ibm.gif" 
+width="90" align="middle"> </span><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.icore.ca/"><img onmousedown="imd(this)" border="0" 
+src="images/logos/iCORE_logo_notext_80px.png" 
+width="80" align="middle"></span><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span>
+</p>
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.pims.math.ca/"><img onmousedown="imd(this)" border="0" 
+src="images/logos/pims-logo-small.png" 
+width="40" align="middle"> </span>
+</p>
+
+</th>
+
+
+<th>
+<div class="h2" id="title_div"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></div>
+</th>
+</tr>
+
+<tr>
+<td >
+<div class="text " id="text_div">
+
+<script type="text/javascript">Element.hide('text_div');</script>
+
+
+<p>
+<center>
+<span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Program in</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="PODCProgram.pdf"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >pdf</span></span><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >.</span>
+</center>
+</p>
+
+<P>
+<I CLASS="sans"> <BIG CLASS="XLARGE"><B><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;Sunday August 9&nbsp;&nbsp;&nbsp;&nbsp;</span></B></BIG>
+</I>
+<P>
+<I CLASS="sans">  
+</I>
+<P>
+<TT>
+
+ 
+<span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >17:30-20:30</span>		<B><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Reception (Nickle Arts Museum)</span></B> </BR></TT>
+<P>
+
+<P>
+<I CLASS="sans"> <BIG CLASS="XLARGE"><B><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;Monday August 10&nbsp;&nbsp;&nbsp;&nbsp;</span></B></BIG>
+</I>
+<P>
+
+<P>
+<I CLASS="sans"> <B><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Regular Papers (ICT 121)</span></B>
+<BR>
+<span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair:</span> </I><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Maurice Herlihy</span><I CLASS="sans"> </I><TT>
+<BR><BR>
+ 
+<span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >08:20		Preventing versus Curing: Avoiding Conflicts in Transactional Memories</span>
+<BR>
+<span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Aleksandar Dragojevic, Rachid Guerraoui, Anmol V.&nbsp;Singh, Vasu Singh</span>
+<BR><P>
+<span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >08:45		Dynamic Atomic Storage Without Consensus</span>
+<BR>
+<span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Marcos Aguilera, Idit Keidar, Dahlia Malkhi, Alexander Shraer</span>
+<BR><P>
+<span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >09:10		Randomized Mutual Exclusion in O(log N/log log N) RMRs</span>
+<BR>
+<span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Danny Hendler, Philipp Woelfel</span>
+<BR><P>
+<span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >09:35		Max Registers, Counters, and Monotone Circuits</span>
+<BR>
+<span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >James Aspnes, Hagit Attiya, Keren Censor</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break (Foyer ICT 121/122)</span></B> </I><TT>
+
+ <span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >10:00-10:30</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Brief Announcements (ICT 121)</span></B>
+<BR>
+<span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair:</span> </I><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Fabian Kuhn</span><I CLASS="sans"> </I><TT>
+<BR><BR>
+
+ <span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >10:30		 Stateless Distributed Algorithms for Generalized Packing Linear Programs</span>
+<BR>
+<span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Baruch Awerbuch, Zhenghua Fu, and Rohit Khandekar</span>
+<BR><P>
+<span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >10:35		 Concurrent Non-commutative Boosted Transactions</span>
+<BR>
+<span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Eric Koskinen and Maurice Herlihy</span>
+<BR><P>
+<span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >10:40		 Distributed Phase Synchronization of Dynamic Set of Processes</span>
+<BR>
+<span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >R.K.&nbsp;Shyamasundar and Shivali Agarwal</span>
+<BR><P>
+<span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >10:45		 How to Speed-up Fault-Tolerant Clock Generation in VLSI Systems-on-Chip via Pipelining</span>
+<BR>
+<span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Andreas Dielacher, Matthias Fugger, and Ulrich Schmid</span>
+<BR><P>
+<span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >10:50		 Perfectly Secure Message Transmission in Directed Networks Re-Visited</span>
+<BR>
+<span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Arpita Patra, Ashish Choudhary, and C.&nbsp;Pandu Rangan</span>
+<BR><P>
+<span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >10:55		 Virtual World Consistency: a new Condition for STM Systems</span>
+<BR>
+<span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Damien Imbs and Michel Raynal</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Brief Announcements (ICT 122)</span></B>
+<BR>
+<span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair:</span> </I><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Marcos Aguilera</span><I CLASS="sans"> </I><TT>
+<BR><BR>
+
+ <span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >10:30		 A Note on Distributed Stable Matching</span>
+<BR>
+<span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Alex Kipnis and Boaz Patt-Shamir</span>
+<BR><P>
+<span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >10:35		 On a Selfish Caching Game</span>
+<BR>
+<span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Pietro Michiardi, Carla-Fabiana Chiasserini, Claudio Casetti,</span>
+<BR>
+<span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Chi-Anh La, and Marco Fiore</span>
+<BR><P>
+<span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >10:40		 Non-Self-Stabilizing and Self-Stabilizing Gathering in Networks of</span>
+<BR>
+<span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Mobile Agents-the Notion of Speed</span>
+<BR>
+<span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Joffroy Beauquier, Janna Burman, Julien Clement, and Shay Kutten</span>
+<BR><P>
+<span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >10:45		 The Disagreement Power of an Adversary</span>
+<BR>
+<span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Carole Delporte-Gallet, Hugues Fauconnier, Rachid Guerraoui, and Andreas Tielmann</span>
+<BR><P>
+<span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >10:50		 Weakest failure detectors via an egg-laying simulation</span>
+<BR>
+<span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Antonio Fernandez, Sergio Rajsbaum, Corentin Travers</span>
+<BR><P>
+<span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >10:55		 Optimization Based Rate Allocation for Application Layer Multicast</span>
+<BR>
+<span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Jinyao Yan, Martin May, and Bernhard Plattner</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Talk (ICT 121)</span></B> </I><TT>
+<BR><BR>
+ 
+<span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >11:10 		 Refining the Way to Consensus</span>
+<BR>
+<span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Robbert van Renesse</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Lunch Break</span></B> </I><TT>
+
+ <span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >12:20		Lunch provided for PODC participants (Dining Centre, Alberta Room)</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Regular Papers (ICT 121)</span></B>
+<BR>
+<span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair:</span> </I><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Michel Raynal</span><I CLASS="sans"> </I><TT>
+<BR><BR>
+
+ <span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >13:45		Tight Bounds for Clock Synchronization</span>
+<BR>
+<span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Christoph Lenzen, Thomas Locher, Roger Wattenhofer</span>
+<BR><P>
+<span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >14:10		Load Balancing Without Regret in the Bulletin Board Model</span>
+<BR>
+<span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Robert Kleinberg, Georgios Piliouras, Eva Tardos</span>
+<BR><P>
+<span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >14:35		Concurrent Imitation Dynamics in Congestion Games</span>
+<BR>
+<span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Heiner Ackermann, Petra Berenbrink, Simon Fischer, Martin Hoefer</span>
+<BR><P>
+<span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >15:00		Extracting Quorum Failure Detectors</span>
+<BR>
+<span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Vibhor Bhatt, Nicholas Christman, Prasad Jayanti</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break (Foyer ICT 121/122)</span></B> </I><TT>
+
+ <span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >15:25-15:55</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Regular Papers (ICT 121)</span></B>
+<BR>
+<span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair:</span> </I><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Dahlia Malkhi</span><I CLASS="sans"> </I><TT>
+<BR><BR>
+
+ <span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >15:55		The Weakest Failure Detector for Solving k-Set Agreement</span>
+<BR>
+<span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Eli Gafni, Petr Kuznetsov</span>
+<BR><P>
+<span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >16:20		Simple and Efficient Asynchronous Byzantine Agreement with Optimal Resilience</span>
+<BR>
+<span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Arpita Patra, Ashish Choudhary, C.&nbsp;Pandu Rangan</span>
+<BR><P>
+<span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >16:45		Partial Synchrony Based on Set Timeliness</span>
+<BR>
+<span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Marcos K.&nbsp;Aguilera, Carole Delporte-Gallet, Hugues Fauconnier, Sam Toueg</span>
+<BR><P>
+<span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >17:10		Fast Scalable Deterministic Consensus for Crash Failures</span>
+<BR>
+<span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Bogdan S.&nbsp;Chlebus, Dariusz R.&nbsp;Kowalski, Michal Strojnowski</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Business Meeting &amp; Rump Session (ICT 116)</span></B> </I><TT>
+<BR><BR>
+
+ <span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >20:30-23:00</span> <br></TT>
+<P>
+
+<P>
+<I CLASS="sans"> <BIG CLASS="XLARGE"><B><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;Tuesday August 11&nbsp;&nbsp;&nbsp;&nbsp;</span></B></BIG>
+</I>
+<P>
+
+<P>
+<I CLASS="sans">  <B><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Regular Papers (ICT 121)</span></B>
+<BR>
+<span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair:</span> </I><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Idit Keidar</span><I CLASS="sans"> </I><TT>
+<BR><BR>
+
+ <span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >08:20		The Forgiving Graph: A distributed data structure for low stretch under adversarial attack</span>
+<BR>
+<span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Tom Hayes, Jared Saia, Amitabh Trehan</span>
+<BR><P>
+<span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >08:45		A Distributed Polylogarithmic Time Algorithm for Self-Stabilizing Skip Graphs</span>
+<BR>
+<span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Riko Jacob, Andrea Richa, Christian Scheideler, Stefan Schmid, Hanjo T&#228;ubig</span>
+<BR><P>
+<span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >09:10		The Flip Markov Chain and a Randomizing P2P Protocol</span>
+<BR>
+<span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Colin Cooper, Martin Dyer, Andrew J.&nbsp;Handley</span>
+<BR><P>
+<span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >09:35		Correctness of Gossip-Based Membership under Message Loss</span>
+<BR>
+<span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Maxim Gurevich, Idit Keidar</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break (Foyer ICT 121/122)</span></B> </I><TT>
+
+ <span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >10:00-10:30</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Brief Announcements (ICT 121)</span></B>
+<BR>
+<span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair:</span> </I><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Thomas Moscibroda</span><I CLASS="sans"> </I><TT>
+<BR><BR>
+
+ <span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >10:30		 The Price of Anonymity: Optimal Consensus despite Asynchrony, Crash and Anonymity</span>
+<BR>
+<span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Francois Bonnet and Michel Raynal</span>
+<BR><P>
+<span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >10:35		  Minimum Spanning Trees and Cone-Based Topology Control</span>
+<BR>
+<span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Alejandro Cornejo and Nancy Lynch</span>
+<BR><P>
+<span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >10:40		 Locality-Based Aggregate Computation in Wireless Sensor Networks</span>
+<BR>
+<span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Jen-Yeu Chen, Gopal Pandurangan, and Jianghai Hu</span>
+<BR><P>
+<span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >10:45		 Tight Lower Bounds for Greedy Routing in Uniform Small World Rings</span>
+<BR>
+<span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Martin Dietzfelbinger and Philipp Woelfel</span>
+<BR><P>
+<span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >10:50		 Optimal Self-stabilizing Multi-token Ring: A Randomized Solution</span>
+<BR>
+<span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Anurag Dasgupta, Sukumar Ghosh, and Andrew Berns</span>
+<BR><P>
+<span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >10:55		 Fast Scalable Byzantine Agreement in the Full Information Model with a</span>
+<BR>
+<span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Nonadaptive Adversary</span>
+<BR>
+<span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Valerie King and Jared Saia</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Brief Announcements (ICT 114)</span></B>
+<BR>
+<span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair:</span> </I><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Petr Kuznetsov</span><I CLASS="sans">  </I><TT>
+<BR><BR>
+
+ <span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >10:30		 Push: a DISC shell</span>
+<BR>
+<span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Eric Van Hensbergen and Noah Evans</span>
+<BR><P>
+<span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >10:35		 Deaf, Dumb, and Chatting Robots: Enabling Distributed Computation &amp;</span>
+<BR>
+<span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Fault-Tolerance Among Stigmergic Robots</span>
+<BR>
+<span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Yoann Dieudonn'e, Shlomi Dolev, Franck Petit, and Michael Segal</span>
+<BR><P>
+<span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >10:40		 Global Consistency can be Easier than Point-to-Point Communication</span>
+<BR>
+<span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Prasant Gopal, Anuj Gupta, Pranav K.&nbsp;Vasishta, Piyush Bansal, and Kannan Srinathan</span>
+<BR><P>
+<span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >10:45		Vertical Paxos and Primary-Backup Replication</span>	 
+<BR>
+<span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Leslie Lamport, Dahlia Malkhi, and Lidong Zhou</span>
+<BR><P>
+<span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >10:50		 Topology Knowledge Affects Probabilistic Reliable Communication</span>
+<BR>
+<span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Pranav K.&nbsp;Vasishta, Prasant Gopal, Anuj Gupta, Piyush Bansal, and Kannan Srinathan</span>
+<BR><P>
+<span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >10:55		 A Platform for Experimenting with Mobile Algorithms in a Laboratory</span>
+<BR>
+<span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Matthieu Roy and Marc-Olivier Killijian</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Talk (ICT 102)</span></B> </I><TT>
+<BR><BR>
+
+ 
+<span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >11:10		 Memory Models: A Case for Rethinking Parallel Languages and Hardware</span>
+<BR>
+<span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Sarita V.&nbsp;Adve</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Lunch Break</span></B> </I><TT>
+
+ <span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >12:20</span>
+		<SPAN CLASS="MATH"><br>
+</SPAN><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;Industry sponsored lunch for</span> <B><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >students, postdocs, and employees of industrial sponsors</span></B>
+<BR>
+		  
+<span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >(Dining Centre, Alberta Room)</span>
+<BR>
+		<SPAN CLASS="MATH">
+<BR>
+</SPAN><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;Lunch on your own for everyone else</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Invited Session on Industrial Applications of Algorithms (ICT 102)</span></B>
+<BR>
+<span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair:</span> </I><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Marcos Aguilera</span><I CLASS="sans"> </I><TT>
+<BR><BR>
+
+ <span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >13:45		The life and times of a ZooKeeper</span>
+<BR>
+<span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Flavio Junqueira, Benjamin Reed</span>
+<BR><P>
+<span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >14:15		Cassandra - A Structured Storage System on a P2P Network</span>
+<BR>
+<span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Avinash Lakshman, Prashant Malik</span>
+<BR><P>
+<span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >14:45		Pregel: A System for Large-Scale Graph Processing</span>
+<BR>
+<span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Grzegorz Malewicz, Matthew H.&nbsp;Austern, Aart J.&nbsp;C.&nbsp;Bik, James C.&nbsp;Dehnert, Ilan Horn,</span>
+<BR>
+<span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Naty Leiser, Grzegorz Czajkowski</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break (Foyer ICT 121/122)</span></B> </I><TT>
+
+ <span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >15:15-15:45</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Regular Papers (ICT 121)</span></B>
+<BR> <span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >(Session Chair:</span> </I><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Faith Ellen</span><I CLASS="sans"><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >)</span> </I><TT>
+<BR><BR>
+
+ <span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >15:45		Fast Distributed Random Walks</span>
+<BR>
+<span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Atish Das Sarma, Danupon Nanongkai, Gopal Pandurangan</span>
+<BR><P>
+<span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >16:10		Distributed and Parallel Algorithms for Weighted Vertex Cover and other Covering Problems</span>
+<BR>
+<span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Christos Koufogiannakis, Neal E.&nbsp;Young</span>
+<BR><P>
+<span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >16:35		Return of the Primal-Dual: Distributed Metric Facility Location</span>
+<BR>
+<span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Saurav Pandit, Sriram Pemmaraju</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Banquet (Calgary Zoo)</span></B> </I><TT>
+
+ <span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >18:00</span><br><br>		 </TT><I CLASS="sans">  <BIG CLASS="XLARGE"><B><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;Wednesday August 12&nbsp;&nbsp;&nbsp;&nbsp;</span></B></BIG>
+</I>
+<P>
+
+<P>
+<I CLASS="sans">  <B><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Regular Papers (ICT 121)</span></B>
+<BR>
+<span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair:</span> </I><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Pierre Fraigniaud</span><I CLASS="sans"> </I><TT>
+<BR><BR>
+
+ <span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >08:20		The Wireless Synchronization Problem</span>
+<BR>
+<span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Shlomi Dolev, Seth Gilbert, Rachid Guerraoui, Fabian Kuhn, Calvin Newport</span>
+<BR><P>
+<span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >08:45		 SINR Diagrams: Towards Algorithmically Usable SINR Models of Wireless Networks</span>
+<BR>
+<span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Chen Avin, Yuval Emek, Erez Kantor, Zvi Lotker, David Peleg, Liam Roditty</span>
+<BR><P>
+<span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >09:10		Coloring Unstructured Wireless Multi-Hop Networks</span>
+<BR>
+<span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Johannes Schneider, Roger Wattenhofer</span>
+<BR><P>
+<span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >09:35		Oblivious Interference Scheduling</span>
+<BR>
+<span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Alexander Fangh&#228;nel, Thomas Ke&#223;elheim, Harald R&#228;cke, Berthold V&#246;cking</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break (Foyer ICT 121/122)</span></B> </I><TT>
+
+ <span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >10:00-10:30</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Brief Announcements (ICT 121)</span></B>
+<BR>
+<span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair:</span> </I><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Andrea Richa</span><I CLASS="sans"> </I><TT>
+<BR><BR>
+
+ <span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >10:30		 The Theory Of Network Tracing</span>
+<BR>
+<span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >H.&nbsp;B.&nbsp;Acharya and M.&nbsp;G.&nbsp;Gouda</span>
+<BR><P>
+<span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >10:35		 Efficient Pruning of Ad-Hoc Wireless Networks</span>
+<BR>
+<span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Enoch Peserico</span>
+<BR><P>
+<span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >10:40		 Self-Assembly as Graph Grammar as Distributed System</span>
+<BR>
+<span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Aaron Sterling</span>
+<BR><P>
+<span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >10:45		 Distributed Discovery of Large Near-Cliques</span>
+<BR>
+<span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Zvika Brakerski and Boaz Patt-Shamir</span>
+<BR><P>
+<span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >10:50		 Lightweight Key Agreement and Digital Certificates for Wireless Sensor Networks</span>
+<BR>
+<span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >Oscar Garcia-Morchon, Tobias Heer, Ludo Tolhuizen, and Klaus Wehrle</span>
+<BR><P>
+<span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >10:55		 Distributed Algorithms for Approximating Wireless Network Capacity</span>
+<BR>
+<span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Michael Dinitz</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Talk (ICT 102)</span></B> </I><TT>
+<BR><BR>
+
+ <span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >11:10		Emerging Challenges and Opportunities in Parallel Computing: The Cretaceous Redux?</span>
+<BR>
+<span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Bruce A.&nbsp;Hendrickson</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >Lunch Break</span></B> </I><TT>
+
+ <span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >12:20		BBQ for PODC/SPAA participants (Dining Centre, Patio)</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Regular Papers (ICT 121)</span></B>
+<BR>
+<span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair:</span> </I><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Boaz Patt-Shamir</span><I CLASS="sans"> </I><TT>
+<BR><BR>
+
+ <span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >13:45		Efficient Broadcasting in Known Topology Radio Networks with Long-range Interference</span>
+<BR>
+<span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Frantisek Galcik, Leszek Gasieniec, Andrzej Lingas</span>
+<BR><P>
+<span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >14:10		The Effect of Power-Law Degrees on the Navigability of Small Worlds</span>
+<BR>
+<span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Pierre Fraigniaud, George Giakkoupis</span>
+<BR><P>
+<span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >14:35		Bounding the Locality of Distributed Routing Algorithms</span>
+<BR>
+<span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Prosenjit Bose, Paz Carmi, Stephane Durocher</span>
+<BR><P>
+<span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >15:00		Parsimonious Flooding in Dynamic Graphs</span>
+<BR>
+<span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Herv'e Baumann, Pierluigi Crescenzi, Pierre Fraigniaud</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break (Foyer ICT 121/122)</span></B> </I><TT>
+
+ <span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >15:25-15:55</span> </TT><I CLASS="sans"> </I>
+<P><P>
+<BR>
+<I CLASS="sans">  <B><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Brief Announcements (ICT 121)</span></B>
+<BR>
+<span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair:</span> </I><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Ittai Abraham</span><I CLASS="sans"> </I><TT>
+<BR><BR>
+
+ <span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >15:55		 Hardness of Broadcasting in Wireless Networks with Unreliable Communication</span>
+<BR>		 
+<span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Fabian Kuhn, Nancy Lynch, and Calvin Newport</span>
+<BR><P>
+<span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >16:00		 Complexity Analysis and Algorithm Design for Pipeline Configuration in Distributed Networks</span>
+<BR>
+<span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Yi Gu, Qishi Wu, Anne Benoit, and Yves Robert</span>
+<BR><P>
+<span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >16:05		 Exactly Electing a Unique Leader is not Harder than Computing Symmetric Functions</span>
+<BR>
+<span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >on Anonymous Quantum Networks</span>
+<BR>
+<span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >Hirotada Kobayashi, Keiji Matsumoto, and Seiichiro Tani</span>
+<BR><P>
+<span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >16:10		 Impossibility Results for Optimistic Fair Exchange with Multiple Autonomous Arbiters</span>
+<BR>
+<span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >Alptekin  K&#252;p&#231;&#252; and Anna Lysyanskaya</span>
+<BR><P>
+<span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >16:15		 Collaborative Measurement of Upload Speeds in P2P Systems</span>
+<BR>
+<span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >John R.&nbsp;Douceur, James Mickens, Thomas Moscibroda, and Debmalya Panigrahi</span>
+<BR><P>
+<span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >16:20		 New Bounds for the Controller Problem</span>
+<BR>
+<span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >Yuval Emek and Amos Korman</span>

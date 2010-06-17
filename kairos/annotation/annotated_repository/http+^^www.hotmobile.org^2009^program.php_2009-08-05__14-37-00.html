@@ -1,0 +1,669 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.hotmobile.org^2009^program.php_2009-08-05__14-37-00.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.hotmobile.org^2009^program.php_2009-08-05__14-37-00.yaml created on Wed Aug 05 17:32:01 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+    <title>HotMobile 2009 - Program</title>
+	<meta http-equiv="Content-Type" content="text/html;charset=iso-8859-1" />
+	<link href="screen.css" rel="stylesheet" type="text/css" media="screen" />
+	<link href="print.css" rel="stylesheet" type="text/css" media="print" />
+	<link href="mobile.css" rel="stylesheet" type="text/css" media="handheld" />
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+    <div class="body" id="program">
+		<div class="header">
+			<h1><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >HotMobile 2009</span></h1>
+            
+            <h3><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >The Tenth International Workshop on Mobile Computing Systems and Applications</span></h3>
+            <h3><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >February 23-24, 2009, Santa Cruz, California</span></h3>
+            <hr />
+           
+ 
+		</div>
+		
+		<div class="lstmenu">
+			<div class="simple" id="mtitle"><strong><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Menu</span></strong></div>
+			<ul>
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="index.php" ><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></li>
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="organizers.php" ><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Organizers</span></span></li>
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="program.php" class="select"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span></li>
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="cfp.php" ><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers/Posters/Demos</span></span></li>
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="regt.php" ><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Registration and Travel</span></span></li>
+				<li><span onclick="return false" style="text-decoration:underline; color:blue" href="doc.php" ><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Doctoral Consortium</span></span></li>
+			</ul>
+			<div style="clear:both;"></div>
+			<hr />
+		</div>
+		
+		<div class="main">
+			<div class="mobbtns">
+			<span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Layout:</span> 
+				<span class="nodesk"><span onclick="return false" style="text-decoration:underline; color:blue" href="?l=screen"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Desktop</span></span> <span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >|</span></span>			
+				<span class="nomobi"><span onclick="return false" style="text-decoration:underline; color:blue" href="?l=mobile"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Mobile friendly</span></span> <span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >|</span></span>
+				<span class="css"><span onclick="return false" style="text-decoration:underline; color:blue" href="?l=nocss"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >No styles</span></span></span>
+			</div>
+<div class="single">
+    
+	<div class="keynote">
+		<h2><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Address: Bob Iannucci</span></h2>
+		<img onmousedown="imd(this)" src="images/IannucciBob1.jpg" alt="Dr. Bob Iannucci" />
+		<p>
+		<span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Dr. Bob Iannucci is a Senior Vice President and special technology advisor to Nokia Corporation.  His previous role at Nokia was as Chief Technology Officer and Head of Nokia Research Center, Nokia’s corporate research unit. Interacting closely with all Nokia business groups, Nokia Research Center is responsible for the strategic and long-term research in Nokia. Operating in seven countries, the center employs about 500 researchers.</span></p>
+		<p>
+		<span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Bob joined Nokia in 2004 as Head of Nokia Research Center's Computing Architectures Laboratory. He holds B.E. in Electrical Engineering from Youngstown State University, Ohio, USA; M.Sc. in Computer Engineering from Syracuse University, New York, USA; and Ph.D. in Electrical Engineering and Computer Science from the Massachusetts Institute of Technology, USA.</span></p>
+		<p>
+		<span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Bob has extensive experience in running both research and development activities in the fields of computing architectures, human-computer interaction, Internet, handheld computing, wireless technology strategy and networking systems.  Previously, he held positions of Senior Vice President of Engineering at Cosine Communications, Vice President of Research at Compaq Computer Corporation, Vice President of Engineering and Co-Founder of Exa Corporation, as well as various research and development roles at IBM Corporation.</span> </p>
+		<p>
+		<span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Bob is the author and co-author of two books and several academic papers. He is the holder of five patents.</span></p>
+	</div>
+
+
+
+
+
+	<div class="program" id="progList">
+		<h2><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >February 23, 2009</span></h2>
+		<h3 class="break"><span class="time"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >7:30 &ndash; 8:30</span></span> <span class="title"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Breakfast</span></span></h3>
+		<h3><span class="time"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >8:30 &ndash; 10:00</span></span> <span class="title"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Opening Session</span></span></h3>
+		<div class="session">
+			<p>
+				<strong><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Opening Remarks</span></strong>
+			</p>
+			<p>
+				<strong><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Keynote</span></strong><br/><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Bob Iannucci, (</span><em><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Nokia</span></em><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >)</span>
+			</p>
+		</div>
+		<h3 class="break"><span class="time"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >10:10 &ndash; 10:30</span></span> <span class="title"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></span></h3>
+		<h3><span class="time"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >10:30 &ndash; 12:00</span></span> <span class="title"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Don't Track me Bro: Location and Privacy</span></span></h3>
+		<h4><span class="subtitle"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Gaetano Borriello</span></span></h4>
+		<div class="session">
+			<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requires authentication" href="papers/57_Final_Paper.pdf"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >We Saw Each Other on the Subway: Secure, Anonymous Proximity-Based Missed Connections</span></span></strong> 
+  <img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/>
+			<span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Justin Manweiler, Ryan Scudellari, Zachary Cancio and Landon Cox (</span><em><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Duke University</span></em><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >)</span>
+			</p>
+			
+			<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requires authentication" href="papers/63_Final_Paper.pdf"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Realtime Location Privacy Via Mobility Prediction: Creating Confusion at Crossroads</span></span></strong> 
+  <img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/>
+			<span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Joseph Meyerowitz and Romit Roy Choudhury (</span><em><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Duke University</span></em><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+			
+			<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requires authentication" href="papers/45_Final_Paper.pdf"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Enabling New Mobile Applications with Location Proofs</span></span></strong> 
+  <img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/>
+			<span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Stefan Saroiu and Alec Wolman (</span><em><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Microsoft Research</span></em><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+		</div><div class="pagebreak"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></div>
+		<h3 class="break"><span class="time"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >12:00 &ndash; 13:00</span></span> <span class="title"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></span></h3>
+		<h3><span class="time"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >13:00 &ndash; 14:30</span></span> <span class="title"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >It's Made of People: Mobile Applications for People</span></span></h3>
+		<h4><span class="subtitle"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Tim Sohn</span></span></h4>
+		<div class="session">
+			<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requires authentication" href="papers/61_Final_Paper.pdf"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >LiveCompare: Grocery Bargain Hunting Through Participatory Sensing</span></span></strong> 
+  <img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/>
+			<span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Linda Deng and Landon Cox (</span><em><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Duke University</span></em><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+			
+			<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requires authentication" href="papers/58_Final_Paper.pdf"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >BALANCE: Towards a Usable Pervasive Wellness Application with Accurate Activity Inference</span></span></strong> 
+  <img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/>
+			<span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Tamara Denning, Adrienne Andrew, Rohit Chaudhri,
+Carl Hartung, Jonathan Lester, Gaetano Borriello and Glen Duncan
+(</span><em><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >University of Washington</span></em><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+			
+						
+			<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requires authentication" href="papers/31_Final_Paper.pdf"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Sharing airtime with Shair avoids wasting time and money</span></span></strong> 
+  <img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/>
+			<span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Pan Hui, Richard Mortier, Kuang Xu, Jon Crowcroft and Victor O.K. Li (</span><em><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Deutsche
+Telekom Laboratories/TU-Berlin, University of Cambridge, University of Hong Kong</span></em><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+
+		</div>
+		<h3 class="break"><span class="time"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >14:30 &ndash; 15:00</span></span> <span class="title"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></span></h3>		
+		<h3><span class="time"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >15:00 &ndash; 16:30</span></span> <span class="title"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Breakout Session - The Future of Mobile Social Computing</span></span></h3>
+		<div class="session">
+			<span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Break up into groups.</span><br/>
+			<span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Come back together at 16:00 for brief presentations.</span>
+			<ul>
+				<li><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >What are compelling apps? How are they the same or different from existing online social networking sites?</span></li>
+				<li><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >What can research contribute here? What are core enabling technlogies? How should privacy be managed, if at all? What kinds of user studies or user models could help out understanding here?</span></li>
+			</ul>
+		</div>
+		<h3><span class="time"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >16:30 &ndash; 17:30</span></span> <span class="title"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Breakout Meeting (steering committee)</span></span></h3>
+		<h3 ><span class="time"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >17:30 &ndash; 19:00</span></span> <span class="title"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Reception</span></span></h3>	
+		<h4><span class="subtitle"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Posters and Demos</span></span></h4>
+<script type="text/javascript">
+function ShowPD()
+{
+	var obj;
+	obj = document.getElementById('pdlist');
+	obj.style.display = 'block';
+	obj = document.getElementById('pdlink');
+	obj.style.display = 'none';
+}
+function HidePD()
+{
+	var obj;
+	obj = document.getElementById('pdlist');
+	obj.style.display = 'none';
+	obj = document.getElementById('pdlink');
+	obj.style.display = 'block';
+}
+</script>		
+		<div class="session" style="padding-bottom:20px">
+			<div id="pdlink" style="font-weight:bold"><span onclick="return false" style="text-decoration:underline; color:blue" href="javascript:ShowPD()"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >List of Posters &amp; Demos</span></span></div>
+			<div id="pdlist" style="display:none">
+				<div style="margin-bottom:10px;float:right"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="javascript:HidePD()"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Hide list</span></span></strong></div>
+<!--		<div style="width:290px; float:left;">-->
+		<div>
+			<div style="font-weight:bold; color:#f80;margin-bottom:10px;"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Posters</span></div>
+			
+<p><strong><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Service Oriented Architecture for Monitoring Cargo in Motion Along Trusted Corridors</span></strong><br/>
+<span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Victor S. Frost, Gary J. Minden, Joseph B. Evans, Leon S. Searl, Edward Komp, Daniel DePardo, Martin Kuehnhausen, Matthew Zeets, Daniel T. Fokum, Angela N. Oguna (University of Kansas)</span></p>
+
+<p><strong><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Challenges of Smarter Power Management on Smartphones</span></strong><br/>
+<span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Hossein Falaki, Ramesh Govindan,  Deborah Estrin (UCLA)</span></p>
+
+<p><strong><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Mobile Guiding and Tracking Services for Public Transit System</span></strong><br/>
+<span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Hung-Huan Liu, Yung-Ju Chen, Yu-Jen Chang (Chung Yuan Christian University)</span></p>
+
+<p><strong><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Mobile Public Display Systems</span></strong><br/>
+<span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Florian Alt, Albrecht Schmidt, Christoph Evers (University of Duisburg-Essen)</span></p>
+
+<p><strong><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >MobiDew: Socially-Aware Data Management for Mobile Users</span></strong><br/>
+<span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Nicolas Kourtellis, Joshua Finnis, Adriana Iamnitchi, Cristian Borcea (University of South Florida, New Jersey Institute of Technology)</span></p>
+
+<p><strong><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Mobile Wireles LAN Router with Traking Antenna</span></strong><br/>
+<span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Hideki Shimada, Yuki Uranishi, Monoru Ikebe and Hideki Sunahara (Nara Institute of Science and Technology, Keio University)</span></p>
+
+<p><strong><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Mobltz: mobile multimedia for informal learning</span></strong><br/>
+<span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Sarah Lewis, Roy Pea, Joe Rosen (Stanford University)</span></p>
+
+<p><strong><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Activities as Context: A Mediator Architecture for an Interactional Notion of Context</span></strong><br/>
+<span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Hong-Siang Teo (Naval Postgraduate School)</span></p>
+
+<p><strong><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Turning the Corner in the City ---The Impact of Radio Propagation on Inter-vehicle Wireless Communication</span></strong><br/>
+<span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >John S. Otto, Fabian E. Bustamante and Randall A. Berry (Northwestern University)</span></p>
+
+<p><strong><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Toward efficiently collecting continuous location data on mobile devices</span></strong><br/>
+<span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Donnie H. Kim, Deborah Estrin (UCLA)</span></p>
+
+<p><strong><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Senster: Scalable Smartphone Based Vehicular Sensor Networking Systems</span></strong><br/>
+<span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Jong Hoon Ahnn, Uichin Lee, Hyun Jin Moon, Mario Gerla (UCLA, NEC)</span></p>
+
+<p><strong><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Predictive-Hierarchical Location Service for Mobile Ad hoc Networks</span></strong><br/>
+<span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Ebtisam Amar, Bashir Yahya, Selma Boumerdassi (University of Pierre et Marie Curie, University of Versailles, CNAM-Laboratoire C&eacute;dric)</span></p>
+		</div>
+<!--		<div style="width:290px;float:right;">	-->
+		<div>
+			<div style="font-weight:bold; color:#f80;margin-bottom:10px;"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Demos</span></div>
+			
+<p><strong><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Rendezvous: An Application Aware MAC for Wireless Networks</span></strong><br/>
+<span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Ashish Sharma, Elizabeth M. Belding (UC Santa Barbara)</span></p>
+
+<p><strong><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Using Bluetooth Device Names to Support Interaction in Smart Environments</span></strong><br/>
+<span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Sarah Rutlidge, Nigel Davies, Adrian Friday, Peter Newman and Oliver Storz (Lancaster University)</span></p>
+
+<p><strong><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Inter-Domain Routing for Heterogeneous MANETs</span></strong><br/>
+<span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Seung-Hoon Lee, Starsky H.Y. Wong, Chi-Kin Chau, Srivatsan Varadarajan, Kang-won Lee, Jon Crowcroft, Mario Gerla (UCLA, IBM, University of Cambridge, Honeywell Research)</span></p>
+
+<p><strong><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >CodeCast: Network Coding Based Multicast in MANETs</span></strong><br/>
+<span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Chien-Chia Chen, Chieh-Ning Lien, Uichin Lee, Soon Y. Oh, and Mario Gerla (UCLA)</span></p>
+
+<p><strong><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >SMSComics: Using Comics as a Visual Metaphor for Enhancing SMS Conversations</span></strong><br/>
+<span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Vidya Setlur and Agathe Battestini (Nokia Research Center)</span></p>
+
+<p><strong><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >An Input Method using Foot Gestures for Operating Appliances in Daily Life</span></strong><br/>
+<span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Tomoki Yoshihisa, Tetsuya Yamamoto, Masahiko Tsukamoto (Osaka University, Kobe University)</span></p>
+
+<p><strong><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Multi-Device IO Using Standard Protocols</span></strong><br/>
+<span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Ben Dodson (Stanford University)</span></p>
+
+		</div>
+		<div style="clear:both"></div>
+
+			
+			
+			</div>
+		</div>
+		<h3 class="break"><span class="time"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >19:00 &ndash; 21:00</span></span> <span class="title"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Banquet</span></span></h3>
+		
+		<h2><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >February 24, 2009</span></h2>
+		<h3 class="break"><span class="time"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >7:30 &ndash; 8:30</span></span> <span class="title"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Breakfast</span></span></h3>
+		<h3><span class="time"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >8:30 &ndash; 10:00</span></span> <span class="title"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Mixing things up: Cross-Layer Mobility</span></span></h3>
+		<h4><span class="subtitle"><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Marco Gruteser</span></span></h4>
+		<div class="session">
+			<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requires authentication" href="papers/48_Final_Paper.pdf"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >The Case for Intentional Networking</span></span></strong> 
+  <img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/>
+			<span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Jason Flinn, T. J. Giuli, Brett Higgins, Brian Noble, Azarias Reda and David Watson (</span><em><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >University of Michigan and Ford Motor Company</span></em><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+			
+			<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requires authentication" href="papers/39_Final_Paper.pdf"><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >A Case for Application Aware Channel Access in Wireless Networks</span></span></strong> 
+  <img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/> <span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Ashish Sharma and Elizabeth Belding (</span><em><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >UC Santa Barbara</span></em><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+
+			<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requires authentication" href="papers/40_Final_Paper.pdf"><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Exploiting "Approximate Communication" for Mobile Media Applications</span></span></strong> 
+  <img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/> <span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Sayandeep Sen, Stephen Schmitt, Mason Donahue and Suman Banerjee (</span><em><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >University of Wisconsin, Madison</span></em><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+			
+		</div>
+		<h3 class="break"><span class="time"><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >10:00 &ndash; 10:30</span></span> <span class="title"><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></span></h3>
+		<h3><span class="time"><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >10:30 &ndash; 12:00</span></span> <span class="title"><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Context-Aware Computing</span></span></h3>
+		<h4><span class="subtitle"><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Jeff Hightower</span></span></h4>
+		<div class="session">
+			<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requires authentication" href="papers/44_Final_Paper.pdf"><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Context Aware Composition</span></span></strong> 
+  <img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Kent Lyons, Roy Want, David Munday,
+Jiasheng He, Shivani Sud, Barbara Rosario and Trevor Pering (</span><em><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Intel
+Research, UC Santa Cruz, and Georgia Institute of Technology</span></em><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+
+
+			<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requires authentication" href="papers/25_Final_Paper.pdf"><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Planning Ahead: Techniques for Simplifying Mobile Service Use</span></span></strong> 
+  <img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/> <span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Mike Harding, Oliver Storz, Nigel Davies and Adrian Friday (</span><em><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Lancaster
+University</span></em><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+
+			<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requires authentication"  href="papers/19_Final_Paper.pdf"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Neary: Conversation field detection based on similarity of auditory situation</span></span></strong>
+  <img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/> <span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Toshiya Nakakura, Yasuyuki Sumi and Toyoaki Nishida (</span><em><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Kyoto
+University</span></em><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+		</div>
+		
+		<h3 class="break"><span class="time"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >12:00 &ndash; 13:00</span></span> <span class="title"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></span></h3>
+		<h3><span class="time"><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >13:00 &ndash; 14:30</span></span> <span class="title"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Building and Testing Applications</span></span></h3>
+		<h4><span class="subtitle"><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Alex Varshavsky</span></span></h4>
+		<div class="session">
+
+<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requires authentication"  href="papers/47_Final_Paper.pdf"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Using Code Instrumentation to Enhance Testing on J2ME: a Lesson Learned with JInjector</span></span></strong> 
+  <img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Michele Sama and Julian Harty (</span><em><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Google</span></em><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+
+<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requires authentication"  href="papers/46_Final_Paper.pdf"><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Experimenting in Mobile Social Contexts Using JellyNets</span></span></strong> 
+  <img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/> <span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Peter Gilbert, Eduardo Cuervo and Landon Cox (</span><em><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Duke University</span></em><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+
+      <p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requires authentication" href="papers/21_Final_Paper.pdf"><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Ibis for Mobility: Solving Challenges of Mobile Computing Using Grid Techniques</span></span></strong> 
+  <img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Nicholas Palmer, Roelof Kemp, Thilo Kielmann and Henri Bal (</span><em><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Vrije Universiteit</span></em><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+		</div>
+		
+		<h3 class="break"><span class="time"><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >14:30 &ndash; 15:00</span></span> <span class="title"><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></span></h3>
+		
+		<h3><span class="time"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >15:00 &ndash; 17:00</span></span> <span class="title"><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Doctoral Consortium</span></span></h3>
+		<div class="session">
+		<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requries authentication" href="papers/dc/camara_ds_final.pdf"><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Dynamic Topology and Communication Control for Highly Dynamic Wireless Mesh Networks</span></span></strong>
+		<img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Daniel C&acirc;mara, Christian Bonnet, Fethi Filali (</span><em><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >EURECOM</span></em><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+
+		<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requries authentication" href="papers/dc/Fokum-extendAbs.pdf"><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Optimal Communications Systems and Network Design for Cargo Monitoring</span></span></strong>
+		<img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Daniel T. Focum (</span><em><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >University of Kansas</span></em><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+
+		<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requries authentication" href="papers/dc/HotMobile09_ResearchSummary_Ghasemzadeh.pdf"><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Sensing Health: Challenges in Designing Mobile Sensory Platforms for Healthcare Monitoring</span></span></strong>
+		<img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Hassan Ghasemzadeh, Roozbeh Jafari (</span><em><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >University of Texas</span></em><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+
+		<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requries authentication" href="papers/dc/liu_researchsynopsis.pdf"><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Crossing the Chasm in Ubiquitous Computing Technology Adoption</span></span></strong>
+		<img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Yong Liu (</span><em><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Indiana University</span></em><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+
+		<p><strong><span onclick="return false" style="text-decoration:underline; color:blue" title="Requries authentication" href="papers/dc/anderson_dc.pdf"><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Integrated Beam Steering and Scheduling for Spatial Reuse</span></span></strong>
+		<img onmousedown="imd(this)" alt="Locked resource" class="nomobi" src="images/lock-sm.png"/><br/><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Eric Anderson (</span><em><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >University of Colorado</span></em><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+
+		</div>
+	</div>
+
+
+</div>	
+		</div>
+		<div class="sponsors">
+			<div style="text-align:center;"><strong><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Sponsored by</span></strong></div>
+			<div style="text-align:center;">
+			
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.acm.org/"><img onmousedown="imd(this)" alt="ACM Logo" src="images/acmlogotr.gif" /></span> 
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.sigmobile.org/"><img onmousedown="imd(this)" alt="SigMobile Logo" src="images/sigmobiletr.gif" /></span>
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hp.com/"><img onmousedown="imd(this)" alt="HP Logo" src="images/hplogo.gif" /></span>
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.nokia.com/"><img onmousedown="imd(this)" alt="HP Logo" src="images/nokialogo-w.gif" /></span>
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.intel.com"><img onmousedown="imd(this)" alt="Intel Logo" src="images/intellogo.gif" /></span>
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.research.ibm.com"><img onmousedown="imd(this)" alt="IBM Logo" src="images/ibm.gif" /></span>
+
+			</div>
+			<div class="photocredit">
+				<span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Photo published with</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://creativecommons.org/licenses/by/2.0/deed.en"><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Creative Commons permission</span></span><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >. Photographer</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://flickr.com/photos/stephcosta/"><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Stephanie Costa</span></span><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >.</span>
+			</div>
+		</div>
+		
+		<div class="footer">
+			<hr />
+			<div class="certificates">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://validator.w3.org/check?uri=referer"><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Valid XHTML</span></span>
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://jigsaw.w3.org/css-validator/check/referer"><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Valid CSS</span>

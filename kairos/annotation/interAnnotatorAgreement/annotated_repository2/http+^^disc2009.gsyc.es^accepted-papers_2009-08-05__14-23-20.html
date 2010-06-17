@@ -1,0 +1,749 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session1/2/annotation/annotated_repository/http+^^disc2009.gsyc.es^accepted-papers_2009-08-05__14-23-20.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session1/2/annotation/annotated_repository/http+^^disc2009.gsyc.es^accepted-papers_2009-08-05__14-23-20.yaml created on Thu Aug 13 13:45:36 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<script type="text/javascript">/* Copyright 2008 Google. */ (function() {
+// Input 0
+// Input 1
+var a="start";function c(d){this.t={};this.tick=function(e,f,b){var g=b?b:(new Date).getTime();this.t[e]=[g,f]};this.tick(a,null,d)}var h=new c;window.jstiming={Timer:c,load:h};try{window.jstiming.pt=window.external.pageT}catch(i){};
+// Input 2
+
+})()
+</script>
+<link rel="shortcut icon" href="http://www.gstatic.com/sites/p/1248801786827/system/app/images/favicon.ico" type="image/x-icon" />
+<link rel="apple-touch-icon" href="http://www.gstatic.com/sites/p/1248801786827/system/app/images/apple-touch-icon.png" type="image/png" />
+<script type="text/javascript">/* Copyright 2008 Google. */ (function() {
+var d=parseInt,h=window,k="length";function m(b){return document.getElementById(b)}h.byId=m;var n="";function o(b){return b.replace(/^\s+|\s+$/g,n)}h.trim=o;
+var q="MSIE",r="6.0",s="string",t='id="',u='" ',v='class="',w='title="',x="display:inline-block;",y="left",z="float:left;",A="right",B="float:right;",C="cursor:hand;",D="<span ",E=' style="width:',F="px; height:",G="px;",H=";padding: 0;filter:progid:DXImageTransform.Microsoft.AlphaImageLoader(src='",I="', sizingMethod='scale');\"></span><span style=\"padding: ",J=" ",K=";",L="float:",M='"></span>';
+h.ie6ImgFix=function(b){var c=h.navigator?navigator.userAgent:n;if(c.indexOf(q)!=-1&&typeof opera=="undefined"){var e=/MSIE\s+([^\);]+)(\)|;)/;e.test(c);var f=RegExp.$1;if(f==r){var a=typeof b==s?m(b):b,l=a.id?t+a.id+u:n,i=a.className?v+a.className+u:n,p=a.title?w+a.title+u:w+a.alt+u,j=x+a.style.cssText;if(a.align==y)j=z+j;if(a.align==A)j=B+j;if(a.parentElement.href)j=C+j;var g=a.currentStyle,P=a.width-d(g.paddingLeft,10)-d(g.paddingRight,10),Q=a.height-d(g.paddingTop,10)-d(g.paddingBottom,10),R=
+D+l+i+p+E+P+F+Q+G+j+H+a.src+I+g.paddingTop+J+g.paddingRight+J+g.paddingBottom+J+g.paddingLeft+K+(g.styleFloat?L+g.styleFloat+K:n)+M;h.setTimeout(function(){a.outerHTML=R},1)}}};var N=[],O=0;h.JOT_addListener=function(b,c,e){var f=new String(O++),a={eventName:b,handler:c,compId:e,key:f};N.push(a);return f};h.JOT_removeListenerByKey=function(b){for(var c=0;c<N[k];c++)if(N[c].key==b){N.splice(c,1);break}};
+h.JOT_removeAllListenersForName=function(b){for(var c=0;c<N[k];c++)N[c].eventName==b&&N.splice(c,1)};var S="function";h.JOT_postEvent=function(b,c,e){var f={eventName:b,eventSrc:c||{},payload:e||{}};if(h.JOT_fullyLoaded)for(var a=N[k],l=0;l<a&&l<N[k];l++){var i=N[l];if(i&&i.eventName==b){f.listenerCompId=i.compId||n;var p=typeof i.handler==S?i.handler:h[i.handler];p&&p(f)}}else h.JOT_delayedEvents.push({eventName:b,eventSrc:c,payload:e})};h.JOT_delayedEvents=[];h.JOT_fullyLoaded=false;var T="{0}";
+h.JOT_formatRelativeToNow=function(b,c){var e=((new Date).getTime()-b)/60000;if(e>=1440)return null;var f=0;if(e>=60){e/=60;f=2}e>=2&&f++;return c?h.JOT_siteRelTimeStrs[f].replace(T,Math.floor(e)):h.JOT_userRelTimeStrs[f].replace(T,Math.floor(e))};
+})()
+</script>
+<script>
+webspace = {};
+webspace.domain = 'defaultdomain';
+webspace.isConsumer = true;
+webspace.sharingPolicy = 'OPENED';
+webspace.baseUri = '';
+webspace.siteTitle = '23rd International Symposium on Distributed Computing. Elche/Elx, Spain, September 23-25, 2009';
+webspace.homePath = '/';
+webspace.analyticsAccountId = '';
+webspace.enableAnalytics = false;
+webspace.domainAnalyticsAccountId = '';
+webspace.termsUrl = 'http://www.google.com/sites/help/intl/en/terms.html';
+webspace.isStartPageEnabled = false;
+webspace.features = {};
+webspace.features.pageTemplates = false;
+webspace.features.uploadHTMLFiles = true;
+
+webspace.isAdsenseEnabled = true;
+webspace.adsensePublisherId = '';
+  
+
+
+webspace.isMapEmbedEnabled = true;
+  
+
+
+webspace.isCalendarOnePickEnabled = true;
+  
+webspace.gadgets = {};
+webspace.gadgets.baseUri = '/system/app/pages/gadgets';
+webspace.gadgets.isGadgetDirectoryEnabled = true;
+webspace.gadgets.isGgsRenderingEnabled = true;
+
+webspace.isSubpageEmbeddingEnabled = true;
+  
+
+webspace.user = {"uid":"","hasAdminAccess":false,"guest_":true,"domain":"","hasWriteAccess":false,"userName":"guest","dasherUser":false,"primaryEmail":"guest","displayNameOrEmail":"guest"};
+
+webspace.page = {"locale":"en","state":"","wuid":"wuid:gx:16ae0d030b342aed","properties":{},"type":"text","canChangePath":true,"revision":13,"title":"Accepted papers","isRtlLocale":false,"bidiEnabled":false,"siteLocale":"en","name":"accepted-papers","path":"/accepted-papers","isSiteRtlLocale":false,"parentPath":null};
+
+
+    var editorResources = [
+      'http://www.gstatic.com/sites/p/1248801786827/system/js/trog_edit__en.js',
+      'http://www.gstatic.com/sites/p/1248801786827/system/app/css/trogedit.css',
+      '/_/rsrc/1248802387289/system/app/css/editor.css'
+    ];
+  
+
+var JOT_clearDotPath = "http://www.gstatic.com/sites/p/1248801786827/system/app/images/cleardot.gif";
+
+var JOT_userRelTimeStrs = ["a minute ago", "{0} minutes ago", "an hour ago", "{0} hours ago"];
+
+
+
+
+var JOT_siteRelTimeStrs = ["a minute ago", "{0} minutes ago", "an hour ago", "{0} hours ago"];
+
+
+</script>
+<script type="text/javascript">
+                window.jstiming.load.tick('scl');
+              </script>
+<meta name="Description" content="23rd International Symposium on Distributed Computing&#xA;September 23-25, 2009" />
+<link rel="stylesheet" type="text/css" href="http://www.gstatic.com/sites/p/1248801786827/system/app/themes/sunset/standard-css-sunset-ltr-ltr.css" />
+<link rel="stylesheet" type="text/css" href="/_/rsrc/1248802389404/system/app/css/overlay.css?cb=9100%25%25%25150goog-ws-left" />
+<title>Accepted papers ‎(23rd International Symposium on Distributed Computing. Elche/Elx, Spain, September 23-25, 2009)‎</title>
+<!--[if IE 6]>
+            <style type="text/css">
+              div.sites-sidebar-nav {
+                width: 100%;
+              }
+              .sites-sidebar-nav a {
+                display: inline;
+              }
+              .sites-sidebar-nav .expander {
+                left: -15px;
+              }
+              .sites-sidebar-nav .current-bg .expander {
+                left: 185px;
+              }
+              div.sites-sidebar-nav {
+                width: 100%;
+              }
+            </style>
+          <![endif]-->
+<!--[if IE]>
+            <style type="text/css">
+            .sites-sidebar-nav .current-bg {
+              margin-top: 0;
+              padding-top: 0;
+            }
+            </style>
+          <![endif]-->
+<script type="text/javascript">
+                window.jstiming.load.tick('cl');
+              </script>
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)" xmlns="http://www.google.com/ns/jotspot" id="body" class=" en"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<div id="sites-page-toolbar">
+<div xmlns="http://www.w3.org/1999/xhtml" id="goog-ws-status" class="goog-ws-status" style="display:none;">
+<div id="goog-ws-notice" class="goog-ws-notice"> </div>
+</div>
+</div>
+<div id="sites-chrome-everything" style="direction: ltr">
+<div xmlns="http://www.w3.org/1999/xhtml" id="sites-chrome-header-wrapper">
+<table id="sites-chrome-header" class="sites-layout-hbox" cellspacing="0">
+<tr class="sites-header-primary-row">
+<td id="sites-header-title">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://disc2009.gsyc.es/">
+<img onmousedown="imd(this)" src="/_/rsrc/1222466769491/config/app/images/customLogo/customLogo.gif?revision=4" id="logo-img-id" onload="ie6ImgFix('logo-img-id');" alt="Logo" class="sites-logo" />
+</span>
+<h2 style=";"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://disc2009.gsyc.es/" dir="ltr"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >23rd International Symposium on Distributed Computing. Elche/Elx, Spain, September 23-25, 2009</span></span></h2>
+</td>
+<td class="sites-layout-searchbox">
+<div>
+<form id="sites-searchbox-form" action="/system/app/pages/search">
+<input type="text" onpropertychange="JOT_setTextDir(this)" oninput="JOT_setTextDir(this)" dir="" id="jot-ui-searchInput" name="q" size="20" />
+<div class="goog-inline-block goog-button goog-button-base   "><div class="goog-inline-block goog-button-base-outer-box"><div class="goog-inline-block goog-button-base-inner-box"><div class="goog-button-base-pos"><div class="goog-button-base-top-shadow"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" > </span></div><div id="sites-searchbox-search-button" class="goog-button-base-content " style="" onclick=""><span id="sites-searchbox-search-button-label"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Search Site</span></span></div></div></div></div></div>
+</form>
+</div>
+</td>
+</tr>
+</table> 
+</div> 
+<div id="sites-chrome-main-wrapper">
+<table id="sites-chrome-main" class="sites-layout-hbox" cellspacing="0">
+<tr>
+<td id="sites-chrome-sidebar-left" class="sites-layout-sidebar-left">
+<div xmlns="http://www.w3.org/1999/xhtml" id="COMP_0751741061263238" class="sites-embed">
+<h4 class="sites-embed-title"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Submission</span></h4>
+<div class="sites-embed-content sites-sidebar-nav ">
+<ul jotId="navList">
+<li class="unindented nav-first"><div dir="ltr"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://disc2009.gsyc.es/dates" jotId="wuid:gx:1d9cb2f61f34f9c5"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Dates</span></span>
+</div></li>
+<li class="unindented"><div dir="ltr"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://disc2009.gsyc.es/program-committee" jotId="wuid:gx:5ff160925d12d578"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></span>
+</div></li>
+<li class="unindented"><div dir="ltr"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://disc2009.gsyc.es/call-for-papers" jotId="wuid:gx:a2b6eb5150357db"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Call for papers</span></span>
+</div></li>
+<li class="unindented"><div dir="ltr"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://disc2009.gsyc.es/submission" jotId="wuid:gx:72cde574057e648c"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Submission</span></span>
+</div></li>
+<li class="unindented"><div dir="ltr"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://disc2009.gsyc.es/workshops" jotId="wuid:gx:302955611427b61d"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span>
+</div></li>
+<li class="unindented"><div class="current-bg" jotId="wuid:gx:16ae0d030b342aed" dir="ltr"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Accepted papers</span>
+</div></li>
+<li class="unindented"><div dir="ltr"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://disc2009.gsyc.es/awards" jotId="wuid:gx:127eab8995c2567e"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Awards</span></span>
+</div></li>
+<li class="unindented"><div dir="ltr"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://disc2009.gsyc.es/invited-speakers" jotId="wuid:gx:26d037be1d00d46e"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Program Highlights</span></span>
+</div></li>
+<li class="unindented"><div dir="ltr"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://disc2009.gsyc.es/location" jotId="wuid:gx:2d3e187670ea78b1"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Location</span></span>
+</div></li>
+<li class="unindented"><div dir="ltr"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://disc2009.gsyc.es/accommodation" jotId="wuid:gx:6ea92fc220b93ad3"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Accomodation</span></span>
+</div></li>
+<li class="unindented"><div dir="ltr"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://disc2009.gsyc.es/program" jotId="wuid:gx:32410d98ecba4fd7"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Preliminary program</span></span>
+</div></li>
+<li class="unindented"><div dir="ltr"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://disc2009.gsyc.es/disc-community" jotId="wuid:gx:6fc004f3c6f9f333"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >DISC Community</span></span>
+</div></li>
+<li class="unindented"><div dir="ltr"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://disc2009.gsyc.es/registration-" jotId="wuid:gx:6b365e59ec112cc1"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span>
+</div></li>
+<li class="unindented"><div dir="ltr"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://disc2009.gsyc.es/poster" jotId="wuid:gx:2731305b88134529"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Poster</span></span>
+</div></li>
+<li class="unindented"><div dir="ltr"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://disc2009.gsyc.es/system/app/pages/sitemap/hierarchy" jotId="wuid:gx:41b11429845b51a8"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Sitemap</span></span>
+</div></li>
+</ul>
+
+</div>
+</div>
+</td>
+<td id="sites-canvas-wrapper">
+<div id="sites-canvas">
+<div id="goog-ws-editor-toolbar-container"> </div>
+<div xmlns="http://www.w3.org/1999/xhtml" id="title-crumbs" style="">
+</div>
+<h3 xmlns="http://www.w3.org/1999/xhtml" id="sites-page-title-header" style="" align="left">
+<span id="sites-page-title" dir="ltr"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Accepted papers</span></span>
+</h3>
+
+<div id="sites-canvas-main" class="sites-canvas-main">
+<div id="sites-canvas-main-content">
+<table xmlns="http://www.w3.org/1999/xhtml" cellspacing="0" class="sites-layout-hbox"><tbody><tr><td class="sites-layout-tile sites-tile-name-content-1"><div dir="ltr"><u><b><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Regular papers:</span></b></u><br />
+<br /><font size="2"><i>
+<span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Compact Multicast Routing</span></i></font><br /><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Ittai Abraham, Dahlia Malkhi and David Ratajczak</span><br />
+<br /><i>
+<span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Tight group renaming on groups of size g is equivalent to g-consensus</span></i><br /><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Yehuda Afek, Eli Gafni and Opher Lieber</span><br />
+<br /><i>
+<span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Interrupting Snapshots and the Java Size() Method</span></i><br /><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Yehuda Afek, Nir Shavit and Moran Tzafrir</span><br />
+<br /><i>
+<span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >A local 2-approximation algorithm for the vertex cover problem</span></i><br /><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Matti Åstrand, Patrik Floréen, Valentin Polishchuk, Joel Rybicki, Jukka Suomela and Jara Uitto</span><br />
+<br /><i>
+<span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Euler Tour Lock-in Problem in the Rotor-Router Model</span></i><br />
+<span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Evangelos Bampas, Leszek Gasieniec, Nicolas Hanusse, David Ilcinkas, Ralf Klasing and Adrian Kosowski</span><br />
+<br /><i>
+<span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >On the Existence of Weakest Failure Detectors for Mutual Exclusion and k-Exclusion</span></i><br />
+<span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Vibhor Bhatt and Prasad Jayanti</span><br />
+<br /><i>
+<span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >A New Self-Stabilizing Minimum Spanning Tree Construction with Loop-free Property</span></i><br />
+<span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Lélia Blin, Maria Potop-Butucaru, Stéphane Rovedakis and Sébastien Tixeuil</span><br />
+<br /><i>
+<span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >The Price of Anonymity: Optimal Consensus despite Asynchrony, Crash and Anonymity</span></i><br />
+<span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >François Bonnet and Michel Raynal</span><br />
+<br /><i>
+<span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Distributed Discovery of Large Near-Cliques</span></i><br />
+<span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Zvika Brakerski and Boaz Patt-Shamir</span><br />
+<br /><i>
+<span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Compact Routing in Power-Law Graphs</span></i><br />
+<span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Wei Chen, Christian Sommer, Shang-Hua Teng and Yajun Wang</span><br />
+<br /><i>
+<span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Keeping Mobile Robot Swarms Connected</span></i><br />
+<span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Alejandro Cornejo, Ruy Ley-Wild, Fabian Kuhn and Nancy Lynch</span><br />
+<br /><i>
+<span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Consensus and mutual exclusion in a multiple access channel</span></i><br />
+<span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Jurek Czyzowicz, Leszek Gasieniec, Dariusz Kowalski and Andrzej Pelc</span><br />
+<br /><i>
+<span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >The Disagreement Power of an Adversary</span></i><br />
+<span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Carole Delporte-Gallet, Hugues Fauconnier, Rachid Guerraoui and Andreas Tielmann</span><br />
+<br /><i>
+<span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Local Computation of Nearly Additive Spanners</span></i><br />
+<span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Bilel Derbel, Cyril Gavoille, David Peleg and Laurent Viennot</span><br />
+<br /><i>
+<span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Nonblocking Algorithms and Backward Simulation</span></i><br />
+<span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Simon Doherty and Mark Moir</span><br />
+<br /><i>
+<span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >New Bounds for the Controller Problem</span></i><br />
+<span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Yuval Emek and Amos Korman</span><br />
+<br /><i>
+<span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >The RedBlue algorithm: An Adaptive Universal Construction</span></i><br />
+<span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Panagiota Fatourou and Nikolaos Kallimanis</span><br />
+<br /><i>
+<span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Elastic Transactions</span></i><br />
+<span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Pascal Felber, Vincent Gramoli and Rachid Guerraoui</span><br />
+<br /><i>
+<span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >On the Number of Synchronous Rounds Required for Byzantine Agreement</span></i><br />
+<span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Matthias Fitzi and Jesper Nielsen</span><br />
+<br /><i>
+<span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >On Set Consensus Numbers</span></i><br />
+<span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Eli Gafni and Petr Kuznetsov</span><br />
+<br /><i>
+<span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >What Can be Observed Locally? Round-based Models for Quantum Distributed Computing</span></i><br />
+<span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Cyril Gavoille, Adrian Kosowski and Marcin Markiewicz</span><br />
+<br /><i>
+<span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Dynamics in Network Interaction Games</span></i><br />
+<span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Martin Hoefer and Siddharth Suri</span><br />
+<br /><i>
+<span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Help when needed, but no more: Efficient Read/Write Partial Snapshot</span></i><br />
+<span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Damien Imbs and Michel Raynal</span><br />
+<br /><i>
+<span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Efficient $k$-shot Broadcasting in Radio Networks</span></i><br />
+<span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Erez Kantor and David Peleg</span><br />
+<br /><i>
+<span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >At-Most-Once Semantics in Asynchronous Shared Memory</span></i><br />
+<span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Sotirios Kentros, Aggelos Kiayias, Nicolas Nicolaou and Alexander Shvartsman</span><br />
+<br /><i>
+<span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Fast, scalable Byzantine agreement in the full information model with a nonadaptive adversary</span></i><br />
+<span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Valerie King and Jared Saia</span><br />
+<br /><i>
+<span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Distributed Fractional Packing and Maximum Weighted b-Matching via Tail-Recursive Duality</span></i><br />
+<span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Christos Koufogiannakis and Neal Young</span><br />
+<br /><i>
+<span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >The Abstract MAC Layer</span></i><br />
+<span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Fabian Kuhn, Nancy Lynch and Calvin Newport</span><br />
+<br /><i>
+<span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Virtual Ring Routing Trends</span></i><br />
+<span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Dahlia Malkhi, Sid Sen, Kunal Talwar, Renato Werneck and Udi Wieder</span><br />
+<br /><i>
+<span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Randomization Can Be a Healer: Consensus with Dynamic Omission Failures</span></i><br />
+<span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Henrique Moniz, Nuno Neves, Miguel Correia and Paulo Verissimo</span><br />
+<br /><i>
+<span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Optimum simultaneous consensus for general omissions is equivalent to an NP Oracle</span></i><br />
+<span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Yoram Moses</span><br />
+<br /><i>
+<span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Crash Quiescent Failure Detection</span></i><br />
+<span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Srikanth Sastry, Scott Pike and Jennifer Welch</span><br />
+<br /><i>
+<span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Contention-sensitive Data Structures and Algorithms</span></i><br />
+<span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Gadi Taubenfeld</span><br />
+<br />
+<b><br /><br /><br /><u><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Brief announcements:</span></u></b><br />
+<br />
+<br /><i>
+<span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Cloud Computing Games: Pricing Services of Large Data Centers</span></i><br />
+<span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Ashraf Al Daoud, Sachin Agarwal and Tansu Alpcan</span><br />
+<br /><i>
+<span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Transactional Scheduling for Read-Dominated Workloads</span></i><br />
+<span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Hagit Attiya and Alessia Milani</span><br />
+<br /><i>
+<span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Incremental Component-Based Specification, Verification, and Performance Evaluation of Distributed Reset</span></i><br />
+<span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Ananda Basu, Borzoo Bonakdarpour, Marius Bozga and Joseph Sifakis</span><br />
+<br /><i>
+<span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Weak synchrony models and failure detectors for message passing (k-) set agreement</span></i><br />
+<span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Martin Biely, Peter Robinson and Ulrich Schmid</span><br />
+<br /><i>
+<span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Model Checking of Fault-tolerant Distributed Protocols Using Symmetry Reduction</span></i><br />
+<span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Peter Bokor, Marco Serafini, Neeraj Suri and Helmut Veith</span><br />
+<br /><i>
+<span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >A Leader-free Byzantine Consensus Algorithm</span></i><br />
+<span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Fatemeh Borran and André Schiper</span><br />
+<br /><i>
+<span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Decidable Graph Languages by Mediated Population Protocols</span></i><br />
+<span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Ioannis Chatzigiannakis, Othon Michail and Paul Spirakis</span><br />
+<br /><i>
+<span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >The minimum failure detector for non-local tasks in message-passing systems</span></i><br />
+<span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Carole Delporte-Gallet, Hugues Fauconnier and Sam Toueg</span><br />
+<br /><i>
+<span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Dynamic FTSS in Asynchronous Systems: the Case of Unison</span></i><br />
+<span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Swan Dubois, Maria Gradinariu Potop-Butucaru and Sébastien Tixeuil</span><br />
+<br /><i>
+<span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >The Speed of Broadcasting in Random Networks: Density Does Not Matter</span></i><br />
+<span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Nikolaos Fountoulakis, Konstantinos Panagiotou and Anna Huber</span><br />
+<br /><i>
+<span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Utilization of Multiple Interfaces in Wireless Ad Hoc Networks</span></i><br />
+<span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Roy Friedman and Alex Kogan</span><br />
+<br /><i>
+<span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Towards Secured Distributed Polling in Social Networks</span></i><br />
+<span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Rachid Guerraoui, Kevin Huguenin, Anne-Marie Kermarrec and Maxime Monod</span><br />
+<br /><i>
+<span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Acceleration by Contention for Shared Memory Mutual Exclusion Algorithms</span></i><br />
+<span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Michiko Inoue, Tsuyoshi Suzuki and Hideo Fujiwara</span><br />
+<br /><i>
+<span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >On Implementing Omega Efficiently in the Crash-Recovery Model</span></i><br />
+<span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Mikel Larrea and Cristian Martín</span><br />
+<br /><i>
+<span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Zab: A practical totally ordered broadcast protocol</span></i><br />
+<span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Benjamin Reed and Flavio Junqueira</span></div></td></tr></tbody></table>
+</div> 
+</div> 
+<div id="sites-canvas-bottom-panel">
+<div xmlns="http://www.w3.org/1999/xhtml" id="COMP_page-subpages"> </div>
+<div xmlns="http://www.w3.org/1999/xhtml" id="COMP_page-attachments" style="display:none" class="sites-canvas-bottom-no-items">
+<div id="sites-attachment-wrapper" class="sites-canvas-bottom-panel-wrapper">
+<div jotId="sites-attachment-inner" style="display:none;" class="sites-attachment-inner">
+<ul id="JOT_ATTACH_container">
+</ul>
+</div>
+</div>
+</div>
+<span onclick="return false" style="text-decoration:underline; color:blue" xmlns="http://www.w3.org/1999/xhtml" name="page-comments"></span>
+<div xmlns="http://www.w3.org/1999/xhtml" id="COMP_page-comments" style="display:none;" class="sites-canvas-bottom-no-items">
+<div id="sites-comment-wrapper" class="sites-canvas-bottom-panel-wrapper">
+<div jotId="sites-comment-inner" style="display:none;" class="sites-comment-inner">
+<div jotId="comments" class="sites-comments">
+<div id="_wuid_" jotId="template" class="sites-comment" style="display:none">
+<div><strong><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >_displayNameOrEmail_</span></strong> <span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >- _time_ -</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="javascript:;" onClick="JOT_postEvent('removeComment', this, {wuid:'_wuid_'});"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Remove</span></span></div>
+<p dir="_dir_"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >_text_</span></p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div> 
+</td> 
+</tr>
+</table> 
+</div> 
+<div id="sites-chrome-footer-wrapper">
+<div id="sites-chrome-footer">
+<div xmlns="http://www.w3.org/1999/xhtml" class="sites-subfooter">
+<p>
+            
+                <span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" > </span>
+                <span onclick="return false" style="text-decoration:underline; color:blue" class="sites-system-link" href="https://www.google.com/a/UniversalLogin?continue=http%3A%2F%2Fsites.google.com%2Fsite%2Fdisc2009site%2Faccepted-papers&amp;service=jotspot"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Sign in</span></span>
+              
+            <span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" > </span>
+            <span onclick="return false" style="text-decoration:underline; color:blue" class="sites-system-link" href="javascript:void(window.open('http://www.google.com/sites/help/intl/en/terms.html'))"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Terms</span></span>
+            <span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" > </span>
+            <span onclick="return false" style="text-decoration:underline; color:blue" class="sites-system-link" href="/system/app/pages/reportAbuse" target="_blank"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Report Abuse</span></span>
+            
+                <span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" > </span>
+                <span onclick="return false" style="text-decoration:underline; color:blue" class="sites-system-link" href="javascript:;" onclick="window.open(webspace.printUrl)"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Print</span></span>
+              
+            <span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" > | </span>
+            <b class="powered-by"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Powered by</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="sites-system-link" href="http://sites.google.com"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Google Sites</span>

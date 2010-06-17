@@ -1,0 +1,849 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en" dir="ltr">
+
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.wikisym.org^ws2008^index.php^Posters_2009-08-05__14-46-15.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.wikisym.org^ws2008^index.php^Posters_2009-08-05__14-46-15.yaml created on Wed Aug 05 17:32:35 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    		<meta name="keywords" content="Posters,Agile Learning and Teaching with Wikis: Building a Pattern,Multilingual Idioms And Proverbs: Wiki As A Tool In Collaborative Translation,OpenWetWare - a wiki focused on life science researchers,Quantitative Analysis and Characterization of Wikipedia Requests,The Implementation of a Wiki-intranet in a Health Sector Research Institute,WikiMob Interaction,WikiSim: Simulating Knowledge Curation in Structured Wikis,Wiki as a tool for improving the innovation process,Wikideas and Creativity Connector: Supporting Group Ideational Creativity,XWiki Concerto: A P2P? wiki for nomadic workers" />
+		<link rel="shortcut icon" href="/favicon.ico" />
+		<link rel="search" type="application/opensearchdescription+xml" href="/ws2008/opensearch_desc.php" title="WikiSym 2008 (English)" />
+    <title>Posters - WikiSym 2008</title>
+    <style type="text/css" media="screen,projection">/*<![CDATA[*/ @import "/ws2008/skins/sFEUPMod/FEUPMod_main.css?97"; /*]]>*/</style>
+    <link rel="stylesheet" type="text/css" media="print" href="/ws2008/skins/common/commonPrint.css?97" />
+    <link rel="stylesheet" type="text/css" media="handheld" href="/ws2008/skins/sFEUPMod/handheld.css?97" />
+    <!--[if lt IE 5.5000]><style type="text/css">@import "/ws2008/skins/sFEUPMod/IE50Fixes.css?97";</style><![endif]-->
+    <!--[if IE 5.5000]><style type="text/css">@import "/ws2008/skins/sFEUPMod/IE55Fixes.css?97";</style><![endif]-->
+    <!--[if IE 6]><style type="text/css">@import "/ws2008/skins/sFEUPMod/IE60Fixes.css?97";</style><![endif]-->
+    <!--[if IE 7]><style type="text/css">@import "/ws2008/skins/sFEUPMod/IE70Fixes.css?97";</style><![endif]-->
+    <!--[if lt IE 7]><script type="text/javascript" src="/ws2008/skins/common/IEFixes.js?97"></script>
+    <meta http-equiv="imagetoolbar" content="no" /><![endif]-->
+
+    <script type= "text/javascript">/*<![CDATA[*/
+var skin = "sFEUPMod";
+var stylepath = "/ws2008/skins";
+var wgArticlePath = "/ws2008/index.php/$1";
+var wgScriptPath = "/ws2008";
+var wgScript = "/ws2008/index.php";
+var wgServer = "http://www.wikisym.org";
+var wgCanonicalNamespace = "";
+var wgCanonicalSpecialPageName = false;
+var wgNamespaceNumber = 0;
+var wgPageName = "Posters";
+var wgTitle = "Posters";
+var wgAction = "view";
+var wgRestrictionEdit = [];
+var wgRestrictionMove = [];
+var wgArticleId = "140";
+var wgIsArticle = true;
+var wgUserName = null;
+var wgUserGroups = null;
+var wgUserLanguage = "en";
+var wgContentLanguage = "en";
+var wgBreakFrames = false;
+var wgCurRevisionId = "921";
+/*]]>*/</script>
+
+    <script type="text/javascript" src="/ws2008/skins/common/wikibits.js?97"><!-- wikibits js --></script>
+            <script type="text/javascript" src="/ws2008/index.php?title=-&amp;action=raw&amp;gen=js&amp;useskin=sFEUPMod"><!-- site js --></script>
+                <style type="text/css">/*<![CDATA[*/
+@import "/ws2008/index.php?title=MediaWiki:Common.css&usemsgcache=yes&action=raw&ctype=text/css&smaxage=18000";
+@import "/ws2008/index.php?title=MediaWiki:SFEUPMod.css&usemsgcache=yes&action=raw&ctype=text/css&smaxage=18000";
+@import "/ws2008/index.php?title=-&action=raw&gen=css&maxage=18000";
+/*]]>*/</style>
+        <!-- Head Scripts -->
+    		<script type="text/javascript" src="/ws2008/skins/common/ajax.js?97"></script>
+		<link rel="alternate" type="application/rss+xml" href="/ws2008/index.php?title=Special:Recentchanges&feed=rss">
+	<script type="text/javascript" src="/ws2008/skins/sFEUPMod/regValidation.js"></script>
+	<script type="text/javascript" src="/ws2008/skins/sFEUPMod/mapper.js"></script>
+			<script type="text/javascript">
+var gaJsHost = (("https:" == document.location.protocol) ? "https://ssl." : "http://www.");
+document.write(unescape("%3Cscript src='" + gaJsHost + "google-analytics.com/ga.js' type='text/javascript'%3E%3C/script%3E"));
+</script>
+<script type="text/javascript">
+var pageTracker = _gat._getTracker("UA-3693298-1");
+pageTracker._initData();
+pageTracker._trackPageview();
+</script>	
+		
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"  class="mediawiki ns-0 ltr page-Posters"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+    <!-- =================== FEUPMod-page =================== -->
+    <div id="FEUPMod-page">
+    
+    <!-- Header -->
+    <div id="FEUPMod-header">
+        <span onclick="return false" style="text-decoration:underline; color:blue" name="top" id="contentTop"></span>
+
+        <!-- Site Logo -->
+        <div id="FEUPMod-p-logo">
+            <span onclick="return false" style="text-decoration:underline; color:blue" style="background-image: url(http://www.wikisym.org/wikisym2.png);" href="/ws2008/index.php/Thank_You_All%21_See_you_at_WikiSym2009%21" title="Thank_You_All!_See_you_at_WikiSym2009!"></span>
+        </div>
+        <!-- end of Site Logo -->
+
+        <!-- Login -->
+        <div id="FEUPMod-p-login">
+            <ul>
+                            <li id="FEUPMod-pt-login"><span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php?title=Special:Userlogin&amp;returnto=Posters"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Log in / create account</span></span>
+               </li>
+                         </ul>
+        </div> <!-- end of FEUPMod-p-login DIV -->
+        <!-- end of Login -->
+
+        <!-- Search -->
+        <div id="FEUPMod-p-search" class="FEUPMod-portlet">
+            <div id="FEUPMod-searchBody" class="FEUPMod-pBody">
+                <form action="/ws2008/index.php/Special:Search" id="searchform"><div>
+                    <input id="searchInput" name="search" type="text" accesskey="f" value="" />
+
+                    <input type='submit' name="go" class="searchButton" id="searchGoButton" value="Go" />
+			   		<span onclick="return false" style="text-decoration:underline; color:blue" type="application/rss+xml" href="/ws2008/index.php?title=Special:Recentchanges&feed=rss"><img onmousedown="imd(this)" src="/ws2008/skins/sFEUPMod/images/rss.png" alt="stay tuned" title="stay tuned" /></span>
+					<span onclick="return false" style="text-decoration:underline; color:blue" href="http://del.icio.us/post"><img onmousedown="imd(this)" src="/ws2008/skins/sFEUPMod/images/delicious_icon.jpg" alt="tag me" title="tag me"/></span>
+					<span onclick="return false" style="text-decoration:underline; color:blue" href="http://twitter.com/wikisym"><img onmousedown="imd(this)" src="/ws2008/skins/sFEUPMod/images/twitter_icon.jpg" alt="follow me" title="follow me"/></span>
+					<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.facebook.com/group.php?gid=6646016017"><img onmousedown="imd(this)" src="/ws2008/skins/sFEUPMod/images/facebook_icon.jpg" alt="join" title="join"/></span>
+					<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.skype.com/go/joinpublicchat?skypename=mrjcleaver&topic=WikiSym%20(Portugal%202008).%20Participants%20chat%3A%20feel%20free%20to%20hang%20out%20even%20if%20you%20don't%20plan%20to%20attend.&blob=xCteBUqXKyg9S4BxsyiQMG52Mb30SGujzWNZR1C8TslB6N3oFWPdZDXi4eNBBU_-vuB5gUsojSYHeqEJeb52q4PsZDc068FcD4iKm2010kbO7I2CqwTVY5b9YEKVAWBK1jNJHre3-bSXPCriYky6-uWz5LV20_LuC6IdN3ugr-1NRk4nJPU3844BL7l46M1uBwsrYA"><img onmousedown="imd(this)" src="/ws2008/skins/sFEUPMod/images/skype_icon.jpg" alt="skype me" title="skype me"/></span>
+                </div></form>
+            </div>
+        </div> <!-- end of FEUPMod-p-search DIV -->
+        <!-- end of Search -->
+
+        <!-- Navigation Menu -->
+		
+		
+      <div id="FEUPMod-p-navigation-wrapper">
+        <div id="FEUPMod-p-navigation">
+		   <ul>
+		   <li><span onclick="return false" style="text-decoration:underline; color:blue" href="?title=Special:Recentchanges"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Recent Changes</span></span></li>
+		                            <li id="ca-history"
+                              ><span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php?title=Posters&amp;action=history"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >History</span></span>
+               <!--?php if($key != $lastkey) echo "|" ?--></li>
+               <li id="ca-viewsource"
+                              ><span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php?title=Posters&amp;action=edit"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >View source</span></span>
+               <!--?php if($key != $lastkey) echo "|" ?--></li>
+               <li id="ca-talk"
+               class="new"               ><span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php?title=Talk:Posters&amp;action=edit"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Discussion</span></span>
+               <!--?php if($key != $lastkey) echo "|" ?--></li>
+               <li id="ca-nstab-main"
+               class="selected"               ><span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/Posters"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Article</span></span>
+               <!--?php if($key != $lastkey) echo "|" ?--></li>
+               			</ul>
+        </div>
+        </div>
+        <!-- end of Navigation Menu -->
+
+    </div> <!-- end of header DIV -->
+    <!-- end of Header -->
+
+    <!-- Main Content -->
+    <div id="content">
+	    <table border='0px'>
+		<tr>
+		<td class="lnav-column">
+		<div id="side">
+			<ul id="nav">
+								<li><span><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Navigation</span></span>
+						<ul>
+										<li id="n-Welcome"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b6.png' /><span onclick="return false" style="text-decoration:underline; color:blue" class="lnav-topic" href="/ws2008/index.php/Main_Page"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Welcome</span></span></li>
+										<li id="n-Submissions"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b1.png' /><span onclick="return false" style="text-decoration:underline; color:blue" class="lnav-topic" href="/ws2008/index.php/Submissions"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Submissions</span></span></li>
+										<li id="n-Program"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b5.png' /><span onclick="return false" style="text-decoration:underline; color:blue" class="lnav-topic" href="/ws2008/index.php/Program"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span></li>
+										<li id="n-Venue"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b4.png' /><span onclick="return false" style="text-decoration:underline; color:blue" class="lnav-topic" href="/ws2008/index.php/Porto:About"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Venue</span></span></li>
+										<li id="n-Committees"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b3.png' /><span onclick="return false" style="text-decoration:underline; color:blue" class="lnav-topic" href="/ws2008/index.php/Committees"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></span></li>
+										<li id="n-Past-WikiSyms"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b2.png' /><span onclick="return false" style="text-decoration:underline; color:blue" class="lnav-topic" href="/ws2008/index.php/Past"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Past WikiSyms</span></span></li>
+										<li id="n-Registration"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b6.png' /><span onclick="return false" style="text-decoration:underline; color:blue" class="lnav-topic" href="/ws2008/index.php/Registration"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></li>
+										<li id="n-News"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b1.png' /><span onclick="return false" style="text-decoration:underline; color:blue" class="lnav-topic" href="/ws2008/index.php/News"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >News</span></span></li>
+										<li id="n-Wiki"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b5.png' /><span onclick="return false" style="text-decoration:underline; color:blue" class="lnav-topic" href="/ws2008/index.php/Public:Wiki"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Wiki</span></span></li>
+										<li id="n-Blog"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b4.png' /><span onclick="return false" style="text-decoration:underline; color:blue" class="lnav-topic" href="/ws2008/index.php/Blog"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Blog</span></span></li>
+										<li id="n-Promote!"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b3.png' /><span onclick="return false" style="text-decoration:underline; color:blue" class="lnav-topic" href="/ws2008/index.php/Promote"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Promote!</span></span></li>
+										<li id="n-Sponsors"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b2.png' /><span onclick="return false" style="text-decoration:underline; color:blue" class="lnav-topic" href="/ws2008/index.php/Sponsors"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></span></li>
+										<li id="n-OpenSpace"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b6.png' /><span onclick="return false" style="text-decoration:underline; color:blue" class="lnav-topic" href="/ws2008/index.php/OpenSpace"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >OpenSpace</span></span></li>
+										<li id="n-Proceedings"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b1.png' /><span onclick="return false" style="text-decoration:underline; color:blue" class="lnav-topic" href="/ws2008/index.php/Proceedings"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></span></li>
+										<li id="n--Thank-You-All!"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b5.png' /><span onclick="return false" style="text-decoration:underline; color:blue" class="lnav-topic" href="/ws2008/index.php/Thank_You_All%21_See_you_at_WikiSym2009%21"> <span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Thank You All!</span></span></li>
+									</ul>
+					</li>
+								<li><span><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Toolbox</span></span>
+					<ul>
+					  					  <li id="t-whatlinkshere"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b4.png' /><span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/Special:Whatlinkshere/Posters"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >What links here</span></span></li>
+					  					  <li id="t-recentchangeslinked"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b3.png' /><span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/Special:Recentchangeslinked/Posters"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Related changes</span></span></li>
+					  				      				      				      				      				      				      				      <li id="t-upload"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b2.png' /><span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/Special:Upload"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Upload file</span></span></li>				      				      <li id="t-specialpages"><img onmousedown="imd(this)" class='nav-bullet' src='/ws2008/skins/sFEUPMod/images/b6.png' /><span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/Special:Specialpages"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Special pages</span></span></li>				      					</ul>
+				</li>
+							</ul>
+		</div>
+		<div id="sponsors"> 
+	<div class="sponsors-section"></div>
+	<div class="sigweb">
+		<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.acm.org/"><img onmousedown="imd(this)" class="acmlogo" align="middle" src="/ws2008/skins/sFEUPMod/images/acm-logo.png" alt="ACM" /></span><br />
+	<div class="sponsors-title"></div>
+		<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.sigweb.org/conferences/wiki-cover.shtml"><img onmousedown="imd(this)" class="acmlogo" align="middle" src="/ws2008/skins/sFEUPMod/images/sponsors/sigweb-logo.png" alt="ACM SIGWEB" /></span><br />		
+	</div>
+	<br /><br />
+	<div class="sponsors-section"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></div>
+	<div class="sponsors-title"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Gold</span></div>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.sapo.pt"><img onmousedown="imd(this)" align="middle" src="/ws2008/skins/sFEUPMod/images/sponsors/SAPO_logo.jpg" alt="SAPO" width="120px"/></span><br />
+	<div class="sponsors-title"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Silver</span></div>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cgd.pt"><img onmousedown="imd(this)" align="middle" src="/ws2008/skins/sFEUPMod/images/sponsors/CGD_logo.jpg" alt="CGD - Caixa Geral de Depósitos" width="100px"/></span><br />
+	<div class="sponsors-title"></div>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.bt.com/"><img onmousedown="imd(this)" align="middle" src="/ws2008/skins/sFEUPMod/images/sponsors/BT_logo.png" alt="BT" width="100px"/></span><br />
+	<div class="sponsors-title"></div>
+	<div class="sponsors-title"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Bronze</span></div>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.sap.com/about/company/research/centers/paloalto.epx"><img onmousedown="imd(this)" align="middle" src="/ws2008/skins/sFEUPMod/images/sponsors/SAP_logo.jpg" alt="SAP" width="100px"/></span><br />
+	<div class="sponsors-title"></div>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.xwiki.com/"><img onmousedown="imd(this)" align="middle" src="/ws2008/skins/sFEUPMod/images/sponsors/XWiki_small_logo.png" alt="XWiki" width="100px"/></span><br />
+	<div class="sponsors-title"></div>
+	<div class="sponsors-title"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Friends</span></div>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.up.pt"><img onmousedown="imd(this)" src="/ws2008/skins/sFEUPMod/images/sponsors/UPorto_logo.jpg" align="middle" alt="University of Porto" width="100px"/></span>
+	<div class="sponsors-title"></div>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.stcp.pt/"><img onmousedown="imd(this)" src="/ws2008/skins/sFEUPMod/images/sponsors/stcp_logo.jpg" align="middle" alt="STCP" width="100px"/></span> 
+	<div class="sponsors-title"></div>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.carristur.pt/"><img onmousedown="imd(this)" src="/ws2008/skins/sFEUPMod/images/sponsors/CarrisTUR_logo.jpg" align="middle" alt="CarrisTUR" width="100px"/></span>
+	<div class="sponsors-title"></div>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.douroacima.pt/"><img onmousedown="imd(this)" src="/ws2008/skins/sFEUPMod/images/sponsors/DouroAcima_logo.jpg" align="middle" alt="Douro Acima" width="100px"/></span>
+	<div class="sponsors-title"></div>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.sandeman.pt/"><img onmousedown="imd(this)" src="/ws2008/skins/sFEUPMod/images/sponsors/Sandeman_logo.jpg" align="middle" alt="Sandeman" width="100px"/></span>
+	<div class="sponsors-title"></div>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.arcadia.pt/"><img onmousedown="imd(this)" src="/ws2008/skins/sFEUPMod/images/sponsors/Arcadia_logo.jpg" align="middle" alt="Arcadia" width="100px"/></span>
+	<div class="sponsors-title"></div>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cm-porto.pt"><img onmousedown="imd(this)" src="/ws2008/skins/sFEUPMod/images/sponsors/CMPorto_logo.gif" align="middle" alt="Câmara Municipal do Porto" width="100px"/></span>
+	<div class="sponsors-title"></div>	
+</div>
+	
+		</td>
+		<td class="center-content">
+		<table class="news-table">
+		<!--tr class="news-tr">
+		<td class="news-td">
+<span class="news-title">Title 1</span><br/>
+<span class="news-text">text text text text text<br>text text text text text<br>text text text text text</span>
+</td>
+<td class="news-td">
+<span class="news-title">Title 1</span><br/>
+<span class="news-text">text text text text text<br>text text text text text<br>text text text text text</span>
+</td>
+<td class="news-td">
+<span class="news-title">Title 1</span><br/>
+<span class="news-text">text text text text text<br>text text text text text<br>text text text text text</span>
+</td>
+<td class="news-td">
+<span class="news-title">Title 1</span><br/>
+<span class="news-text">text text text text text<br>text text text text text<br>text text text text text</span>
+</td>
+<td class="news-td">
+<span class="news-title">Title 1</span><br/>
+<span class="news-text">text text text text text<br>text text text text text<br>text text text text text</span>
+</td>		</tr-->
+		</table>
+		<br />
+        <span onclick="return false" style="text-decoration:underline; color:blue" name="top" id="top"></span>
+                <h1 class="firstHeading"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Posters</span></h1>
+        <div id= "bodyContent" class="FEUPMod-bodyContent">
+            <h3 id="siteSub"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >From WikiSym 2008</span></h3>
+            <div id="contentSub"></div>
+                                    <div id="jump-to-nav"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Jump to:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#column-one"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >navigation</span></span><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#searchInput"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >search</span></span></div>            <!-- start content -->
+            <ul><li> <span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/Agile_Learning_and_Teaching_with_Wikis:_Building_a_Pattern" title="Agile Learning and Teaching with Wikis: Building a Pattern"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Agile Learning and Teaching with Wikis: Building a Pattern</span></span><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >. Marija Cubric</span>
+</li><li> <span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/XWiki_Concerto:_A_P2P%3F_wiki_for_nomadic_workers" title="XWiki Concerto: A P2P? wiki for nomadic workers"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >XWiki Concerto: A P2P? wiki for nomadic workers</span></span><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >, Stéphane Laurière</span>
+</li><li> <span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/The_Implementation_of_a_Wiki-intranet_in_a_Health_Sector_Research_Institute" title="The Implementation of a Wiki-intranet in a Health Sector Research Institute"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >The Implementation of a Wiki-intranet in a Health Sector Research Institute</span></span><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >, Katja Hilska</span>
+</li><li> <span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/Wiki_as_a_tool_for_improving_the_innovation_process" title="Wiki as a tool for improving the innovation process"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Wiki as a tool for improving the innovation process</span></span><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >, Fabrício J. Barth, Gabriel T. Vilela, Antonio P. Timoszczuk, Antonio L. G. Mussoi</span>
+</li><li> <span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/Wikideas_and_Creativity_Connector:_Supporting_Group_Ideational_Creativity" title="Wikideas and Creativity Connector: Supporting Group Ideational Creativity"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Wikideas and Creativity Connector: Supporting Group Ideational Creativity</span></span><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >. Oscar Ardaiz</span>
+</li><li> <span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/Multilingual_Idioms_And_Proverbs:_Wiki_As_A_Tool_In_Collaborative_Translation" title="Multilingual Idioms And Proverbs: Wiki As A Tool In Collaborative Translation"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Multilingual Idioms And Proverbs: Wiki As A Tool In Collaborative Translation</span></span> <span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Dora Montagna</span>
+</li><li> <span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php?title=On_The_Analysis_Of_Large_Wikis&amp;action=edit" class="new" title="On The Analysis Of Large Wikis"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >On The Analysis Of Large Wikis</span></span><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >. B. Thomas Adler, Luca de Alfaro, Ian Pye, Vishwanath Raman</span>
+</li><li> <span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php?title=ProveIt_%21:_A_FireFox_Extension_to_Support_Citation_in_MediaWiki&amp;action=edit" class="new" title="ProveIt !: A FireFox Extension to Support Citation in MediaWiki"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >ProveIt !: A FireFox Extension to Support Citation in MediaWiki</span></span> <span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Christopher Jordan, Andrea Forte, Amy Bruckman</span>
+</li><li> <span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php?title=TiddlyWeb_:_A_RESTful_Store_for_TiddlyWiki&amp;action=edit" class="new" title="TiddlyWeb : A RESTful Store for TiddlyWiki"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >TiddlyWeb : A RESTful Store for TiddlyWiki</span></span><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >. Chris Dent</span>
+</li><li> <span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/WikiMob_Interaction" title="WikiMob Interaction"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >WikiMob Interaction</span></span><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >. Rosana Anglés, Raquel Frisa</span>
+</li><li> <span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/OpenWetWare_-_a_wiki_focused_on_life_science_researchers" title="OpenWetWare - a wiki focused on life science researchers"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >OpenWetWare - a wiki focused on life science researchers</span></span> <span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >- Ricardo Vidal</span>
+</li><li> <span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/Quantitative_Analysis_and_Characterization_of_Wikipedia_Requests" title="Quantitative Analysis and Characterization of Wikipedia Requests"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Quantitative Analysis and Characterization of Wikipedia Requests</span></span> <span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >- Antonio J. Reinoso.</span>
+</li><li> <span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/WikiSim:_Simulating_Knowledge_Curation_in_Structured_Wikis" title="WikiSim: Simulating Knowledge Curation in Structured Wikis"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >WikiSim: Simulating Knowledge Curation in Structured Wikis</span></span> <span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Luna De Ferrari, Stuart Aitken, Jano van Hemert, Igor Goryanin</span>
+</li></ul>
+<p><b><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Want to do an impromptu poster?</span></b>
+</p><p><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >If you've not contacted us before, but you have something you are burning to show, feel free to bring an poster no bigger than A2 in size. We'll show you where to put it. We've got spaces around the edges, and that's what wikis (and this wikiconference) is for: Innovating.</span>
+</p>
+<!-- Saved in parser cache with key ws2008db:pcache:idhash:140-0!1!0!!en!2!edit=0 and timestamp 20090805064603 -->
+<div class="printfooter">
+<span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Retrieved from "</span><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.wikisym.org/ws2008/index.php/Posters"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >http://www.wikisym.org/ws2008/index.php/Posters</span></span><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >"</span></div>
+                        <!-- end content -->
+            <!-- show back to top link only if the body is longer than the window height -->
+            <script type="text/javascript">
+                var winheight = parseInt(document.documentElement.clientHeight)
+                var boheight = parseInt(document.body.scrollHeight)
+                if(winheight <= boheight) {
+                    document.write('<div class="backToTop"><span onclick="return false" style="text-decoration:underline; color:blue" href="#" onclick="window.scrollTo(0,0);return false;" title="Back to the top of the page">&nbsp;</span></div>');
+                }
+            </script>
+            <div class="visualClear"></div>
+        </div>
+	</td>
+	<td class="rnav-column">
+		<div id="news">
+	<div class=""></div>
+	<div class="newssection-header"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >News</span></div>
+	<div align="right" class="newsblock">
+		<img onmousedown="imd(this)" align="left" src="/ws2008/skins/sFEUPMod/images/news/ws2008photo.jpg"/>
+		<div class="newsblock-title"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://wikisym.org/ws2008/index.php/Photos"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Photo Show</span></span></div>
+		<div class="newsblock-date"><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >See the photos of WikiSym2008</span></div>
+		<span class="newsblock-link"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Take a look at the official photos of WikiSym2008. You have photos of your own? Add yours to the pile!.</span></span>
+		<hr />
+		<img onmousedown="imd(this)" align="left" src="/ws2008/skins/sFEUPMod/images/news/ws2008mosaic.jpg"/>
+		<div class="newsblock-title"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://wikisym.org/ws2008/index.php/Who_Is_Attending"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Who has Attended</span></span></div>
+		<div class="newsblock-date"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Are you in the mosaic?</span></div>
+		<span class="newsblock-link"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Show us who you are. Put your photo on the participants mosaic.</span></span>
+		<hr /><br/>
+		<span class="newsblock-link">
+		<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.wikisym.org/ws2008/files/WikiSym2008-.PocketGuide-20080906-1400.pdf">
+		<img onmousedown="imd(this)" src="/ws2008/skins/sFEUPMod/images/news/PDF_Icon_Tiny.jpg"/>
+		<span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;Conference Pocket Guide</span>
+		</span></span><br /><br />		
+		<!--img class="newsthumb" align="left" src="skins/sFEUPMod/images/news/newsthumb.jpg" /-->
+		<div class="newsblock-title"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Conference Program</span></div>
+		<div class="newsblock-date"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >2008-08-22</span></div>
+	<div class="">
+	<img onmousedown="imd(this)" src="/ws2008/skins/sFEUPMod/images/program-map.jpg" class="mapper icolor0000ff iopacity70 noborder" " border="0"/>
+	<map name="program">
+	<!-- monday day 8 --><area shape="rect" coords="59,2,2,15" href="http://www.wikisym.org/ws2008/index.php/Program#day1" />
+	<!-- tuesday day 9 --><area shape="rect" coords="127,2,64,14" href="http://www.wikisym.org/ws2008/index.php/Program#day2" />
+	<!-- wednesday day 10 --><area shape="rect" coords="189,3,131,15" href="http://www.wikisym.org/ws2008/index.php/Program#day3" />
+	<!-- 8 morning 1 openspace all--><area id="osall1" shape="rect" coords="60,18,2,28" href="http://www.wikisym.org/ws2008/index.php/Program#day1_opening" />
+	<!-- 8 morning 1 openspace--><area id="os1" shape="rect" coords="15,29,1,49" href="http://www.wikisym.org/ws2008/index.php/Program#day1_opening" />
+	<!-- 8 morning 1 workshops --><area id="ws1"shape="rect" coords="30,29,17,49" href="http://www.wikisym.org/ws2008/index.php/Program#day1_WIRW" />
+	<!-- 8 morning 1 doctoral space --><area id="ds1" shape="rect" coords="45,29,31,49" href="http://www.wikisym.org/ws2008/index.php/Program#day1_doctoralspace" />
+	<!-- 8 morning 1 tutorial --><area id="tt1" shape="rect" coords="60,29,46,49" href="http://www.wikisym.org/ws2008/index.php/Program#day1_XWiki" />
+	<!-- 8 morning 2 openspace--><area id="os2"shape="rect" coords="16,52,2,83" href="http://www.wikisym.org/ws2008/index.php/Program#day1_openspace-session" />
+	<!-- 8 morning 2 workshops --><area id="ws2" shape="rect" coords="29,52,17,83" href="http://www.wikisym.org/ws2008/index.php/Program#day1_WorkshopsAll" />
+	<!-- 8 morning 2 doctoral space --><area id="ds2" shape="rect" coords="44,52,31,83" href="http://www.wikisym.org/ws2008/index.php/Program#day1_doctoralspace" />
+	<!-- 8 morning 2 tutorial --><area id="tt2" shape="rect" coords="60,53,45,83" href="http://www.wikisym.org/ws2008/index.php/Program#day1_WikiForPublishing" />
+	<!-- 8 afternoon 1 openspace--><area id="os3" shape="rect" coords="16,90,2,122" href="http://www.wikisym.org/ws2008/index.php/Program#day1_openspace-session" />
+	<!-- 8 afternoon 1 workshops --><area id="ws3" shape="rect" coords="30,91,16,122" href="http://www.wikisym.org/ws2008/index.php/Program#day1_WorkshopsAll" />
+	<!-- 8 afternoon 1 doctoral space --><area id="ds3" shape="rect" coords="45,91,31,122" href="http://www.wikisym.org/ws2008/index.php/Program#day1_doctoralspace" />
+	<!-- 8 afternoon 1 tutorial --><area id="tt3" shape="rect" coords="60,91,46,122" href="http://www.wikisym.org/ws2008/index.php/Program#day1_TikiWiki" />
+	<!-- 8 afternoon 2 openspace--><area id="os4" shape="rect" coords="16,125,2,156" href="http://www.wikisym.org/ws2008/index.php/Program#day1_openspace-session" />
+	<!-- 8 afternoon 2 workshops --><area id="ws4" shape="rect" coords="30,125,17,156" href="http://www.wikisym.org/ws2008/index.php/Program#day1_WorkshopsAll" />
+	<!-- 8 afternoon 2 doctoral space --><area id="ds4" shape="rect" coords="44,125,31,156" href="http://www.wikisym.org/ws2008/index.php/Program#day1_doctoralspace" />
+	<!-- 8 afternoon 2 tutorial --><area id="tt4" shape="rect" coords="59,126,46,156" href="http://www.wikisym.org/ws2008/index.php/Program#day1_TiddlyWiki" />
+	<!-- 8 evening openspace --><area id="os5" shape="rect" coords="60,160,2,170" href="http://www.wikisym.org/ws2008/index.php/Program#day1_openspace-evening" />
+	<!-- 8 evening posters welcome --><area id="soc1" shape="rect" coords="60,171,2,181" href="http://www.wikisym.org/ws2008/index.php/Program#day1_posters-welcome" />
+	<!-- 8 evening bofs --><area id="bof8" shape="rect" coords="59,182,2,193" href="http://www.wikisym.org/ws2008/index.php/Program#day1_bofs" />
+	<!-- 9 morning keynote--><area id="kn1" shape="rect" coords="127,18,64,49" href="http://www.wikisym.org/ws2008/index.php/Program#day2_GeorgePLandow" />
+	<!-- 9 morning openspace all--><area id="osall2" shape="rect" coords="127,52,64,62" href="http://www.wikisym.org/ws2008/index.php/Program#day2_openspace-morning" />	
+	<!-- 9 morning openspace --><area id="os6" shape="rect" coords="80,63,64,83" href="http://www.wikisym.org/ws2008/index.php/Program#day2_openspace-session" />
+	<!-- 9 morning papers --><area id="pp1" shape="rect" coords="127,63,80,83" href="http://www.wikisym.org/ws2008/index.php/Program#day2_Millard-etAl" />
+	<!-- 9 afternoon openspace 1--><area id="os7" shape="rect" coords="79,91,64,122" href="http://www.wikisym.org/ws2008/index.php/Program#day2_openspace-session" />
+	<!-- 9 afternoon invited speaker --><area id="kn2" shape="rect" coords="95,91,80,122" href="http://www.wikisym.org/ws2008/index.php/Program#day2_DanIngalls" />
+	<!-- 9 afternoon papers 1--><area id="pp2" shape="rect" coords="127,91,96,122" href="http://www.wikisym.org/ws2008/index.php/Program#day2_Kageura-etAl" />
+	<!-- 9 afternoon openspace 2--><area id="os8" shape="rect" coords="79,125,64,157" href="http://www.wikisym.org/ws2008/index.php/Program#day2_openspace-session" />
+	<!-- 9 afternoon papers 2--><area id="pp3" shape="rect" coords="127,126,80,157" href="http://www.wikisym.org/ws2008/index.php/Program#day2_Adler-etAl-a" />
+	<!-- 9 evening openspace --><area id="os9" shape="rect" coords="127,160,63,170" href="http://www.wikisym.org/ws2008/index.php/Program#day2_openspace-evening" />
+	<!-- 9 evening dinner --><area id="soc2" shape="rect" coords="127,171,64,181" href="http://www.wikisym.org/ws2008/index.php/Program#day2_Social2" />
+	<!-- 9 evening bofs --><area id="bof9" shape="rect" coords="127,182,64,193" href="http://www.wikisym.org/ws2008/index.php/Program#day2_bofs" />
+	<!-- 10 morning keynote--><area id="kn3" shape="rect" coords="190,18,131,49" href="http://www.wikisym.org/ws2008/index.php/Program#day3_StewartNickolas" />
+	<!-- 10 morning openspace all --><area id="osall3" shape="rect" coords="190,52,132,63" href="http://www.wikisym.org/ws2008/index.php/Program#day3_openspace-morning" />
+	<!-- 10 morning openspace --><area id="os10" shape="rect" coords="145,63,132,83" href="http://www.wikisym.org/ws2008/index.php/Program#day3_openspace-session" />
+	<!-- 10 morning green thing --><area shape="rect" coords="160,63,146,83" href="http://www.wikisym.org/ws2008/index.php/Program#day3_AppWikis" />
+	<!-- 10 morning papers --><area id="pp4" shape="rect" coords="189,63,161,83" href="http://www.wikisym.org/ws2008/index.php/Program#day3_Munson" />
+	<!-- 10 afternoon openspace 1--><area id="os11" shape="rect" coords="145,91,131,122" href="http://www.wikisym.org/ws2008/index.php/Program#day3_openspace-session" />
+	<!-- 10 afternoon wikifest 1--><area id="wf1" shape="rect" coords="160,91,145,122" href="http://www.wikisym.org/ws2008/index.php/Program#day3_WikiFest" />
+	<!-- 10 afternoon papers 1--><area id="pp5" shape="rect" coords="190,91,161,122" href="http://www.wikisym.org/ws2008/index.php/Program#day3_Junghans-etAl" />
+	<!-- 10 afternoon openspace 2--><area id="os12" shape="rect" coords="145,126,132,157" href="http://www.wikisym.org/ws2008/index.php/Program#day3_openspace-session" />
+	<!-- 10 afternoon wikifest 2--><area id="wf2" shape="rect" coords="160,125,146,157" href="http://www.wikisym.org/ws2008/index.php/Program#day3_WikiFest" />
+	<!-- 10 afternoon papers 2--><area id="pp6" shape="rect" coords="189,126,161,157" href="http://www.wikisym.org/ws2008/index.php/Program#day3_Kramer-etAl" />
+	<!-- 10 evening openspace --><area id="os13" shape="rect" coords="189,160,131,170" href="http://www.wikisym.org/ws2008/index.php/Program#day3_closing" />
+	<!-- 10 evening closing --><area shape="rect" coords="190,171,131,181" href="http://www.wikisym.org/ws2008/index.php/Program#day3_WikiSym2009"/>
+	
+	<!-- openspace legend --><area shape="rect" id="oslegend" class="icolor000000 iopacity35 forcegroup" rel="os1,os2,os3,os4,os5,os6,os7,os8,os9,os10,os11,os12,os13,osall1,osall2,osall3" coords="31,211,17,225" />
+	<!-- workshops/wikifest legend --><area shape="rect" id="wswflegend" class="icolor000000 iopacity35 forcegroup" rel="ws1,ws2,ws3,ws4,wf1,wf2" coords="31,225,16,240" />
+	<!-- DoctoralSpace / Papers Session legend --><area shape="rect" id="dspplegend" class="icolor000000 iopacity35 forcegroup" rel="ds1,ds2,ds3,ds4,pp1,pp2,pp3,pp4,pp5,pp6"coords="31,240,17,255" />
+	<!-- Tutorials legend --><area shape="rect" id="ttlegend" class="icolor000000 iopacity35 forcegroup" rel="tt1,tt2,tt3,tt4" coords="31,256,17,270" />
+	<!-- Keynote / Invited Speakers legend --><area shape="rect" id="knlegend" class="icolor000000 iopacity35 forcegroup" rel="kn1,kn2,kn3" coords="31,273,17,287" />
+	<!-- Social Events legend --><area shape="rect" id="soclegend" class="icolor000000 iopacity35 forcegroup" rel="soc1,soc2" coords="30,288,17,302" />
+	<!-- bofs legend --><area shape="rect" id="boflegend" class="icolor000000 iopacity35 forcegroup" rel="bof8,bof9" coords="31,303,17,317" />
+	</map>
+	</div>
+		<table border="0px">
+		<tr>
+		<td valign="top">
+			<span class="newsblock-link"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >A detailed version of the Conference Program is now almost closed. However, the OpenSpace program is still</span> <strong><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >open</span></strong><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >, waiting for you to contribute to it, whether before or during the conference. Add your session!!</span><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.wikisym.org/ws2008/index.php/Program#Program_Overview"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; More...</span></span></span><br />
+		</td>
+		</tr>
+		</table>
+		<div class="newsblock-title"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >WikiWalk</span></div>
+		<div class="newsblock-date"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >join now!</span></div>
+		<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.wikisym.org/ws2008/index.php/WikiWalk"><img onmousedown="imd(this)" align="center" src="/ws2008/skins/sFEUPMod/images/news/wikiwalk_thumb.jpg" style="border: solid #aaaaaa 1px;margin-bottom:10px"/></span>
+		<div class="newsblock-title"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Keynote and Invited speakers</span></div>
+		<div class="newsblock-date"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >2008-06-15</span></div>
+		<table border="0px">
+		<tr>
+		<td valign="top">
+			<img onmousedown="imd(this)" class="imageborder" align="left" src="/ws2008/skins/sFEUPMod/images/news/georgelandow.jpg" />
+		</td>
+		<td valign="top">
+			<span class="newsblock-subtitle"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >George P. Landow</span></span><br />
+			<span class="newsblock-text"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Professor of Art and History at Brown University</span></span>
+			<span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+			<span class="newsblock-link"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.wikisym.org/ws2008/index.php/When_a_Wiki_is_not_a_Wiki:_Twenty_Years_of_the_Victorian_Web"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >More...</span></span></span><br />
+		</td>
+		</tr>
+		</table>
+		<table border="0px">
+		<tr>
+		<td valign="top">
+			<img onmousedown="imd(this)" class="imageborder" align="left" src="/ws2008/skins/sFEUPMod/images/news/stewartnickolas.jpg" />
+		</td>
+		<td valign="top" width="100%">
+			<span class="newsblock-subtitle"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Stewart Nickolas</span></span><br />
+			<span class="newsblock-text"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >IBM Emerging Technologies</span></span>
+			<div class="newsblock-link"><span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/Application_Wikis_to_Mashup_Makers_to_Next_Generation_Mashups"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >More...</span></span></div>
+		</td>
+		</tr>
+		</table>
+				<table border="0px">
+		<tr>
+		<td valign="top">
+			<img onmousedown="imd(this)" class="imageborder" align="left" src="/ws2008/skins/sFEUPMod/images/news/daningalls.jpg" />
+		</td>
+		<td valign="top" width="100%">
+			<span class="newsblock-subtitle"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Dan Ingalls</span></span><br />
+			<span class="newsblock-text"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Sun Microsystems Laboratories</span></span>
+			<div class="newsblock-link"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.wikisym.org/ws2008/index.php/The_Lively_Kernel:_A_Wiki_of_Active_Objects"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >More...</span></span></div>
+		</td>
+		</tr>
+		</table>
+		<!--div class="newsblock-link"><span onclick="return false" style="text-decoration:underline; color:blue" href="?title=News">Read more...</span></div-->
+		<!--img class="imageborder" align="left" src="skins/sFEUPMod/images/news/georgelandow.jpg" />
+		<img onmousedown="imd(this)" class="imageborder" align="left" src="skins/sFEUPMod/images/news/stewartnickolas.jpg" />
+		<img onmousedown="imd(this)" class="imageborder" align="left" src="skins/sFEUPMod/images/news/daningalls.jpg" />
+		<div class="newsblock-subtitle">George Landow</div-->
+	</div>
+	<div class="newsblock-title"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Local Information</span></div>
+	<div class="newsblock-date"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >automatically updated</span></div>
+	<div id="wx_module_1126">
+   <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.weather.com/weather/local/POXX0022"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Porto Weather Forecast, Portugal</span></span>
+	</div>
+
+	<script type="text/javascript">
+
+   /* Locations can be edited manually by updating 'wx_locID' below.  Please also update */
+   /* the location name and link in the above div (wx_module) to reflect any changes made. */
+   var wx_locID = 'POXX0022';
+
+   /* If you are editing locations manually and are adding multiple modules to one page, each */
+   /* module must have a unique div id.  Please append a unique # to the div above, as well */
+   /* as the one referenced just below.  If you use the builder to create individual modules  */
+   /* you will not need to edit these parameters. */
+   var wx_targetDiv = 'wx_module_1126';
+
+   /* Please do not change the configuration value [wx_config] manually - your module */
+   /* will no longer function if you do.  If at any time you wish to modify this */
+   /* configuration please use the graphical configuration tool found at */
+   /* https://registration.weather.com/ursa/wow/step2 */
+   var wx_config='SZ=180x150*WX=FHW*LNK=SSNL*UNT=C*BGC=f8f6e7*MAP=null|null*DN=wikisym.org*TIER=0*PID=1073948428*MD5=414adff5ffb9fa24a095de52f58ab16b';
+
+   document.write('<scr'+'ipt src="'+document.location.protocol+'//wow.weather.com/weather/wow/module/'+wx_locID+'?config='+wx_config+'&proto='+document.location.protocol+'&target='+wx_targetDiv+'"></scr'+'ipt>');  
+	</script>
+	<div class="newssection-header"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Poster / Badge</span></div>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/files/poster_wikisym_a2.jpg"><img onmousedown="imd(this)" align="center" src="/ws2008/skins/sFEUPMod/images/news/posterbadge3.jpg" style="border: solid #aaaaaa 1px"/></span>
+	<!-- 
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.wikisym.org/ws2008/index.php/Promote"><img onmousedown="imd(this)" align="center" style="margin-top:10px" src="/ws2008/skins/sFEUPMod/images/news/promote.jpg" /></span>
+	-->
+</div>
+	</td>
+	</tr>
+	<tr>
+	<td></td>
+	<td class="feupfooter">
+		<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fe.up.pt/"><img onmousedown="imd(this)" src="/ws2008/skins/sFEUPMod/images/feup_footer.jpg" alt="FEUP / UPORTO" /></span>
+	</td>
+	<td align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.inescporto.pt"><img onmousedown="imd(this)" class="sponsor-logo" src="/ws2008/skins/sFEUPMod/images/sponsors/inesc-logo.png"/></span></td>
+	</tr>
+	</table>
+    </div> <!-- end of FEUPMod-content DIV -->
+    <!-- end of Main Content -->
+
+
+    </div> <!-- end of FEUPMod-page DIV -->
+	
+	
+    <!-- =================== end of FEUPMod-page =================== -->
+
+	<!-- =================== FEUPMod-page-actions =================== -->
+    <!-- FEUPMod-page-actions -->
+    <div id="FEUPMod-page-actions">
+        <div id="FEUPMod-content-actions">
+        <ul>
+			                        <li id="ca-nstab-main"
+               class="selected"               ><span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/Posters"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Article</span></span>
+               <span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >|</span></li>
+               <li id="ca-talk"
+               class="new"               ><span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php?title=Talk:Posters&amp;action=edit"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Discussion</span></span>
+               <span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >|</span></li>
+               <li id="ca-viewsource"
+                              ><span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php?title=Posters&amp;action=edit"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >View source</span></span>
+               <span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >|</span></li>
+               <li id="ca-history"
+                              ><span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php?title=Posters&amp;action=history"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >History</span></span>
+               </li>
+               			   <li><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="?title=Special:Recentchanges"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Recent Changes</span></span></li>
+        </ul>
+        </div>
+    </div> <!-- end of FEUPMod-page-actions DIV -->
+    
+	<!-- =================== end of FEUPMod-page-actions =================== -->
+    
+
+    <!-- =================== FEUPMod-page-footer =================== -->
+    <div id="FEUPMod-page-footer">
+
+       <!-- FEUPMod-footer -->
+        <div id="FEUPMod-footer">
+            <div id="FEUPMod-f-message">
+                <span id="f-lastmod"> <span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >This page was last modified 22:34, 7 September 2008.</span></span>            </div>
+            <ul id="FEUPMod-f-list">
+                <li id="f-about"><span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/WikiSym_2008:About" title="WikiSym 2008:About"><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >About WikiSym 2008</span></span> <span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </li>                <li id="f-disclaimer"><span onclick="return false" style="text-decoration:underline; color:blue" href="/ws2008/index.php/WikiSym_2008:General_disclaimer" title="WikiSym 2008:General disclaimer"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Disclaimers</span></span> <span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </li>                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://mediawiki.org"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Powered by MediaWiki</span></span> <span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://sicc.fe.up.pt/org/dci/DC/Design_comunicacao.htm"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Design</span>

@@ -1,0 +1,1159 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/12/annotation/annotated_repository/http+^^acmgis08.cs.umn.edu^papers.html_2009-08-05__14-21-17.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/12/annotation/annotated_repository/http+^^acmgis08.cs.umn.edu^papers.html_2009-08-05__14-21-17.yaml created on Thu Aug 13 13:57:22 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<title>ACM GIS 2008</title>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<link rel="stylesheet" type="text/css" href="style.css" media="screen" />
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<div id="wrap">
+
+<div id="header">
+
+<table class="main" border="0" align="center" cellpadding="0" cellspacing="0">
+<tr>
+
+  <td width=10%>
+    	<img onmousedown="imd(this)" style="height: 95px;" src="img/acmlogo.gif" alt="ACM LOGO" align=center border="0"> 	
+<!--<img onmousedown="imd(this)" style="height: 95px;" src="img/SigSpatial-Color.png" alt="ACM LOGO" align=center border="0"> -->
+  </td>
+
+  <td width=80% align="center">
+    <center>
+	<h1>
+	<span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >16th ACM SIGSPATIAL International Conference on</span>
+	<br>
+	<span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Advances in Geographic Information Systems</span>
+	<br>
+	<span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >(ACM GIS 2008)</span>
+	</h1>
+    </center>
+  </td>
+
+  <td width=10%>
+  
+  </td>
+
+</tr>
+</table>
+
+</div>
+
+<div id="menu">
+<table style="border-collapse: collapse;" height="37" width="100%">
+        <tbody>
+          <tr>
+            <td align="center">
+            <span onclick="return false" style="text-decoration:underline; color:blue" class="menulink" href="index.html"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span>
+            </td>
+
+            <td align="center">
+            <span onclick="return false" style="text-decoration:underline; color:blue" class="menulink" href="cfp.html"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Call for</span><br><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Papers</span></span>
+            </td>
+
+            <td align="center">
+            <span onclick="return false" style="text-decoration:underline; color:blue" class="menulink" href="pc.html"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Organization</span><br><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Committee</span></span>
+            </td>
+
+            <td align="center">
+            <span onclick="return false" style="text-decoration:underline; color:blue" class="menulink" href="submission.html"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span><br><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Submission</span></span>
+            </td>
+
+            <td align="center">
+            <span onclick="return false" style="text-decoration:underline; color:blue" class="menulink" href="papers.html"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Accepted</span><br><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Papers</span></span>
+            </td>
+
+            <td align="center">
+            <span onclick="return false" style="text-decoration:underline; color:blue" class="menulink" href="registration.html"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span>
+            </td>
+
+            <td align="center">
+            <span onclick="return false" style="text-decoration:underline; color:blue" class="menulink" href="venue_accomodations.html"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Venue and</span><br><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Accommodations</span></span>
+            </td>
+
+            <td align="center">
+            <span onclick="return false" style="text-decoration:underline; color:blue" class="menulink" href="program.html"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span>
+            </td>
+
+          </tr>
+        </tbody>
+      </table>
+</div>
+
+<table class="main" border="0" align="center" cellpadding="0" cellspacing="0">
+<tr>
+<td id="left">
+
+<h2><u><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></u></h2>
+<h3><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >For all submissions, i.e., Research, Demo, and Ph.D. showcases</span></h3>
+
+<ul>
+<li><b><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Abstract Submission</span></b></li>
+<li><b><font color="red"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >[Extended]</span></font></b></li>
+<li><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Jun. 17, 2008, 9:00 PM PST</span></li>
+<li><b><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Full Paper Submission</span></b></li>
+<li><b><font color="red"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >[Extended]</span></font></b></li>
+<li><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Jun. 24, 2008, 9:00 PM PST</span></li>
+<li><b><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Notification of Acceptance</span></b></li>
+<li><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Aug. 25, 2008</span></li>
+<li><b><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Camera-Ready Copy</span></b></li>
+<li><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Sept. 7, 2008</span></li>
+<li><b><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Conference Date</span></b></li>
+<li><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >November 5-7, 2008</span></li>
+</ul>
+<h2><u><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Chairs</span></u></h2>
+<ul>
+	<li><b><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >General Chairs</span></b></li>
+ 	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.umd.edu/%7Ehjs/"><i><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Hanan Samet</span></i></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://infolab.usc.edu/Shahabi/index.html"><i><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Cyrus Shahabi</span></i></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.uic.edu/%7Ewolfson/"><i><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Ouri Wolfson</span></i></span></li>
+	<li><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></li>
+    <li><b><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Program Chair</span></b></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.purdue.edu/homes/aref/"><i><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Walid G. Aref</span></i></span></li>
+	<li><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></li>
+	<li><b><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Program Co-chairs</span></b></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www-users.cs.umn.edu/%7Emokbel/"><i><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Mohamed Mokbel</span></i></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cise.ufl.edu/%7Emschneid"><i><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Markus Schneider</span></i></span></li>
+</ul>
+
+<h2><u><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Corporate Sponsors</span></u></h2>
+
+<div style="border:1px solid gray; background: white; padding: 0px; 5px 5px 5px 5px">
+<center>
+<ul>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.esri.com/"><img onmousedown="imd(this)"  alt="ESRI" src="img/esri-logo.jpg" border="0"></span></li>
+	<li><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></li>
+	<!-- Goole Logo: 0.3985 * width -->
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.google.com/"><img onmousedown="imd(this)" style="width: 123px; height: 49px;" alt="Google" src="img/google.gif" border="0"></span></li>
+	<li><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.microsoft.com/"><img onmousedown="imd(this)" style="width: 123px; height: 23px;" alt="Microsoft" src="img/microsoft.jpg" border="0"></span></li>
+	<li><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ornl.gov/"><img onmousedown="imd(this)" style="width: 119px; height: 61px;" alt="Oak Ridge National Laboratory" src="img/ornl.jpg" border="0"></span></li>
+</ul>
+</center>
+</div>
+
+</td>
+
+<td id="right">
+
+<center>
+<h2><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >ACM GIS 2008 Accepted Papers</span></h2>
+</center>
+
+<br />
+
+<span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >ACM GIS 2008 has accepted:</span>
+<br />
+<span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >38</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#researchpapers"><b><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Research Papers</span></b></span>
+<br />
+<span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >37</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#posterpapers"><b><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Poster Papers</span></b></span>
+<br />
+<span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >8</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#phdshowcases"><b><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Ph.D. Showcases</span></b></span>
+<br />
+<span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >13</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#demonstrations"><b><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Demonstrations</span></b></span>
+<br /><br />
+<span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Camera-ready instructions can be found by clicking</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="camera_ready.html"><b><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >here</span></b></span>
+
+<br /><br />
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="researchpapers"></span>
+<div style="border:1px solid gray; background: white; padding: 0px; 5px 5px 5px 5px">
+<center>
+<h3><font color="gray"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >List of Accepted Research Papers</span></font></h3>
+</center>
+</div>
+
+<div style="border:1px solid gray; background: white; padding: 0px; 5px 5px 5px 5px">
+
+<ul>
+
+<li>
+<b><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Dual-heap kNN: k-nearest neighbor search for spatial data retrieval in embedded DBMS</span></b><br />
+<span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Hideki Hayashi (Hitachi Central Research Laboratory, Japan),
+Daisuke Ito (Hitachi Central Research Laboratory, Japan),
+Masaaki Tanizaki (Hitachi Central Research Laboratory, Japan),
+Kohji Kimura (Hitachi Software Division, Japan),
+Hisanori Kajiyama (Hitachi Software Engineering Co, Japan)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Algorithms for Reverse Proximity Query Problems</span></b><br />
+<span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Yokesh Kumar (University of Minnesota at Twin Cities, USA),
+Ravi Janardan (University. of Minnesota at Twin Cities, USA),
+Prosenjit Gupta (International Institute of Information Technology, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Detecting Basic Topological Changes in Sensor Networks by Local Aggregation</span></b><br />
+<span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Jixiang Jiang (University of Maine, USA),
+Michael Worboys (University of Maine, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Sparse Terrain Pyramids</span></b><br />
+<span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Kenneth Weiss (University of Maryland at College Park, USA),
+Leila De Floriani (University of Genova, Italy)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Autonomous Navigation of Mobile Agents Using RFID-Enabled Space Partitions</span></b><br />
+<span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Muhammad Atif Mehmood (University of Melbourne, Australia),
+Lars Kulik (University of Melbourne, Australia),
+Egemen Tanin (University of Melbourne, Australia)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >The Multi-Rule Partial Sequenced Route Query</span></b><br />
+<span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Haiquan Chen (Auburn University, USA), Wei-Shinn Ku (Auburn University, USA),
+Min-Te Sun (National Central University, Taiwan),
+Roger Zimmermann (National University of Singapore, Singapore)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Scalable Processing of Trajectory-Based Queries in Space-Partitioned Moving Objects Databases</span></b><br />
+<span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Ralph Lange (Universit&#228t Stuttgart, Germany),
+Frank D&#252rr (Universit&#228t Stuttgart, Germany),
+Kurt Rothermel (Universit&#228t Stuttgart, Germany)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Fast and Extensible Building Modeling from Airborne LiDAR Data</span></b><br />
+<span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Qian-Yi Zhou (University of Southern California, USA),
+Ulrich Neumann (University of Southern California, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Density based Co-Location Pattern Discovery</span></b><br />
+<span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Xiangye Xiao (Hong Kong University of Science and Technology, Hong Kong),
+Xing Xie (Microsoft Research Asia, China),
+Qiong Luo (Hong Kong University of Science and Technology, Hong Kong),
+Wei-Ying Ma (Microsoft Research Asia, China)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Piet-QL: a Query Language for GIS-OLAP Integration</span></b><br />
+<span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Leticia Gomez (Instituto Tecnologico de Buenos Aires, Argentina),
+Alejandro Vaisman (Universidad de Buenos Aires, Argentina and University of Hasselt, Belgium),
+Sebastian Zich (Universidad de Buenos Aires, Argentina)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >A conceptual spatial model supporting topologically-consistent multiple representations</span></b><br />
+<span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Donatella Gubiani (University of Udine, Italy),
+Angelo Montanari (University of Udine, Italy)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Finding Regional Co-Location Patterns for Sets of Continuous Variables in Spatial Datasets</span></b><br />
+<span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Christoph Eick (University of Houston, USA),
+Rachana Parmar (University of Houston, USA),
+Wei Ding (University of Houston, USA),
+Tomasz Stepinski (Lunar and Planetary Institute, Houston, USA),
+Jean-Phillippe Nicot (Bureau of Economic Geology, University of Texas, Austin, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Embedding and Extending GIS for Exploratory Analysis of Large-Scale Species Distribution Data</span></b><br />
+<span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Jianting Zhang (The City College of the City University of New York, USA),
+Le Gruenwald (University of Oklahoma, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >An ACS cooperative learning approach for route finding in natural environment</span></b><br />
+<span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >David Brosset (Naval Academy Research Institute, France),
+Christophe Claramunt (Naval Academy Research Institute, France),
+Eric Saux (Naval Academy Research Institute, France)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Parallel ODETLAP for Terrain Compression and Reconstruction</span></b><br />
+<span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Jared Stookey (Rensselaer Polytechnic Institute, USA),
+Zhongyi Xie (Rensselaer Polytechnic Institute, USA),
+W. Randolph Franklin (Rensselaer Polytechnic Institute, USA),
+Dan Tracy (Rensselaer Polytechnic Institute, USA),
+Barb Cutler (Rensselaer Polytechnic Institute, USA),
+Marcus V. A. Andrade (Universidade Federal de Vi&#231osa, Brazil)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Spatial Queries in Disconnected Mobile Networks</span></b><br />
+<span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Xinjuan Zhu (Xian Polytechnic University, China),
+Bo Xu (University of Illinois at Chicago, USA),
+Ouri Wolfson (University of Illinois at Chicago, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Validation of Vector Data using Oblique Images</span></b><br />
+<span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Pragyana Mishra (Microsoft Corporation, USA),
+Eyal Ofek (Microsoft Corporation, USA),
+Gur Kimchi (Microsoft Corporation, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Low-Cost Orthographic Imagery</span></b><br />
+<span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Peter Pesti (Georgia Tech, USA),
+Jeremy Elson (Microsoft Research, USA),
+Jon Howell (Microsoft Research, USA),
+Drew Steedly (Microsoft Research, USA),
+Matt Uyttendaele (Microsoft Research, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Mining User Similarity Based on Location History</span></b><br />
+<span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Quannan Li (Microsoft Research Asia, China),
+Yu Zheng (Microsoft Research Asia, China),
+Xing Xie (Microsoft Research Asia, China),
+Yukun Chen (Microsoft Research Asia, China),
+Wenyu Liu (Huazhong University of Science and Technology, China)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Feed-links for Network Extensions</span></b><br />
+<span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Boris Aronov (Polytechnic University, New York, USA), Kevin Buchin (Utrecht University, The Netherlandd), Maike Buchin (Utrecht University, The Netherlands), Bart Jansen (Utrecht University, The Netherlands), Tom de Jong (Utrecht University, The Netherlands), Marc van Kreveld (Utrecht University, The Netherlands), Maarten L&#246ffler (Utrecht University, The Netherlands), Jun Luo (Utrecht University, The Netherlands), Rodrigo I. Silveira (Utrecht University, The Netherlands), Bettina Speckmann (TU Eindhoven, The Netherlands)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Towards a Geometric Interpretation of Double-Cross Matrix-based Similarity of Polylines</span></b><br />
+<span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Bart Kuijpers (Hasselt University & Transnational University of Limburg, Belgium),
+Bart Moelans (Hasselt University & Transnational University of Limburg, Belgium)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Measuring Geographic Information on the Web</span></b><br />
+<span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Robert Pasley (University of Sheffield, UK),
+Paul Clough (University of Sheffield, UK),
+Florian Twaroch (Cardiff University, UK),
+Ross Purves (University of Z&#252rich, Switzerland)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Continuous Proximity Monitoring in Road Networks</span></b><br />
+<span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Hans-Peter Kriegel (Ludwig-Maximilinas University Munich, Germany),
+Peer Kr&#246ger (Ludwig-Maximilinas University Munich, Germany),
+Matthias Renz (Ludwig-Maximilinas University Munich, Germany)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Similarity-Based Prediction of Travel Times for Vehicles Traveling on Known Routes</span></b><br />
+<span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Dalia Tiesyte (Aalborg University, Denmark),
+Christian S. Jensen (Aalborg University, Denmark)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >An Operation-Independent Approach to Extend 2D Spatial Operations to 3D and Moving Objects</span></b><br />
+<span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Farid Karimipour (Technical University of Vienna, Austria),
+Andrew Frank (Technical University of Vienna, Austria),
+Mahmoud Reza Delavar (University of Tehran, Iran)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Studying (Non-Planar) Road Networks Through an Algorithmic Lens</span></b><br />
+<span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >David Eppstein (University of California, at Irvine, USA),
+Michael Goodrich (University of California at Irvine, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Combining 3-D geovisualization with force feedback driven user interaction</span></b><br />
+<span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Adam Faeth (Iowa State University, USA),
+Mike Oren (Iowa State University, USA),
+Chris Harding (Iowa State University, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >An Inconsistency Tolerant Approach to Querying Spatial Databases</span></b><br />
+<span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >M. Andrea Rodr&#237guez (Universidad de Concepci&#243n, Chile),
+Leopoldo Bertossi (University of Carleton, Canada),
+M&#243nica Caniupan (Universidad del Biobio, Chile)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Should SDBMS support the Join Index?: A Case study from spatial statistical analysis</span></b><br />
+<span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Pradeep Mohan (University of Minnesota at Twin Cities, USA), Shashi Shekhar (University of Minnesota at Twin Cities, USA), Ned Levine (Ned Levine and Associates, Houston, USA), Ronald Wilson (National Institute of Justice, USA), Betsy George (University of Minnesota at Twin Cities, USA), Mete Celik (University of Minnesota at Twin Cities, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Integrating Gazetteers and Remote Sensed Imagery</span></b><br />
+<span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Shawn Newsam (University of California at Merced, USA),
+Yi Yang (University of California at Merced, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Heuristic Algorithms for Route-Search Queries over Geographical Data</span></b><br />
+<span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Yaron Kanza (Technion,  Israel),
+Eliyahu Safra (ESRI, USA),
+Yehoshua Sagiv (The Hebrew University,  Israel),
+Yerach Doytsher (Technion, Israel)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Detecting Single File Movement</span></b><br />
+<span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Kevin Buchin (Utrecht University, The Netherlands),
+Maike Buchin (Utrecht University, The Netherlands),
+Joachim Gudmundsson (NICTA, Sydney, Australia)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >A Topology-based Semantic Location Model for Indoor Applications</span></b><br />
+<span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Dandan Li (Hong Kong University of Science and Technology, Hong Kong),
+Dik Lun Lee (Hong Kong University of Science and Technology, Hong Kong)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Qualitative Geocoding of Persistent Web Page</span></b><br />
+<span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Albert Angel (University of Toronto, Canada),
+Alexandros Efentakis (RA Computer Technology Institute, Greece),
+Chara Lontou (National Technical University of Athens, Greece),
+Dieter Pfoser (Research Academic Computer Technology Institute, Greece)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >SenseWeb: Sharing and Exploring Sensor Streams over Geocentric Interfaces</span></b><br />
+<span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Aman Kansal (Microsoft Research, USA),
+Liqian Luo (Microsoft Research, USA),
+Suman Nath (Microsoft Research, USA),
+Feng Zhao (Microsoft Research, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >NewsStand: A New View on News</span></b><br />
+<span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Benjamin Teitler (University of Maryland at College Park, USA),
+Michael Lieberman (University of Maryland at College Park, USA),
+Daniele Panozzo (University of Maryland at College Park, USA),
+Jagan Sankaranarayanan (University of Maryland at College Park, USA),
+Hanan Samet (University of Maryland at College Park, USA),
+Jon Sperling (Department of Housing and Urban Development, Office of Policy Development and Research, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Extraction of Road Intersection Position, Connectivity, and Orientation from Raster Maps</span></b><br />
+<span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Yao-Yi Chiang (University of Southern California, USA),
+Craig Knoblock (University of Southern California, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Using Tomography for Privacy-Preserving Ubiquitous Sensing</span></b><br />
+<span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Stacy Patterson (University of California at Santa Barbara, USA),
+Bassam Bamieh (University of California at Santa Barbara, USA),
+Amr El Abbadi (University of California at Santa Barbara, USA)</span>
+</li>
+
+</ul>
+
+</div>
+
+<br /><br />
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="posterpapers"></span>
+<div style="border:1px solid gray; background: white; padding: 0px; 5px 5px 5px 5px">
+<center>
+<h3><font color="gray"><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >List of Accepted Poster Papers</span></font></h3>
+</center>
+</div>
+
+<div style="border:1px solid gray; background: white; padding: 0px; 5px 5px 5px 5px">
+
+<ul>
+
+<li>
+<b><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Search of Moving Objects on a Planar Graph</span></b><br />
+<span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Thuy Le (University of New Brunswick, Canada),
+Bradford Nickerson (University of New Brunswick, Canada)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Geometric Algorithms on an Ellipsoid Earth Model</span></b><br />
+<span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Michael Kallay (Microsoft Corporation, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Approaches for Determining the Geographic Footprint of Arbitrary Terms for Retrieval and Visualization</span></b><br />
+<span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Andreas Henrich (University of Bamberg, Germany),
+Volker L&#252decke (University of Bamberg, Germany),
+Daniel Blank (University of Bamberg, Germany)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Bridging the gap between geospatial resource providers and model developers</span></b><br />
+<span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Gilberto Zonta Pastorello Jr (IC-UNICAMP, Brazil), Rodrigo Dias Arruda Senra (IC-UNICAMP, Brazil), Claudia Bauzer Medeiros (IC-UNICAMP, Brazil)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >An Online Approach Based on Localized Weighted Learning for Short-term Traffic Flow Prediction</span></b><br />
+<span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Meng Shuai (Beijing University, China), Wen Pu (Beijing University, China), Kunqing Xie (Beijing University, China), Guojie Song (Beijing University, China), Xiujun Ma (Beijing University, China)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Privacy-Preserving Trajectory Collection</span></b><br />
+<span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Gyozo Gidofalvi (Uppsala University, Sweden), Xuegang Huang (Aalborg University, Denmark), Torben Bach Pedersen (Aalborg University, Denmark)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Discovering Controlling Factors of Geospatial Variables</span></b><br />
+<span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Tomasz Stepinski (Lunar and Planetary Institute, USA), Wei Ding (University of Massachusetts at Boston, USA), Christoph Eick (University of Houston, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >An Automatic Approach to Integrate Routing-relevant Information from Different Resources</span></b><br />
+<span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Meng Zhang (Technical University of Munich, Germany), Lu Liu (Technical University of Munich, Germany), Hongbo Gong (Technical University of Munich, Germany), Liqiu Meng (Technical University of Munich, Germany)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Geo-ontology Enrichment through Reverse Engineering</span></b><br />
+<span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Guillermo Hess (UFRGS, Brazil), Cirano Iochpe (UFRGS, Brazil)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Snapshot Location-based Query Processing on Moving Objects in Road Networks</span></b><br />
+<span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Haojun Wang (University of Southern California, USA), Roger Zimmermann (National University of Singapore, Singapore)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Content-based Ontology Matching for GIS Datasets</span></b><br />
+<span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Jeffrey Partyka (University of Texas at Dallas, USA), Neda Alipanah (University of Texas at Dallas, USA), Latifur Khan (University of Texas at Dallas, USA), Bhavani Thuraisingham (University of Texas at Dallas, USA), Shashi Shekhar (University of Minnesota at Twin Cities, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >The DAEDALUS Framework: Progressive Querying and Mining of Movement Data</span></b><br />
+<span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Riccardo Ortale (ICAR-CNR, Italy), Ettore Ritacco (ICAR-CNR, Italy), Nikos Pelekis (University of Piraeus, Italy), Roberto Trasarti (ISTI-CNR, Italy), Gianni Costa (ICAR-CNR, Italy), Fosca Giannotti (ISTI-CNR, Italy), Giuseppe Manco (ICAR-CNR, Italy), Chiara Renso (ISTI-CNR, Italy), Yannis Theodoridis (University of Piraeus, Greece)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Morphological Analysis of Terrains Based on Discrete Curvature and Distortion</span></b><br />
+<span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Mohammed Mostefa Mesmoudi (University of Paris, France), Leila De Floriani (University of Genova, Italy), Paola Magillo (University of Genova, Italy)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Applying Hierarchical Graphs to Pedestrian Indoor Navigation</span></b><br />
+<span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Edgar-Philipp Stoffel (Ludwig-Maximilians University Munich, Germany),
+Korbinian Schoder (Ludwig-Maximilians University Munich, Germany),
+Hans J&#252rgen Ohlbach (Ludwig-Maximilians University Munich, Germany)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Composing Geoinformatics Workflows with User Preferences</span></b><br />
+<span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >David Chiu (Ohio State University, USA), Sagar Deshpande (Ohio State University, USA), Gagan Agrawal (Ohio State University, USA), Rongxing Li (Ohio State University, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Path Planning on a Compressed Terrain</span></b><br />
+<span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Tracy (Rensselaer Polytechnic Institute, USA), W. Randolph Franklin (Rensselaer Polytechnic Institute, USA), Barbara Cutler (Rensselaer Polytechnic Institute, USA), Franklin Luk (Rensselaer Polytechnic Institute, USA), Marcus Andrade (Federal University of Vicosa, USA), Metin Inanc (Rensselaer Polytechnic Institute, USA), Zhongyi Xie (Rensselaer Polytechnic Institute, USA), Jake Stookey (Rensselaer Polytechnic Institute, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Computing Information Gain for Spatial Data Support</span></b><br />
+<span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Tao Hong (University of Nebraska at Lincoln, USA), Ashok Samal (University of Nebraska at Lincoln, USA), Leen-Kiat Soh (University of Nebraska at Lincoln, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Data Modeling and Querying System for Multi-Dimensional Spatial Data</span></b><br />
+<span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Wei Li (University of Massachusetts at Lowell, USA), Cindy Chen (University of Massachusetts at Lowell, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Two-Site Voronoi Diagrams in Geographic Networks</span></b><br />
+<span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Matthew Dickerson (Middlebury College, USA), Michael Goodrich (University of California at Irvine, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Data Mining for Visual Exploration and Detection of Ecosystem Disturbances</span></b><br />
+<span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Haibin Cheng (Michigan State University, USA), Pang-Ning Tan (Michigan State University, USA), Christopher Potter (NASA Ames Research Center, USA), Steven Klooster (California State University at Monterey Bay, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Charting New Ground: Modeling User Behavior in Interactive Geovisualization</span></b><br />
+<span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >David Wilson (University of North Carolina at Charlotte, USA), Heather Richter Lipford (University of North Carolina at Charlotte, USA), Erin Carroll (University of North Carolina at Charlotte) , USA, Pamela Karr (University of North Carolina at Charlotte, USA), Nadia Najjar (University of North Carolina at Charlotte, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Quantifying Spatial Prepositions: an Experimental Study</span></b><br />
+<span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Mark M. Hall (Cardiff University, UK), Christopher B. Jones (Cardiff University, UK)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Multigranular spatio-temporal models: implementation challenges</span></b><br />
+<span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Elena Camossi (University College Dublin, Ireland), Michela Bertolotto (University College Dublin, Ireland), Elisa Bertino (Purdue University, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >An ontology framework for quality of geographic information</span></b><br />
+<span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Richard Onchaga (Internation Institute for Geo-Information and Earth Observation (ITC), The Netherlands), Ing Widya (University of Twente, The Netherlands), Javier Morales (Internation Institute for Geo-Information and Earth Observation (ITC) , The Netherlands), L.J.M. Nieuwenhuis (University of Twente, The Netherlands)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Mobile Continuous Nearest Neighbor Queries on Air</span></b><br />
+<span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >KwangJin Park (Wonkwang University, Korea), Patrick Valduriez (INRIA and LINA, France), Hyunseung Choo (Sungkyunkwan University, Korea)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >A Situation-centric Approach to Meteorological Services in the SITUMET Platform</span></b><br />
+<span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Stefan Pfennigschmidt ((Fraunhofer Institute for Software and Systems Engineering, Germany),,
+Agn&#232s Voisard (Fraunhofer Institute for Software and Systems Engineering and Free University Berlin, Germany)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Pedestrian Flow Prediction in Extensive Road Networks using Biased Observational Data</span></b><br />
+<span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Simon Scheider (University of M&#252nster, Germany), Michael May (Fraunhofer IAIS Schloss Birlinghoven, Germany), Roberto R&#246sler (Fraunhofer IAIS Schloss Birlinghoven, Germany), Daniel Schulz (Fraunhofer IAIS Schloss Birlinghoven, Germany), Dirk Hecker (Fraunhofer IAIS Schloss Birlinghoven, Germany)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Dynamic Travel Time Provision for Road Networks</span></b><br />
+<span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Dieter Pfoser (Research Academic Computer Technology Institute, Greece), Sotiris Brakatsoulas (Research Academic Computer Technology Institute , Greece), Petra Brosch (Technical University of Vienna, Austria), Martina Umlauft (Technical University of Vienna, Austria), Nektaria Tryfona (TALENT, Greece), Giorgos Tsironis (TALENT, Greece)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Clustering of German Municipalities Based on Mobility Characteristics</span></b><br />
+<span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Andrea Zanda (Universidad Polit&#233cnica de Madrid, Spain), Christine K&#246rner (Fraunhofer IAIS, Germany), Fosca Giannotti (ISTI-CNR, Italy), Daniel Schulz (Fraunhofer IAIS, Germany), Michael May (Fraunhofer IAIS, Germany)</span>
+
+</li>
+
+<li>
+<b><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Towards Provenance-Aware Geographic Information Systems</span></b><br />
+<span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Shaowen Wang (University of Illinois at Urbana-Champaign, USA), Anand Padmanabhan (University of Illinois at Urbana-Champaign, USA), James Myers (University of Illinois at Urbana-Champaign, USA), Wenwu Tang (University of Illinois at Urbana-Champaign, USA), Yong Liu (University of Illinois at Urbana-Champaign, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Indexing planar point quartets via geometric attributes</span></b><br />
+<span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Charles B. Cranston (University of Maryland at College Park, USA), Hanan Samet (University of Maryland at College Park, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Tracking deformable 2D objects in wireless sensor networks</span></b><br />
+<span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Guang Jin (University of Maine, USA), Silvia Nittel (University of Maine, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Geospatial information integration based on the conceptualization of geographic domain</span></b><br />
+<span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Miguel Torres (IPN, Mexico), Rolando Quintero (IPN, Mexico), Serguei Levachkine (IPN, Mexico), Marco Moreno (IPN, Mexico), Giovanni Guzman (IPN, Mexico)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >GEDMWA: Geospatial Exploratory Data Mining Web Agent</span></b><br />
+<span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Edward Pultar (University of California at Santa Barbara, USA), Martin Raubal (University of California at Santa Barbara, USA), Michael Goodchild (University of California at Santa Barbara, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Optimal Incremental Multi-step Nearest-Neighbor Search</span></b><br />
+<span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Ming Zhang (University of Calgary, Canada), Reda Alhajj (University of Calgary, Canada), Jon Rokne (University of Calgary, Canada)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Selective Data Replication for Distributed Geographical Data Sets</span></b><br />
+<span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Xuan Gu (University of Canterbury, New Zealand), Richard Pascoe (University of Canterbury, New Zealand)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >Geographical Analysis of hierarchical business structures by interactive drill down</span></b><br />
+<span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Klaus Boehm (University of Applied Sciences at Mainz, Germany), Eva Daub (University of Applied Sciences at Mainz, Germany)</span>
+</li>
+
+</ul>
+
+</div>
+
+
+<br /><br />
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="phdshowcases"></span>
+<div style="border:1px solid gray; background: white; padding: 0px; 5px 5px 5px 5px">
+<center>
+<h3><font color="gray"><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >List of Accepted Ph.D. Showcases</span></font></h3>
+</center>
+</div>
+
+<div style="border:1px solid gray; background: white; padding: 0px; 5px 5px 5px 5px">
+
+<ul>
+
+<li>
+<b><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Enriching the Spatial Reasoning System RCC8</span></b><br />
+<span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >Ahed Alboody  (Universit&#233  Paul Sabatier, France) (Ph.D. Student), Jordi Inglada (Centre National d&#180Etudes Spatiales, France) (Advisor), Florence Sedes (Universit&#233 Paul Sabatier, France)  (Advisor)</span>
+
+</li>
+
+<li>
+<b><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >Query Optimization for Spatio-temporal Data Stream Management Systems</span></b><br />
+<span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Hicham G. Elmongui (Purdue University, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Specification of a Framework for Semantic Annotation of Geospatial Data on the Web</span></b><br />
+<span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Carla Macario (IC-UNICAMP, Brazil) (Ph.D. Student), Claudia Medeiros (IC-UNICAMP, Brazil) (Advisor)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Change Analysis in Spatial Datasets by Interestingness Comparison</span></b><br />
+<span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Vadeerat Rinsurongkawong (University of Houston, USA) (Ph.D. Student), Christoph Eick (University of Houston, USA) (Advisor)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >Data mining of Maps and their Automatic Region/Time/Theme Classification</span></b><br />
+<span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Judith Gelernter (Carnegie Mellon University, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Mapping of Large Magnitude Discontinuous Sea Ice Motion</span></b><br />
+<span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Mani Thomas (University of Delaware, USA) (Ph.D. Student), Chandra Kambhamettu (University of Delaware, USA) (Primary Advisor), Cathleen Geiger (University of Delaware, USA) (Secondary Advisor)</span>
+
+</li>
+
+<li>
+<b><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Evaluating Hydrology Preservation of Simplified Terrain Representations</span></b><br />
+<span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >Christopher Stuetzle (Rensselaer Polytechnic Institute, USA) (Ph.D. Student), W. Randolph Franklin (Rensselaer Polytechnic Institute, USA) (Advisor), Barbara Cutler (Rensselaer Polytechnic Institute, USA) (Advisor), Jonathan Muckell (Rensselaer Polytechnic Institute, USA) (Collaborator), Marcus Andrade (Univ. Fed. Vicosa, Brazil, and Rensselaer Polytechnic Institute, USA) (Collaborator), Jared Stookey (Rensselaer Polytechnic Institute, USA) (Collaborator), Metin Inanc (Rensselaer Polytechnic Institute, USA) (Collaborator), Zhongyi Xie (Rensselaer Polytechnic Institute, USA) (Collaborator)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >pRPL: an open-source general-purpose parallel Raster Processing programming Library</span></b><br />
+<span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Qingfeng Guan (University of California at Santa Barbara, USA)</span>
+</li>
+
+</ul>
+
+</div>
+
+<br /><br />
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="demonstrations"></span>
+<div style="border:1px solid gray; background: white; padding: 0px; 5px 5px 5px 5px">
+<center>
+<h3><font color="gray"><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >List of Accepted Demonstrations</span></font></h3>
+</center>
+</div>
+
+<div style="border:1px solid gray; background: white; padding: 0px; 5px 5px 5px 5px">
+
+<ul>
+
+<li>
+<b><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >Computing Isocrones in Multimodal, Schedule-Based Transport Networks</span></b><br />
+<span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Veronika Bauer (Free University of Bolzano, Italy), Johann Gamper (Free University of Bolzano, Italy), Roberto Loperfido (Municipality of Bolzano, Italy), Sylvia Profanter (Municipality of Bolzano, Italy), Stefan Putzer (Creaform, Italy), Igor Timko (Free University of Bolzano, Italy)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >Efficient generation of area thematic maps in KML</span></b><br />
+<span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Bruce Ralston (University of Tennessee, USA), Josh Streufert (University of Tennessee, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >Web-in-Car: A Web Search Method Not Requiring Keyword Input for Car Navigation Systems</span></b><br />
+<span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Kazutoshi Sumiya (University of Hyogo, Japan), Takuma Segawa (Micware, Japan), Kazuya Sugihara (Micware, Japan), Kenji Narushima (Micware, Japan)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Monitoring Continuous Queries over Streaming Locations</span></b><br />
+<span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >Kostas Patroumpas (National Technical University of Athens, Greece), Evi Kefallinou (National Technical University of Athens, Greece), Timos Sellis (National Technical University of Athens, Greece)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Near-Real-Time Spatiotemporal Precipitation Virtual Sensor Creation based on NEXRAD Level</span></b> <span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >Yong Liu (University of Illinois at Urbana-Champaign, USA), David Hill (University of Illinois at Urbana-Champaign, USA), Alejandro Rodriguez (University of Illinois at Urbana-Champaign, USA), Luigi Marini (University of Illinois at Urbana-Champaign, USA), Rob Kooper (University of Illinois at Urbana-Champaign, USA), Joe Futrelle (University of Illinois at Urbana-Champaign, USA), Barbara Minsker (University of Illinois at Urbana-Champaign, USA), James Myers (University of Illinois at Urbana-Champaign, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >GISolve Toolkit: Advancing GIS through Cyberinfrastructure</span></b><br />
+<span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >Shaowen Wang (University of Illinois at Urbana-Champaign, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >A Location Aware Role and Attribute Based Access Control System</span></b><br />
+<span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >Isabel Cruz (University of Illinois at Chicago, USA), Pohsiu Lin (University of Illinois at Chicago, USA), Mirko Orsini (University of Illinois at Chicago, USA), Rigel Gjomemo (University of Illinois at Chicago, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Highway Operation Monitoring and Evaluation System</span></b><br />
+<span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >Chang-Tien Lu (Virginia Polytechnic Institure and State University, USA), Arnold Boedihardjo (Virginia Polytechnic Institure and State University, USA), Jing Dai (Virginia Polytechnic Institure and State University, USA), Feng Chen (Virginia Polytechnic Institure and State University, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >*Miner: A Spatial and Spatiotemporal Data Mining System</span></b><br />
+<span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >Ranga Raju Vatsavai (Oak Ridge National Laboratory, USA), Shashi Shekhar (University of Minnesota at Twin Cities, USA), Thomas Burk (University of Minnesota at Twin Cities, USA), Budhendra Bhaduri (Oak Ridge National Laboratory, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >Demo Paper: Development of Trail Network Model and a Web-based Bikeway Routing Service System</span></b><br />
+<span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >Qifeng Lu(Virginia Polytechnic Institure and State University, USA), Stephen Sedlock (Virginia Polytechnic Institure and State University, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >MAEviz ? An Earthquake Risk Assessment System</span></b><br />
+<span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >Terrence M. McLaren (National Center for Supercomputing Applications, USA), James D. Myers (National Center for Supercomputing Applications, USA), Jong Sung Lee, (National Center for Supercomputing Applications, USA)Nathan Tolbert (National Center for Supercomputing Applications, USA), Shawn Hampton (National Center for Supercomputing Applications, USA), Chris Navarro (National Center for Supercomputing Applications, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >Biography as Events in Time and Space</span></b><br />
+<span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >Fredric Gey (University of California at Berkeley, USA), Ryan Shaw (University of California at Berkeley, USA), Ray Larson (University of California at Berkeley, USA), Michael Buckland (University of California at Berkeley, USA)</span>
+</li>
+
+<li>
+<b><span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >Editing and Versioning Dynamic Network Models</span></b><br />
+<span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >Petko Bakalov (ESRI, USA), Erik Hoel (ESRI, USA), Wee-Liang Heng (ESRI, USA), Vassilis J. Tsotras (University of California at Riverside, USA)</span>
+</li>
+
+</ul>
+
+</div>
+
+</td>
+
+</tr>
+</table>
+
+
+<div id="clear"> </div>
+
+<div id="footer">
+<span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >Conference Webmaster: Justin Levandoski, University of Minnesota, USA</span>

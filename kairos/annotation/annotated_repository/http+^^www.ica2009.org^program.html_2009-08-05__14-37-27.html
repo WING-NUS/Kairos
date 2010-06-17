@@ -1,0 +1,809 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html><head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.ica2009.org^program.html_2009-08-05__14-37-27.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.ica2009.org^program.html_2009-08-05__14-37-27.yaml created on Wed Aug 05 17:32:01 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+
+<meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+
+
+	<title>ICA 2009</title>
+	
+	 <style type="text/css">
+            html {
+                 scrollbar-arrow-color: #99CCFF;
+                 scrollbar-3dlight-color: #FFFFFF;
+                 scrollbar-highlight-color: #99CCFF;
+                 scrollbar-face-color: #FFFFFF;
+                 scrollbar-shadow-color: #99CCFF;
+                 scrollbar-darkshadow-color: #FFFFFF;
+                 }
+            table {margin-top: 0.5em;}
+            th {padding-left: 0.5em; padding-right: 0.5em}
+            td {padding-left: 0.5em; padding-right: 0.5em}
+            tr.odd {background-color: #cccccc}
+            tr.even {background-color: #eeeeee}
+     </style>
+</head><body onload="on_load()" onkeyup="on_key_up(event)" topmargin="10" leftmargin="30" marginheight="10" marginwidth="30"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<font style="line-height: 150%;" size="2" color="#555555" face="Arial"><br/>
+
+<p align="justify"><font size="6">
+<b><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Conference Program – ICA 2009</span></b></font></p><br>
+
+<table class="showBrief">
+  <tbody>
+    <tr style="font-size:large;font-style:bold; color:#FFFFFF; background-color:#0093dd" >
+      <td class="heading"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Day</span></td>
+      <td class="heading"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Time</span></td>
+      <td class="heading"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Plenary</span></td>
+    </tr>
+    <tr class="odd">
+      <td><b><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Sunday</span></b></td>
+      <td><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >18:00 – 19:00</span></td>
+      <td><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Opening Talk - Prof. Simon Haykin</span> 
+      <br/><span onclick="return false" style="text-decoration:underline; color:blue" href="keynote.html#1"><i><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Cognition: The new lifeline for Independent Components Analysis</span></i></span>
+	  <br/><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Tulay Adali (UMBC, USA)</span></td>
+	  
+    </tr>
+    <tr class="even">
+      <td> </td>
+      <td><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >19:00 – 20:00</span></td>
+      <td><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Discussion</span><br></td>
+    </tr>
+    <tr class="odd">
+      <td></td>
+      <td><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >20:15 – 21:30</span></td>
+      <td><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Welcome Reception</span></td>
+    </tr>
+
+    <tr class="even">
+      <td></td>
+      <td><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >*</span></td>
+      <td><i><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Registration will take place from 14:00 to 18:00</span></i></td>
+    </tr>
+    
+    <tr class="odd">
+      <td><b><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Monday</span></b></td>
+      <td><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >08:45 – 09:00</span></td>
+      <td><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Opening Remarks</span></td>
+    </tr>
+    <tr class="even">
+      <td> </td>
+      <td><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >09:00 – 10:00</span></td>
+      <td><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Plenary Talk – Prof. Mark Plumbley</span><br/>
+      <span onclick="return false" style="text-decoration:underline; color:blue" href="keynote.html#2"><i><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Analysing Digital Music</span></i></span>
+	  <br/><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Joao Marcos Travassos Romano (UNICAMP, Brazil)</span></td>
+    </tr>
+    <tr class="odd">
+      <td></td>
+      <td><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >10:00 – 10:30</span></td>
+      <td><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td>
+    </tr>
+    <tr class="even">
+      <td> </td>
+      <td><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >10:30 – 12:10</span></td>
+      <td><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Lecture Session I:</span> <i><span onclick="return false" style="text-decoration:underline; color:blue" href="#1001"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Convolutive Mixtures</span></span></i><br/></td>
+    </tr>
+    <tr class="odd">
+      <td></td>
+      <td><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >12:10 – 14:00</span></td>
+      <td><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></td>
+    </tr>
+    <tr class="even">
+      <td> </td>
+      <td><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >14:00 – 16:00</span></td>
+      <td><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session I:</span> <i><span onclick="return false" style="text-decoration:underline; color:blue" href="#2001"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Theory, Convolutive Mixtures and Communications</span></span></i></td>
+    </tr>
+    <tr class="odd">
+      <td> </td>
+      <td><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >16:00 – 16:30</span></td>
+      <td><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td>
+    </tr>
+    <tr class="even">
+      <td> </td>
+      <td><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >16:30 – 18:10</span></td>
+
+      <td><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Lecture Session II:</span> <i><span onclick="return false" style="text-decoration:underline; color:blue" href="#1002"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Theory</span></span></i></td>
+    </tr>
+    <tr class="odd">
+      <td></td>
+      <td><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >*</span></td>
+      <td><i><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Registration will take place from 8:00 to 16:00</span></i></td>
+    </tr>
+    
+    <tr class="even">
+      <td><b><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday</span></b></td>
+      <td><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >09:00 – 10:00</span></td>
+      <td><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Plenary Talk – Prof. David Field</span><br/>
+      <span onclick="return false" style="text-decoration:underline; color:blue" href="keynote.html#3"><i><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Sparseness, Invariance and the Plausibility of Independent Coding</span></i></span>
+	  <br/><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Allan Barros (UFMA, Brazil)</span></td>
+    </tr>
+    <tr class="odd">
+      <td></td>
+      <td><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >10:00 – 10:30</span></td>
+      <td><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td>
+    </tr>
+    <tr class="even">
+      <td> </td>
+      <td><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >10:30 – 12:10</span></td>
+      <td><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Lecture Session III:</span> <i><span onclick="return false" style="text-decoration:underline; color:blue" href="#1003"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Semi-Blind Source Separation / Evaluation Session Paper</span></span></i><br/></td>
+    </tr>
+    <tr class="odd">
+      <td></td>
+      <td><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >12:10 – 14:00</span></td>
+      <td><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></td>
+    </tr>
+    <tr class="even">
+      <td> </td>
+      <td><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >14:00 – 16:00</span></td>
+      <td><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session II:</span> <i><span onclick="return false" style="text-decoration:underline; color:blue" href="#2002"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Special Session on Evaluation / Applications</span></span></i></td>
+    </tr>
+    <tr class="odd">
+      <td> </td>
+      <td><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >16:00 – 16:30</span></td>
+      <td><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td>
+    </tr>
+    <tr class="even">
+      <td> </td>
+      <td><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >16:30 – 18:10</span></td>
+
+      <td><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Lecture Session IV:</span> <i><span onclick="return false" style="text-decoration:underline; color:blue" href="#1004"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Applications</span></span></i></td>
+    </tr>
+    <tr class="odd">
+      <td> </td>
+      <td><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >20:00 – 23:00</span></td>
+      <td><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Banquet</span></td>
+    </tr>
+   
+    <tr class="even">
+      <td><b><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday</span></b></td>
+      <td><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >09:00 – 10:00</span></td>
+      <td><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Plenary Talk – Prof. Andrzej Cichocki</span><br/>
+      <span onclick="return false" style="text-decoration:underline; color:blue" href="keynote.html#4"><i><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Multi-Way Array (Tensor) Factorizations and Decompositions and their</span> <br/><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Potential Application</span></i></span>
+	  <br/><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Christian Jutten (INPG, France)</span></td>
+    </tr>
+    <tr class="odd">
+      <td></td>
+      <td><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >10:00 – 10:30</span></td>
+      <td><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td>
+    </tr>
+    <tr class="even">
+      <td> </td>
+      <td><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >10:30 – 12:10</span></td>
+      <td><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Lecture Session V:</span> <i><span onclick="return false" style="text-decoration:underline; color:blue" href="#1005"><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Subspace Decompositions</span></span></i><br/></td>
+    </tr>
+    <tr class="odd">
+      <td></td>
+      <td><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >12:10 – 14:00</span></td>
+      <td><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></td>
+    </tr>
+    <tr class="even">
+      <td> </td>
+      <td><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >14:00 – 16:00</span></td>
+      <td><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session III:</span> <br/>
+      <i><span onclick="return false" style="text-decoration:underline; color:blue" href="#2003"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Algorithms (Nonnegative Decompositions / Time-Frequency, Subspace and</span> <br/> <span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Sparsity-Based Approaches)</span></span></td>
+    </tr>
+    <tr class="odd">
+      <td> </td>
+      <td><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >16:00 – 18:00</span></td>
+      <td><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Farewell Reception</span></td>
+    </tr>
+<!--     <tr style="font-size:large;font-style:bold; color:#FFFFFF; background-color:#0093dd" >
+      <td class="heading"></td>
+      <td class="heading"></td>
+      <td class="heading"></td>
+    </tr>
+     -->
+    </tbody>
+    
+</table><br/>
+
+<p align="justify" id="1001"><font style="line-height: 150%;" size="4" color="#555555" face="Arial">
+<b><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Lecture Session I – Convolutive Mixtures</span></b></font></p>
+<p><font size="3"><b><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Session Chairs: Emmanuel Vincent (IRISA-INRIA, France) and Paris Smaragdis (Adobe Systems, USA)</span></b></font></p>
+
+<ul>
+<li><font size="3"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Modeling the Short Time Fourier Transform Ratio and Application to Underdetermined Audio Source Separation</span></font><br/>
+	<i><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Dinh-Tuan Pham, Zaher El-Chami, Alexandre Guérin, and Christine Servière</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Blind Order Detection and Parameter Estimation of MISO-FIR Channels</span> </font><br/>
+	<i> <span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Carlos Estevão Fernandes, Pierre Comon, and Gérard Favier</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Adapted Deflation Approach for Referenced Contrast Optimization in Blind MIMO Convolutive Source Separation</span> </font><br/>
+	<i> <span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Rémi Dubroca, Christophe De Luigi, and Eric Moreau</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >A Method for Filter Shaping in Convolutive Blind Source Separation</span> </font><br/>
+	<i> <span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Radoslaw Mazur and Alfred Mertins</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Online Subband Blind Source Separation For Convolutive Mixtures Using A Uniform Filter Bank With Critical Sampling</span> </font><br/>
+	<i> <span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Paulo B. Batalheiro, Mariane R. Petraglia, and Diego B. Haddad</span></i></li><br/>
+</ul>
+
+
+<p align="justify" id="2001"><font style="line-height: 150%;" size="4" color="#555555" face="Arial">
+<b><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session I – Theory, Convolutive Mixtures and Communications</span></b></font></p>
+<p><font size="3"><b><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Charles Casimiro Cavalcante (UFC, Brazil)</span></b></font></p>
+
+<ul>
+<li><font size="3"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Blind Separation of Cyclostationary Signals</span> </font><br/>
+	<i> <span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Nhat Anh Cheviet, Mohamed El Badaoui, Adel Belouchrani, and François Guillet</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Cebysev Coefficients-Based Algorithm for Estimating the ICA Model</span> </font><br/>
+	<i> <span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Doru Constantin</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Histogram Based Blind Identification and Source Separation from Linear Instantaneous Mixtures</span> </font><br/>
+	<i> <span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Konstantinos I. Diamantaras and Theophilos Papadimitriou</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Blind Source Separation of Post-Nonlinear Mixtures Using Evolutionary Computation and Gaussianization</span> </font><br/>
+	<i> <span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Tiago M. Dias, Romis Attux, João M. T. Romano, and Ricardo Suyama</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >On IIR Filters and Convergence Acceleration For Convolutive Blind Source Separation</span> </font><br/>
+	<i> <span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Diego B. Haddad, Mariane R. Petraglia, and Paulo B. Batalheiro</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Time Frequency Masking Strategy for Blind Source Separation of Acoustic Signals Based on Optimally-Modified LOG-Spectral Amplitude Estimator</span> </font><br/>
+	<i> <span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Eugen Hoffmann, Dorothea Kolossa, and Reinhold Orglmeister</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Comparison of Two Main Approaches to Joint SVD</span> </font><br/>
+	<i> <span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Gen Hori</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Solving the Acoustic Echo Cancellation Problem in Double-Talk Scenario Using Non-Gaussianity of the Near-End Signal</span> </font><br/>
+	<i> <span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Intae Lee, Charles E. Kinney, Bowon Lee, and Antonius A. C. M. Kalker</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Bayesian Robust PCA for Incomplete Data</span> </font><br/>
+	<i> <span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Jaakko Luttinen, Alexander Ilin, and Juha Karhunen</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Independent Component Analysis (ICA) using Pearsonian Density Function</span> </font><br/>
+	<i> <span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Abhijit Mandal and Arnab Chakraborty</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Underdetermined BSS of MISO OSTBC Signals - Ali Mansour, Joe Youssef, and Koffi</span></font><br/>
+	<i><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Clement Yao</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >An Analysis of Unsupervised Signal Processing Methods in the Context of Correlated Sources</span> </font><br/>
+	<i> <span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Aline Neves, Cristina Wada, Ricardo Suyama, Romis Attux, and João M. T. Romano</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Probabilistic Formulation of Independent Vector Analysis using Complex Gaussian Scale Mixtures</span></font><br/>
+	<i><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Jason Palmer, Scott Makeig, and Ken Kreutz-Delgado</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Blind Channel Identification in (2 x 1) Alamouti Coded Systems Based on Maximizing the Eigenvalue Spread of Cumulant Matrices</span></font><br/>
+	<i><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Héctor Pérez-Iglesias, Daniel Iglesia, Adriana Dapena, and Vicente Zarzoso</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Least Square Joint Diagonalization of Matrices Under an Intrinsic Scale Constraint</span></font><br/>
+	<i><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Dinh-Tuan Pham and Marco Congedo</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Blind Separation of Noisy Mixtures of Non-Stationary Sources Using Spectral Decorrelation</span> </font><br/>
+	<i> <span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Hicham Saylani, Shahram Hosseini, and Yannick Deville</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Audio Watermark Detection Using Undetermined ICA</span> </font><br/>
+	<i> <span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Jongwon Seok and Hafiz Malik</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Separation of Convolutive Mixtures with Hybrid Sources</span> </font><br/>
+	<i> <span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Christine Servière</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Fast Parallel Estimation of High Dimensional Information Theoretical Quantities with Low Dimensional Random Projection Ensembles</span> </font><br/>
+	<i> <span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Zoltán Szabó and András Lörincz</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Soft Dimension Reduction for ICA by Joint Diagonalization on the Stiefel Manifold</span></font><br/>
+	<i><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Fabian J. Theis, Thomas P. Cason, and P.-A. Absil</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Theoretical Analysis and Comparison of Several Criteria on Linear Model Dimension Reduction</span> </font><br/>
+	<i> <span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Shikui Tu and Lei Xu</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Nonlinear Blind Source Deconvolution Using Recurrent Prediction-Error Filters and an Artificial Immune System</span> </font><br/>
+	<i> <span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Cristina Wada, Douglas M. Consolaro, Rafael Ferrari, Ricardo Suyama, Romis Attux, and Fernando J. Von Zuben</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >ICA by Maximizing Non-Stability</span> </font><br/>
+	<i> <span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Baijie Wang, Ercan E. Kuruoglu, and Junying Zhang</span></i></li><br/>
+</ul>
+
+<p align="justify" id="1002"><font style="line-height: 150%;" size="4" color="#555555" face="Arial">
+<b><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Lecture Session II - Theory</span></b></font></p>
+<p><font size="3"><b><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Session Chairs: Tulay Adali (UMBC, USA) and Dinh-Tuan Pham (UJF - Grenoble INP, France)</span></b></font></p>
+
+<ul>
+<li><font size="3"><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >On Optimal Selection of Correlation Matrices for Matrix-Pencil-Based Separation</span> </font><br/>
+	<i> <span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Arie Yeredor</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Blind Non-Stationary Sources Separation by Sparsity in a Linear Instantaneous Mixture</span> </font><br/>
+	<i> <span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Bertrand Rivet</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >On the Relationships Between MMSE and Information-Theoretic-Based Blind Criterion for Minimum BER Filtering</span> </font><br/>
+	<i> <span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Charles C. Cavalcante and João M. T. Romano</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Estimating Squared-loss Mutual Information for Independent Component Analysis</span> </font><br/>
+	<i> <span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Taiji Suzuki and Masashi Sugiyama</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Minimum Determinant Constraint for Non-negative Matrix Factorization</span> </font><br/>
+	<i> <span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Reinhard Schachtner, Gerhard Pöppel, Ana Maria Tomé, and Elmar W. Lang</span></i></li><br/>
+</ul>
+
+
+<p align="justify" id="1003"><font style="line-height: 150%;" size="4" color="#555555" face="Arial">
+<b><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Lecture Session III: Semi-Blind Source Separation / Evaluation Session Paper</span></b></font></p>
+<p><font size="3"><b><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Session Chairs: Fabian Theis (Helmholtz Zentrum München, Germany) and Christian Jutten (INPG, France)</span></b></font></p>
+
+<ul>
+<li><font size="3"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Using Signal Invariants to Perform Nonlinear Blind Source Separation</span> </font><br/>
+	<i> <span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >David N. Levin</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Reference Based Contrast Functions in a Semi-Blind Context</span> </font><br/>
+	<i> <span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Marc Castella and Eric Moreau</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >ICA with Sparse Connections: Revisited</span> </font><br/>
+	<i> <span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Kun Zhang, Heng Peng, Laiwan Chan, and Aapo Hyvärinen</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Extension of Sparse, Adaptive Signal Decompositions to Semi-Blind Audio Source Separation</span> </font><br/>
+	<i> <span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Andrew Nesbit, Emmanuel Vincent, and Mark D. Plumbley</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >The 2008 Signal Separation Evaluation Campaign: A Community-Based Approach to Large-Scale Evaluation</span> </font><br/>
+	<i> <span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Emmanuel Vincent, Shoko Araki, and Pau Bofill</span></i></li><br/>
+</ul>
+
+
+<p align="justify" id="2002"><font style="line-height: 150%;" size="4" color="#555555" face="Arial">
+<b><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session II – Special Session on Evaluation / Applications</span></b></font></p>
+<p><font size="3"><b><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Mariane Rembold Petraglia (UFRJ, Brazil)</span></b></font></p>
+
+<ul>
+<p><font size="3"><u><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Special Session on Evaluation</span></u></font></p>
+<li><font size="3"><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Stereo Source Separation and Source Counting with MAP Estimation with Dirichlet Prior Considering Spatial Aliasing Problem</span> </font><br/>
+	<i> <span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Shoko Araki, Tomohiro Nakatani, Hiroshi Sawada, and Shoji Makino</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Blind Spectral-GMM Estimation for Underdetermined Instantaneous Audio Source Separation</span> </font><br/>
+	<i> <span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Simon Arberet, Alexey Ozerov, Rémi Gribonval, and Frédéric Bimbot</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Application of Two Time-Domain Convolutive Blind Source Separation Algorithms to the 2008 Signal Separation Evaluation Campaign (SiSEC) Data</span> </font><br/>
+	<i> <span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Scott Douglas</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Permutation Correction in Blind Source Separation Using Sliding Subband Likelihood Function</span> </font><br/>
+	<i> <span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Intae Lee</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Underdetermined Instantaneous Audio Source Separation via Local Gaussian Modeling</span> </font><br/>
+	<i> <span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Emmanuel Vincent, Simon Arberet, and Rémi Gribonval</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Principles and performance of the LI-TIFROM software</span></font><br/>
+	<i> <span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Matthieu Puigt</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Blind source separation for convolutive mixtures by recursive ICA and permutation correction</span></font><br/>
+	<i> <span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Francesco Nesta</span></i></li><br/>
+</ul>
+
+<ul>
+<p><font size="3"><u><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Applications</span></u></font></p>
+<li><font size="3"><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Segmentation of Natural and Man-Made Structures by Independent Component Analysis</span> </font><br/>
+	<i> <span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >André Cavalcante, Fausto Lucena, Allan Kardec Barros, Yoshinori Takeuchi, and Noboru Ohnishi</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >An Implementation of Floral Scent Recognition System using ICA combined with Correlation Coefficients</span></font><br/>
+	<i><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Byeong-Geun Cheon, Yong-Wan Roh, Dong-Ju Kim, and Kwang-Seok Hong</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Topographic Independent Component Analysis Based on Fractal and Morphology Applied to Texture Segmentation</span> </font><br/>
+	<i> <span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Klaus Fabian Côco, Evandro Ottoni Teatini Salles, and Mario Sarcinelli Filho</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >ICA-Based Method for Quantifying EEG Event Related Desynchronization</span></font><br/>
+	<i><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Danton Ferreira, Antônio M. F. L. Miranda de Sá, Augusto Santiago Cerqueira, and José Manoel de Seixas</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Localization of Generalized Discharge Sources in Patients with Juvenile Myoclonic Epilepsy Using Independent Components Analysis</span></font><br/>
+	<i><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Sidcley P. Gomes, Patrícia da Silva Sousa-Carvalho, Enio Aguiar, Anderson B. Silva, Fábio M. Braga, and Allan Kardec Barros</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Iterative Subspace Decomposition for Ocular Artifact Removal from EEG Recordings</span></font><br/>
+	<i><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Cédric Gouy-Pailler, Reza Sameni, Marco Congedo, and Christian Jutten</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Denoising Single Trial Event Related Magnetoencephalographic Recordings</span> </font><br/>
+	<i> <span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Elina Karp, Lauri Parkkonen, and Ricardo Vigário</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Image Source Separation using Color Channel Dependencies</span> </font><br/>
+	<i> <span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Koray Kayabol, Ercan E. Kuruoglu, and Bulent Sankur</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Learning Natural Image Structure with a Horizontal Product Model</span> </font><br/>
+	<i> <span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Urs Köster, Jussi T. Lindgren, Michael Gutmann, and Aapo Hyvärinen</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Estimating Markov Random Field Potentials for Natural Images</span> </font><br/>
+	<i> <span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Urs Köster, Jussi T. Lindgren, and Aapo Hyvärinen</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Atrial Activity Extraction based on Statistical and Spectral Features</span></font><br/>
+	<i><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Raul Llinares, Jorge Igual, Addisson Salazar, Julio Miró-Borrás, and Arturo Serrano</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >ICA Mixture Modeling for the Classification of Materials in Impact-Echo Testing</span> </font><br/>
+	<i> <span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Addisson Salazar, Arturo Serrano, Raul Llinares, Luis Vergara, and Jorge Igual</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >High-Energy Particles Online Discriminators Based on Nonlinear Independent Components</span> </font><br/>
+	<i> <span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Eduardo Simas Filho, José Manoel de Seixas, and Luiz P. Calôba</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >BSS-Based Feature Extraction for Skin Lesion Image Classification</span> </font><br/>
+	<i> <span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Hans Georg Stockmeier, Heidi Bäcker, Wolfgang Bäumler, and Elmar W. Lang</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >Estimating Hidden Influences in Metabolic and Gene Regulatory Networks</span> </font><br/>
+	<i> <span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Fabian J. Theis and Florian Blöchl</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >Blind Decomposition of Spectral Imaging Microscopy: A Study on Artificial and Real Test Data</span> </font><br/>
+	<i> <span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >Fabian J. Theis, Richard Neher, and Andre Zeug</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Spike Detection and Sorting: Combining Algebraic Differentiations with ICA</span> </font><br/>
+	<i> <span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Zoran Tiganj and Mamadou Mboup</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Image Denoising Using Sparse Representation</span></font><br/>
+	<i><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >SeyyedMajid Valiollahzadeh, Hamed Firouzi, Massoud Babaie-Zadeh, and Christian Jutten</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Network Traffic Flow Separation and Control Through a Hybrid ICA-Fuzzy Adaptive Algorithm</span> </font><br/>
+	<i> <span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >Flávio Henrique Teles Vieira, Lígia Maria Carvalho Sousa, George E. Bozinis, and Wesley F. de Miranda</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Arabica: Robust ICA in a Pipeline</span> </font><br/>
+	<i> <span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Jarkko Ylipaavalniemi and Jyri Soppela</span></i></li><br/>
+</ul>
+
+<p align="justify" id="1004"><font style="line-height: 150%;" size="4" color="#555555" face="Arial">
+<b><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Lecture Session IV: Applications</span></b></font></p>
+<p><font size="3"><b><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Session Chairs: Ricardo Vigario (HUT, Finland) and Shoko Araki (NTT, Japan)</span></b></font></p>
+
+<ul>
+<li><font size="3"><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >Validity of the Independence Assumption for the Separation of Instantaneous and Convolutive Mixtures of Speech and Music Sources</span> </font><br/>
+	<i> <span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Matthieu Puigt, Emmanuel Vincent, and Yannick Deville</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Bayesian Non-Negative Matrix Factorization</span> </font><br/>
+	<i> <span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Mikkel Schmidt, Lars Kai Hansen, and Ole Winther</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >Ion-selective Electrode Array based on a Bayesian Nonlinear Source Separation Method</span> </font><br/>
+	<i> <span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Leonardo Tomazeli Duarte, Christian Jutten, and Saïd Moussaoui</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >Eye Movement Quantification In Functional MRI Data By Spatial Independent Component Analysis</span> </font><br/>
+	<i> <span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Ingo R. Keck, Volker Fischer, Carlos G. Puntonet, and Elmar W. Lang</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >Target Speech Enhancement in Presence of Jammer and Diffuse Background Noise</span> </font><br/>
+	<i> <span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Jani Even, Hiroshi Saruwatari, and Kiyohiro Shikano</span></i></li><br/>
+</ul>
+
+<p align="justify" id="1005"><font style="line-height: 150%;" size="4" color="#555555" face="Arial">
+<b><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Lecture Session V: Subspace Decompositions</span></b></font></p>
+<p><font size="3"><b><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Arie Yeredor (Tel-Aviv University, Israel)</span></b></font></p>
+
+<ul>
+<li><font size="3"><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Optimal Performance of Second-Order Multidimensional ICA</span></font><br/>
+	<i><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >Dana Lahat, Jean-François Cardoso, and Hagit Messer</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Stationary Subspace Analysis</span></font><br/>
+	<i><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >Paul von Buenau, Frank C. Meinecke, and Klaus-Robert Müller</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >A Novel Subspace Clustering Method for Dictionary Design</span> </font><br/>
+	<i> <span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >B. Vikrham Gowreesunker and Ahmed H. Tewfik</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Non-Independent BSS: A Model for Evoked MEG Signals with Controllable Dependencies</span> </font><br/>
+	<i> <span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >Florian Kohl, Gerd Wübbeler, Dorothea Kolossa, Clemens Elster, Markus Bär, and Reinhold Orglmeister</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >Hierarchical Extraction of Independent Subspaces of Unknown Dimensions</span> </font><br/>
+	<i> <span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >Peter Gruber, Harold W. Gutch, and Fabian J. Theis</span></i></li><br/>
+</ul>
+
+<p align="justify" id="2003"><font style="line-height: 150%;" size="4" color="#555555" face="Arial">
+<b><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session III – Algorithms (Nonnegative Decompositions / Time-Frequency, Subspace and Sparsity-Based Approaches)</span></b></font></p>
+<p><font size="3"><b><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair: Romis Attux (UNICAMP, Brazil)</span></b></font></p>
+
+<ul>
+<li><font size="3"><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >Source Separation of Phase-Locked Subspaces</span> </font><br/>
+	<i> <span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >Miguel Almeida and Ricardo Vigário</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >Nonnegative Network Component Analysis by Linear Programming for Gene Regulatory Network Reconstruction</span> </font><br/>
+	<i> <span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >Chunqi Chang, Zhi Ding, and Yeung Sam Hung</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >Constructing Time-Frequency Dictionaries for Source Separation via Time-Frequency Masking and Source Localisation</span> </font><br/>
+	<i> <span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >Ruairi de Fréin, Scott T. Rickard, and Barak A. Pearlmutter</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >A Robust and Precise Solution to Permutation Indeterminacy and Complex Scaling Ambiguity in BSS-based Blind MIMO-OFDM Receiver</span> </font><br/>
+	<i> <span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >Mahdi Khosravy, Mohammad Reza Alsharif, Bin Guo, Hai Lin, and Katsumi Yamashita</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >A Cascade System for Solving Permutation and Gain Problems in Frequency-Domain BSS</span></font><br/>
+	<i><span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Iglesia, Héctor Pérez-Iglesias, and Adriana Dapena</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >Narrow-band Short-Time Frequency-Domain Blind Signal Separation of Passive Sonar Signals</span></font><br/>
+	<i><span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >Natanael Nunes de Moura, José Manoel de Seixas, and Eduardo Simas Filho</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >An ICA-Based Method for Blind Source Separation in Sparse Domains</span> </font><br/>
+	<i> <span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >Everton Z. Nadalin, Ricardo Suyama, and Romis Attux</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >Blind Source Separation of Sparse Overcomplete Mixtures and Application to Neural Recordings</span> </font><br/>
+	<i> <span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >Michal Natora, Felix Franke, Matthias Munk, and Klaus Obermayer</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >Cumulative State Coherence Transform for a Robust Two-Channel Multiple Source Localization</span> </font><br/>
+	<i> <span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >Francesco Nesta, Piergiorgio Svaizer, and Maurizio Omologo</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >Image Coding and Compression by Sparse 3D Discrete Cosine Transform</span></font><br/>
+	<i><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >Hamid Palangi, Aboozar Ghaffari, Massoud Babaie-Zadeh, and Christian Jutten</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >Iterative-Shift Cluster-Based Time-Frequency BSS for Fractional-Time-Delay Mixtures</span> </font><br/>
+	<i> <span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >Matthieu Puigt and Yannick Deville</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >Blind Source Separation with Spatio-Spectral Sparsity Constraints - Application to Hyperspectral Data Analysis</span></font><br/>
+	<i><span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >Yassir Moudden, Jerome Bobin, Jean-Luc Starck, and Jalal Fadili</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >Limitations of the Spectrum Masking Technique for Blind Source Separation</span> </font><br/>
+	<i> <span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >Gustavo Fernandes Rodrigues and Hani Camille Yehia</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >Improvement of the Initialization of ICA Time-Frequency Algorithms for Speech Separation</span> </font><br/>
+	<i> <span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >Auxiliadora Sarmiento, Sergio Cruces, and Iván Durán</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >Binary Nonnegative Matrix Factorization Applied to Semi-Conductor Wafer Test Sets</span> </font><br/>
+	<i> <span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >Reinhard Schachtner, Gerhard Pöppel, and Elmar W. Lang</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >Probabilistic Factorization of Non-Negative Data with Entropic Co-occurrence Constraints</span> </font><br/>
+	<i> <span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >Paris Smaragdis, Madhusudana Shashanka, Bhiksha Raj, and Gautham J. Mysore</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >Blind Extraction of Chaotic Sources from Gaussian White Noise Based on a Measure of Determinism</span> </font><br/>
+	<i> <span class="coloringspan" id="282" onmousedown="md(this)" onmouseup="mu(this)" >Diogo C. Soriano, Ricardo Suyama, and Romis Attux</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="283" onmousedown="md(this)" onmouseup="mu(this)" >A Sparsity-Based Method to Solve Permutation Indeterminacy in Frequency-Domain Convolutive Blind Source Separation</span> </font><br/>
+	<i> <span class="coloringspan" id="284" onmousedown="md(this)" onmouseup="mu(this)" >Prasad Sudhakar and Rémi Gribonval</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="285" onmousedown="md(this)" onmouseup="mu(this)" >Canonical Dual Approach to Binary Factor Analysis</span> </font><br/>
+	<i> <span class="coloringspan" id="286" onmousedown="md(this)" onmouseup="mu(this)" >Ke Sun, Shikui Tu, David Yang Gao, and Lei Xu</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="287" onmousedown="md(this)" onmouseup="mu(this)" >Complete Blind Subspace Deconvolution</span> </font><br/>
+	<i> <span class="coloringspan" id="288" onmousedown="md(this)" onmouseup="mu(this)" >Zoltán Szabó</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="289" onmousedown="md(this)" onmouseup="mu(this)" >Estimating Phase Linearity in The Frequency-Domain ICA Demixing Matrix</span> </font><br/>
+	<i> <span class="coloringspan" id="290" onmousedown="md(this)" onmouseup="mu(this)" >Keisuke Toyama and Mark D. Plumbley</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="291" onmousedown="md(this)" onmouseup="mu(this)" >Factor Analysis as Data Matrix Decomposition: A New Approach for Quasi-Sphering in Noisy ICA</span> </font><br/>
+	<i> <span class="coloringspan" id="292" onmousedown="md(this)" onmouseup="mu(this)" >Steffen Unkel and Nickolay T. Trendafilov</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="293" onmousedown="md(this)" onmouseup="mu(this)" >Signal Subspace Separation based on the Divergence Measure of a set of Wavelets Coefficients</span> </font><br/>
+	<i> <span class="coloringspan" id="294" onmousedown="md(this)" onmouseup="mu(this)" >Vincent Vigneron and Aurélien Hazan</span></i></li><br/>
+<li><font size="3"><span class="coloringspan" id="295" onmousedown="md(this)" onmouseup="mu(this)" >Mixtures of Gamma Priors for Non-Negative Matrix Factorization Based Speech Separation</span> </font><br/>
+	<i> <span class="coloringspan" id="296" onmousedown="md(this)" onmouseup="mu(this)" >Tuomas Virtanen and Ali Taylan Cemgil</span>

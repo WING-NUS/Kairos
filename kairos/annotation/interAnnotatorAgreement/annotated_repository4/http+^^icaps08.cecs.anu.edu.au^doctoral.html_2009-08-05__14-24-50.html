@@ -1,0 +1,617 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session1/5/annotation/annotated_repository/http+^^icaps08.cecs.anu.edu.au^doctoral.html_2009-08-05__14-24-50.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session1/5/annotation/annotated_repository/http+^^icaps08.cecs.anu.edu.au^doctoral.html_2009-08-05__14-24-50.yaml created on Thu Aug 13 13:47:31 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<meta http-equiv="content-type" content="text/html; charset=iso-8859-1" />
+<title>ICAPS - 2008</title>
+<meta name="ICAPS2008" content="" />
+<meta name="description" content="ICAPS 2008 Doctoral Consortium" />
+<link href="default.css" rel="stylesheet" type="text/css" />
+<script type="text/JavaScript">
+<!--
+function MM_preloadImages() { //v3.0
+  var d=document; if(d.images){ if(!d.MM_p) d.MM_p=new Array();
+    var i,j=d.MM_p.length,a=MM_preloadImages.arguments; for(i=0; i<a.length; i++)
+    if (a[i].indexOf("#")!=0){ d.MM_p[j]=new Image; d.MM_p[j++].src=a[i];}}
+}
+
+function MM_findObj(n, d) { //v4.01
+  var p,i,x;  if(!d) d=document; if((p=n.indexOf("?"))>0&&parent.frames.length) {
+    d=parent.frames[n.substring(p+1)].document; n=n.substring(0,p);}
+  if(!(x=d[n])&&d.all) x=d.all[n]; for (i=0;!x&&i<d.forms.length;i++) x=d.forms[i][n];
+  for(i=0;!x&&d.layers&&i<d.layers.length;i++) x=MM_findObj(n,d.layers[i].document);
+  if(!x && d.getElementById) x=d.getElementById(n); return x;
+}
+
+function MM_nbGroup(event, grpName) { //v6.0
+  var i,img,nbArr,args=MM_nbGroup.arguments;
+  if (event == "init" && args.length > 2) {
+    if ((img = MM_findObj(args[2])) != null && !img.MM_init) {
+      img.MM_init = true; img.MM_up = args[3]; img.MM_dn = img.src;
+      if ((nbArr = document[grpName]) == null) nbArr = document[grpName] = new Array();
+      nbArr[nbArr.length] = img;
+      for (i=4; i < args.length-1; i+=2) if ((img = MM_findObj(args[i])) != null) {
+        if (!img.MM_up) img.MM_up = img.src;
+        img.src = img.MM_dn = args[i+1];
+        nbArr[nbArr.length] = img;
+    } }
+  } else if (event == "over") {
+    document.MM_nbOver = nbArr = new Array();
+    for (i=1; i < args.length-1; i+=3) if ((img = MM_findObj(args[i])) != null) {
+      if (!img.MM_up) img.MM_up = img.src;
+      img.src = (img.MM_dn && args[i+2]) ? args[i+2] : ((args[i+1])? args[i+1] : img.MM_up);
+      nbArr[nbArr.length] = img;
+    }
+  } else if (event == "out" ) {
+    for (i=0; i < document.MM_nbOver.length; i++) {
+      img = document.MM_nbOver[i]; img.src = (img.MM_dn) ? img.MM_dn : img.MM_up; }
+  } else if (event == "down") {
+    nbArr = document[grpName];
+    if (nbArr)
+      for (i=0; i < nbArr.length; i++) { img=nbArr[i]; img.src = img.MM_up; img.MM_dn = 0; }
+    document[grpName] = nbArr = new Array();
+    for (i=2; i < args.length-1; i+=2) if ((img = MM_findObj(args[i])) != null) {
+      if (!img.MM_up) img.MM_up = img.src;
+      img.src = img.MM_dn = (args[i+1])? args[i+1] : img.MM_up;
+      nbArr[nbArr.length] = img;
+  } }
+}
+
+function MM_swapImgRestore() { //v3.0
+  var i,x,a=document.MM_sr; for(i=0;a&&i<a.length&&(x=a[i])&&x.oSrc;i++) x.src=x.oSrc;
+}
+
+function MM_swapImage() { //v3.0
+  var i,j=0,x,a=MM_swapImage.arguments; document.MM_sr=new Array; for(i=0;i<(a.length-2);i+=3)
+   if ((x=MM_findObj(a[i]))!=null){document.MM_sr[j++]=x; if(!x.oSrc) x.oSrc=x.src; x.src=a[i+2];}
+}
+//-->
+</script>
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)" onload="MM_preloadImages('../assets/navbar/home-over.gif','../assets/navbar/callforpapers-over.gif','../assets/navbar/workshops-over.gif','../assets/navbar/doctorial-over.gif','../assets/navbar/collocatedevents-over.gif','../assets/navbar/registration-over.gif','../assets/navbar/accomdationtravel-over.gif','../assets/navbar/conferencecommittee-over.gif','../assets/navbar/acceptedpapers-over.gif','assets/navbar/conferenceprogram-over.gif','assets/navbar/registation-over.gif','assets/navbar/doctorial-over.gifassets/navbar/doctoral-over.gif','assets/navbar/collocated-over.gif')"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<div id="header">
+  <h2><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></h2>
+</div>
+
+<!-- end #header -->
+<div id="menu">
+  <table width="760" height="42" border="0" cellpadding="0" cellspacing="0">
+    <tr>
+      <td><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html" target="_top" onclick="MM_nbGroup('down','group1','home','assets/navbar/home-over.gif',1)" onmouseover="MM_nbGroup('over','home','assets/navbar/home-over.gif','assets/navbar/home-over.gif',1)" onmouseout="MM_nbGroup('out')"><img onmousedown="imd(this)" src="assets/navbar/home.gif" alt="Home" name="home" width="152" height="22" border="0" id="home" onload="" /></span></td>
+      <td><span onclick="return false" style="text-decoration:underline; color:blue" href="callforpapers.html" target="_top" onclick="MM_nbGroup('down','group1','callforpapers','assets/navbar/callforpapers-over.gif',1)" onmouseover="MM_nbGroup('over','callforpapers','assets/navbar/callforpapers-over.gif','assets/navbar/callforpapers-over.gif',1)" onmouseout="MM_nbGroup('out')"><img onmousedown="imd(this)" src="assets/navbar/callforpapers.gif" alt="Call for Papers" name="callforpapers" border="0" id="callforpapers" onload="" /></span></td>
+      <td><span onclick="return false" style="text-decoration:underline; color:blue" href="doctoral.html" target="_top" onclick="MM_nbGroup('down','group1','doctorial','assets/navbar/doctorial-over.gifassets/navbar/doctoral-over.gif',1)" onmouseover="MM_nbGroup('over','doctorial','assets/navbar/doctoral-over.gif','assets/navbar/doctorial-over.gifassets/navbar/doctoral-over.gif',1)" onmouseout="MM_nbGroup('out')"><img onmousedown="imd(this)" src="assets/navbar/doctoral.gif" alt="Doctoral Consortium" name="doctorial" border="0" id="doctorialconsortium" onload="" /></span></td>
+      <td><span onclick="return false" style="text-decoration:underline; color:blue" href="collocatedevents.html" target="_top" onclick="MM_nbGroup('down','group1','collocatedevents','assets/navbar/collocated-over.gif',1)" onmouseover="MM_nbGroup('over','collocatedevents','assets/navbar/collocated-over.gif','assets/navbar/collocated-over.gif',1)" onmouseout="MM_nbGroup('out')"><img onmousedown="imd(this)" src="assets/navbar/collocated.gif" alt="Collocated Events" name="collocatedevents" border="0" id="collocatedevents" onload="" /></span></td>
+      <td><span onclick="return false" style="text-decoration:underline; color:blue" href="registration.html" target="_top" onClick="MM_nbGroup('down','group1','registration','assets/navbar/registation-over.gif',1)" onMouseOver="MM_nbGroup('over','registration','assets/navbar/registation-over.gif','assets/navbar/registation-over.gif',1)" onMouseOut="MM_nbGroup('out')"><img onmousedown="imd(this)" name="registration" src="assets/navbar/registation.gif" border="0" alt="Registration and Travel" onLoad="" /></span></td>
+    </tr>
+
+    <tr>
+      <td><span onclick="return false" style="text-decoration:underline; color:blue" href="conferenceprogram.html" onmouseout="MM_swapImgRestore()" onmouseover="MM_swapImage('conferenceprogram','','assets/navbar/conferenceprogram-over.gif',1)"><img onmousedown="imd(this)" src="assets/navbar/conferenceprogram.gif" alt="Conference Program" width="152" height="23" border="0" id="conferenceprogram" /></span></td>
+      <td><span onclick="return false" style="text-decoration:underline; color:blue" href="conferencecommittee.html" onmouseout="MM_swapImgRestore()" onmouseover="MM_swapImage('conferencecommittee','','assets/navbar/conferencecommittee-over.gif',1)"><img onmousedown="imd(this)" src="assets/navbar/conferencecommittee.gif" alt="Conference Committee" width="152" height="23" border="0" id="conferencecommittee" /></span><span onclick="return false" style="text-decoration:underline; color:blue" href="../conferencecommittee.html" onmouseout="MM_swapImgRestore()" onmouseover="MM_swapImage('conferencecommittee','','../assets/navbar/conferencecommittee-over.gif',1)"></span></td>
+      <td><span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.html" onmouseout="MM_swapImgRestore()" onmouseover="MM_swapImage('workshops','','assets/navbar/workshops-over.gif',1)"><img onmousedown="imd(this)" src="assets/navbar/workshops.gif" alt="Workshops" width="152" height="23" border="0" id="workshops" /></span><span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.html" onmouseout="MM_swapImgRestore()" onmouseover="MM_swapImage('workshops','','assets/navbar/workshops-over.gif',1)"></span></td>
+      <td><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials.html" onmouseout="MM_swapImgRestore()" onmouseover="MM_swapImage('tutorials','','assets/navbar/tutorials-over.gif',1)"><img onmousedown="imd(this)" src="assets/navbar/tutorials.gif" alt="Tutorials" width="152" height="23" border="0" id="tutorials" /></span><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials.html" onmouseout="MM_swapImgRestore()" onmouseover="MM_swapImage('tutorials','','assets/navbar/tutorials-over.gif',1)"></span></td>
+
+      <td><span onclick="return false" style="text-decoration:underline; color:blue" href="demonstrations.html" onmouseout="MM_swapImgRestore()" onmouseover="MM_swapImage('demonstrations','','assets/navbar/demonstrations-over.gif',1)"><img onmousedown="imd(this)" src="assets/navbar/demonstrations.gif" alt="Demonstrations" width="152" height="23" border="0" id="demonstrations" /></span><span onclick="return false" style="text-decoration:underline; color:blue" href="demonstrations.html" onmouseout="MM_swapImgRestore()" onmouseover="MM_swapImage('demonstrations','','assets/navbar/demonstrations-over.gif',1)"></span></td>
+    </tr>
+  </table>
+
+</div>
+<!-- end #menu -->
+<div id="content">
+
+<h2><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></h2>
+
+<span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >The doctoral consortium will take place in
+the Grand Lodge on Sunday starting with coffee
+in the neighboring Banquet Hall at 8:15am.</span>
+<p>
+<table border="1">
+<tr>
+<td><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >08:30</span></td><td> <span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >introduction</span></td>
+</tr>
+
+<tr>
+<td><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >09:00</span></td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="sattar-icaps08dc-advisor-relationships.pdf"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >working with your advisor</span></span> <span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >(Abdul Sattar)</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >09:30</span></td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="skills1.ppt"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >research skills</span></span> <span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >(Francesca Rossi)</span></td>
+</tr>
+
+<tr style="color:#000000; background-color:#f0e0e0;">
+<td><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >10:00</span></td><td> <span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >coffee</span></td>
+</tr>
+
+<tr>
+<td><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >10:30</span></td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="job-hunting.pdf"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >job hunting</span></span> <span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >(Wheeler Ruml)</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >11:00</span></td><td> <span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >panel of recent PhDs</span></td>
+</tr>
+
+<tr style="color:#000000; background-color:#f0e0e0;">
+<td><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >12:00</span></td><td> <span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >lunch</span></td>
+</tr>
+
+<tr>
+<td><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >13:30</span></td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="MESS.ppt"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >how not to give a talk</span></span> <span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >(Judy Goldsmith)</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >14:00</span></td><td> <span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >small group discussions</span></td>
+</tr>
+
+<tr style="color:#000000; background-color:#f0e0e0;">
+<td><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >15:00</span></td><td> <span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >coffee</span></td>
+</tr>
+
+<tr>
+<td><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >15:30</span></td><td> <span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >small group discussions (cont.)</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >16:30</span></td><td> <span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >debriefing</span></td>
+</tr>
+
+<tr>
+<td><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >17:00</span></td><td> <span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >conclusion</span></td>
+</tr>
+</table>
+
+
+<h2><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Invited Students</span></h2>
+
+<ul>
+  <li><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Shirin Sohrabi Araghi, Toronto, Canada</span>
+  <li><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Debdeep Banerjee, ANU/NICTA, Australia</span>
+  <li><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >J. Benton, Arizona, USA</span>
+  <li><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Sara Bernadini, NASA/Trento, USA/Italy</span>
+  <li><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Abdeslam Boularias, Laval, Canada</span>
+  <li><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Emma Brunskill, MIT, USA</span>
+  <li><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Larry Bush, MIT, USA</span>
+  <li><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Karina Valdivia Delgado, Sao Paulo, Brazil</span>
+  <li><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Emanuele di Rosa, Genova, Italy</span>
+  <li><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Christian Fritz, Toronto, Canada</span>
+  <li><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Saket Joshi, Tufts, USA</span>
+  <li><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Michael Katz, Techinon, Israel</span>
+  <li><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Lukas Kuhn, Munich/PARC, Germany/USA</span>
+  <li><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Hui Li, MIT, USA</span>
+  <li><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Robert Mattmüller, Freiburg, Germany</span>
+  <li><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Leon Planken, Delft, Holland</span>
+  <li><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Nathan Robinson, Griffith/NICTA, Australia</span>
+  <li><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Gabi Röger, Freiburg, Germany</span>
+  <li><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Julie Shah, MIT, USA</span>
+  <li><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Cindy Ko-Hsin Wang, ANU/NICTA, Australia</span>
+  <li><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Brian Ziebart, CMU, USA</span>
+</ul>     
+
+<h2><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >List of Posters</span></h2>
+
+<ul>      
+<li> <b><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Shirin Sohrabi</span></b> <span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >and Sheila A. McIlraith,</span> <i><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >On Planning with Preferences in HTN*</span></i>  <span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >(paper in NMR)</span>
+<li> <b><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Debdeep Banerjee</span></b> <span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >and  Patrik Haslum,</span> <i ahref="DCPOSTERS/debdeep.pdf"> <span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Planning As CSP : A Transition Based Encoding</span></i> 
+<li> <b><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >J. Benton</span></b><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >, Kartik Talamadupula, Subbarao Kambhampati,</span> <i ahref="DCPOSTERS/benton-abstract.pdf"> <span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >A Heuristic for Soft Deadline Goals</span></i> 
+<li> <b><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Sara Bernardini</span></b> <span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >and  David E. Smith,</span> <i ahref="DCPOSTERS/Sara_Bernardini_DC.pdf"> <span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Constraint-based Temporal Planning: Issues in Search Control and Domain Modelling</span></i> 
+<li> <b><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Abdeslam Boularias</span></b> <span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >and Brahim Chaib-draa,</span> <i><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Exact Dynamic Programming for Decentralized POMDPs with Lossless Policy Compression</span></i> <span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >(paper in ICAPS)</span>
+<li>  <b><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Emma Brunskill</span></b> <span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >& Nicholas Roy,</span> <i ahref="DCPOSTERS/icapsdcbrunskill.pdf"> <span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Acting Well in Continuous-State Stochastic Worlds with State-Dependent Dynamics</span></i> 
+<li> <b><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Lawrence A. Bush</span></b><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >, Brian Williams and Nicholas Roy,</span> <i ahref="DCPOSTERS/Lawrence_Bush_ICAPS_08_Final_ExplorationPolicies.pdf"> <span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Computing Exploration Policies via Closed-form Least-Squares Value Iteration</span></i> 
+<li> <b><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Karina Valdivia Delgado</span></b><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >, Leliane Nunes de Barros and Fábio Gagliardi Cozman,</span> <i ahref="DCPOSTERS/DelgadoDoctoralFinalVersion.pdf"> <span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Factored Markov Decision Processes with Imprecise Probabilities: a multilinear</span></i> 
+<li> <b><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Emanuele Di Rosa</span></b><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >,  Enrico Giunchiglia, Marco Maratea,</span> <i ahref="DCPOSTERS/Di_Rosa.pdf"> <span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Solving satisfiability problems with preferences in Planning as Satifiability</span></i> 
+<li> <b><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Christian Fritz</span></b> <span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >and Sheila A. McIlraith,</span> <i ahref="DCPOSTERS/FritzC_icaps_poster_paper.pdf"> <span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Planning in The Face of Frequent Exogenous Events</span></i> 
+<li> <b><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Saket Joshi</span></b> <span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >and Roni Khardon,</span> <i><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Stochastic Planning with First Order Decision Diagrams</span></i> <span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >(paper in ICAPS)</span>
+<li> <b><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Michael Katz</span></b> <span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >and Carmel Domshlak,</span> <i><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Pushing the Envelope of Abstraction-based Admissible Heuristics</span></i>  <span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >(paper in ICAPS)</span>
+<li> <b><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Lukas Kuhn</span></b><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >, Johan de Kleer,</span> <i ahref="DCPOSTERS/SPARK8neu.pdf"> <span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >On-line Planning and Scheduling for Diagnosing High-speed Manufacturing</span></i> 
+<li> <b><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Hui X. Li</span></b> <span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >and Brian C. Williams,</span> <i><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Generative Planning for Hybrid Systems based on Flow Tubes</span></i>  <span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >(paper in ICAPS)</span>
+<li> <b><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Robert Mattmüller</span></b> <span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >and Bernhard Nebel,</span> <i ahref="DCPOSTERS/ICAPS08-DC-submission-mattmueller.pdf"> <span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Solving Adversarial Planning Problems using Bidirectional Search</span></i>
+<li> <b><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Leon Planken</span></b><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >, Roman van der Krogt, Mathijs de Weerdt,</span> <i><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >P3C: A New Algorithm for the Simple Temporal Problem</span></i>  <span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >(paper in ICAPS)</span>
+<li> <b><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Nathan Robinson</span></b><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >, Charles Gretton, Duc-Nghia Pham, and Abdul Sattar,</span> <i><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >A Compact and Efficient SAT Encoding for Planning</span></i>  <span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >(paper in ICAPS)</span>
+<li> <b><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Gabriele Röger</span></b> <span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >and Malte Helmert and Bernhard Nebel,</span> <i><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >On the Relative Expressiveness of ADL and Golog: The Last Piece in the Puzzle</span></i>  <span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >(paper in KR)</span>
+<li> <b><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Julie Shah</span></b><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >, Brian Williams,</span> <i><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Fast Dynamic Scheduling of Disjunctive Temporal Constraint Networks</span></i>  <span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >(paper in ICAPS)</span>
+<li> <b><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Ko-Hsin Cindy Wang</span></b> <span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >and Adi Botea,</span> <i><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Fast and Memory-Efficient Multi-Agent Pathfinding</span></i>  <span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >(paper in ICAPS)</span>
+<li> <b><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Brian D. Ziebart</span></b><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >, Anind K. Dey, J. Andrew Bagnell,</span> <i><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Fast Planning for Dynamic Preferences</span></i>  <span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >(paper in ICAPS)</span>
+</ul>
+
+
+<h2><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >CFP</span></h2>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="doctoralCFP.html"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Call for Participation</span></span>
+
+
+<h2><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Doctoral Consortium Chairs</span></h2>
+
+<ul>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.engr.uky.edu/~goldsmit/hp.html"><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Judy Goldsmith</span></span><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >, University of Kentucky, USA</span>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.uic.edu/~sloan/"><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Robert Sloan</span></span><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >, University of Illinois at Chicago, USA</span>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ai.sri.com/~nysmith/"><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Neil Yorke-Smith</span></span><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >, SRI International, USA</span>
+</ul>
+
+<h2><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Programme Committee</span></h2>
+
+<ul>
+<li><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Laura Barbulescu, Carnegie Mellon University, USA</span>
+<li><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Yixin Chen, Washington University in St Louis, USA</span>
+<li><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Carmel Domshlak, Technion, Israel</span>
+<li><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Stefan Edelkamp, University of Dortmund, Germany</span>
+<li><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Tara Estlin, NASA JPL, USA</span>
+<li><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Hector Geffner, Universitat Pompeu Fabra, Spain</span>
+<li><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Malte Helmert, University of Freiburg, Germany</span>
+<li><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Joerg Hoffmann, University of Innsbruck (DERI), Austria</span>
+<li><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Henry Kautz, University of Rochester, USA</span>
+<li><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Graham Kendall, University of Nottingham, UK</span>
+<li><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Gilles Pesant, Universite de Montreal, Canada</span>
+<li><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Nicola Policella, ESA/ESOC, Germany and ISTC-CNR, Italy</span>
+<li><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Wheeler Ruml, University of New Hampshire, USA</span>
+<li><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Miguel Angel Salido, University of Valencia, Spain</span>
+<li><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Toby Walsh, NICTA and UNSW, Australia</span>
+<li><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Fusun Yaman, University of Maryland Baltimore County, USA</span>
+</ul>
+
+<h2><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></h2>
+<ul>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.nsf.gov/"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >National Science Foundation</span></span> <span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >(USA)</span>
+<!-- <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.dsto.defence.gov.au/">Defence Science and Technology Organisation</span> (Australia) -->
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://nicta.com.au/"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >NICTA</span></span> <span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >(Australia)</span>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.nasa.gov/"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >NASA</span></span> <span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >(USA)</span>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://sri.com/"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >SRI International</span></span> <span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >(USA)</span>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ic.arc.nasa.gov/people/de2smith/"><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >David E. Smith</span></span> <span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >(USA)</span>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ilog.com/"><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >ILOG</span></span> <span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >(France)</span>
+<!-- <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.adventiumlabs.org/">Adventium Labs</span> (USA) -->
+<!-- <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.eccai.org/">ECCAI</span> <img onmousedown="imd(this)" src="ECCAI20.jpg"> (Europe) -->
+</ul>
+
+	<!-- end #links -->
+	<div style="clear: both;"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></div>
+</div>
+<!-- end #content -->
+
+<div id="footer">
+	<p id="legal"><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Copyright &copy; 2007 Jess Simmonds</span>

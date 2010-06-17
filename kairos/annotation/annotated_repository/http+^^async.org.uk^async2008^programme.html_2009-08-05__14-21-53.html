@@ -1,0 +1,847 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" 
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+<HTML>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^async.org.uk^async2008^programme.html_2009-08-05__14-21-53.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^async.org.uk^async2008^programme.html_2009-08-05__14-21-53.yaml created on Wed Aug 05 17:31:02 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+	<TITLE>Async 2008</TITLE>
+	<META NAME="description" CONTENT="Async 2008">
+	<META NAME="author" CONTENT="Ian G. Clark">
+	<META NAME="keywords" CONTENT="Async 2008">
+	<BASE TARGET="_self">
+	<LINK REL="stylesheet" TYPE="text/css" HREF="async2008.css" />
+</HEAD>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+	<DIV id="container">
+		<DIV id="header">
+		</DIV>
+<!-- include header file -->
+
+<DIV id="left-menu">
+
+<span onclick="return false" style="text-decoration:underline; color:blue" href="index.html" title="Async 2008 Home"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="history.html" title="Welcome &amp; History"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Welcome &amp; History</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="updates.html" title="News &amp; Updates"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >News &amp; Updates</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="async2008-cfp.pdf" title="Call for papers"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Call for papers</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="#" title="Online Registration"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Online Registration</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="https://www.softconf.com/starts/async08/" title="Paper Submissions"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Paper Submissions</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="https://www.softconf.com/starts/async08/" title="Referees login"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Referees login</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="committee.html" title="Committees"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="sponsors.html" title="Sponsors"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="contacts.html" title="Contacts"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Contacts</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="student-travel-grants.html" title="Student Grants"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Student Grants</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="#" title="&nbsp;"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="programme.html" class="on" title="Programme"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Programme</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="keynote-tutorials.html" title="Keynote Talks &amp; Tutorials"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Talks &amp; Tutorials</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="demos.html" title="Echibition &amp; Demo Sessions"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Exhibition &amp; Demo Sessions</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="#" title="&nbsp;"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="venue.html" title="Venue"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Venue</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="hotels.html" title="Accommodation &amp; Hotels"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation &amp; Hotels</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="venue.html#welcome" title="Welcome Reception"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Welcome Reception</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="banquet-excursion.html" title="Banquet &amp; Excursion"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Banquet &amp; Excursion</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ncl.ac.uk/travel/info/index.php" title="Travel &amp; Maps"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Travel &amp; Maps</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://en.wikipedia.org/wiki/Newcastle_upon_Tyne" title="About Newcastle"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >About Newcastle</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="restaurants.html" title="Local Restaurants"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Local Restaurants</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="practical.html" title="Practical Information"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Practical Information</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="#" title="&nbsp;"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://picasaweb.google.co.uk/async.noc" title="Photos"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Photos</span></span><BR>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://simon.trinhall.cam.ac.uk/swmpics/2008/pics.cgi?dir=swmpics/2008/2008-04-09-BeamishMuseum" title="Simon Moore's Photos"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Simon Moore's Photos</span></span><BR>
+
+</DIV>
+
+<!-- include left hand menu file -->
+
+<!-- include Programme contents -->
+<DIV id="content">
+	<H3 class="middle"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Provisional Programme</span></H3>
+
+	<TABLE width="100%" class="prog">
+		<TR>
+			<TH width="5%"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></TH>
+			<TH width="19%"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Mon (7th)</span></TH> <!-- mon -->
+			<TH width="19%"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Tue (8th)</span></TH> <!-- tue -->
+			<TH width="19%"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Wed (9th)</span></TH> <!-- wed -->
+			<TH width="19%"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Thu (10th)</span></TH> <!-- thu -->
+			<TH width="19%"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Fri (11th)</span></TH> <!-- fri -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >8:00</span></TD>
+			<TD class="pra"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></TD> <!-- mon -->
+			<TD class="pre"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Registration +</span><BR><span onclick="return false" style="text-decoration:underline; color:blue" HREF="#opening"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Official Open</span></span></TD> <!-- tue -->
+			<TD class="pra"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></TD> <!-- wed -->
+			<TD class="pra"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></TD> <!-- thu -->
+			<TD class="pra"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></TD> <!-- fri -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >8:30</span></TD>
+			<TD class="pre"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></TD> <!-- mon -->
+			<TD class="prb"rowspan="2"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="keynote-tutorials.html#keynote-async1"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Async-1</span></span></TD> <!-- tue -->
+			<TD class="prb" rowspan="2"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="keynote-tutorials.html#keynote-nocs1"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Keynote NoCS-1</span></span></TD> <!-- wed -->
+			<TD class="prb" rowspan="2"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="keynote-tutorials.html#keynote-async2"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Async-2</span></span></TD> <!-- thu -->
+			<TD class="prb" rowspan="2"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="keynote-tutorials.html#keynote-nocs2"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Keynote NoCS-2</span></span></TD> <!-- fri -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >9:00</span></TD>
+			<TD class="prb" rowspan="3"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="keynote-tutorials.html#tutorial1"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial</span><BR><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >David Kinniment (1)</span></span></TD> <!-- mon -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >9:30</span></TD>
+			<TD class="prb" rowspan="2"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="#async1"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Async-1</span></span></TD> <!-- tue -->
+			<TD class="prb" rowspan="2"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="#nocs3"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >NoCS-3</span></span></TD> <!-- wed -->
+			<TD class="prb" rowspan="2"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="#async3"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Async-3</span></span></TD> <!-- thu -->
+			<TD class="prb" rowspan="2"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="#nocs6"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >NoCS-6</span></span></TD> <!-- fri -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >10:00</span></TD>
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >10:30</span></TD>
+			<TD class="prc"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Coffee +</span><BR><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial Demo 1</span></TD> <!-- mon -->
+			<TD class="prc"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Coffee</span></TD> <!-- tue -->
+			<TD class="prc"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Coffee</span></TD> <!-- wed -->
+			<TD class="prc"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Coffee</span></TD> <!-- thu -->
+			<TD class="prc"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Coffee</span></TD> <!-- fri -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >11:00</span></TD>
+			<TD class="prb" rowspan="2"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="keynote-tutorials.html#tutorial1"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial</span><BR><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >David Kinniment (2)</span></span></TD> <!-- mon -->
+			<TD class="prb" rowspan="4"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="#async2"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Async-2</span></span></TD> <!-- tue -->
+			<TD class="prb" rowspan="4"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="#nocs4"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >NoCS-4</span></span></TD> <!-- wed -->
+			<TD class="prb" rowspan="4"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="#async4"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Async-4</span></span></TD> <!-- thu -->
+			<TD class="prb" rowspan="2"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="#nocs7"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >NoCS-7</span></span></TD> <!-- fri -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >11:30</span></TD>
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >12:00</span></TD>
+			<TD class="prc"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial Demo 2</span></TD> <!-- mon -->
+			<TD class="prb" rowspan="2"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="#nocs8"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >NoCS-8</span><BR><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session + Demos</span></span></TD> <!-- fri -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >12:30</span></TD>
+			<TD class="prd" rowspan="2"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></TD> <!-- mon -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >13:00</span></TD>
+			<TD class="prd" rowspan="3"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></TD> <!-- tue -->
+			<TD class="pre" rowspan="10"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="banquet-excursion.html"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Excursion</span></span> <span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >to</span><BR><span onclick="return false" style="text-decoration:underline; color:blue" HREF="http://www.beamish.org.uk/"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Beamish Open Air Museum</span></span><BR><BR><I><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >light lunch included</span></I></TD> <!-- wed -->
+			<TD class="prd" rowspan="2"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></TD> <!-- thu -->
+			<TD class="prd" rowspan="2"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></TD> <!-- fri -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >13:30</span></TD>
+			<TD class="prb" rowspan="4"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="keynote-tutorials.html#tutorial2"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial</span><BR><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Sachin Sapatnekar</span></span></TD> <!-- mon -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >14:00</span></TD>
+			<TD class="prb" rowspan="3"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="#nocs5"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >NoCS-5</span></span></TD> <!-- thu -->
+			<TD class="prb" rowspan="2"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Panel</span></TD> <!-- fri -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >14:30</span></TD>
+			<TD class="prb" rowspan="3"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="#nocs1"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >NoCS-1</span></span></TD> <!-- tue -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >15:00</span></TD>
+			<TD class="pre"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Close</span></TD> <!-- fri -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >15:30</span></TD>
+			<TD class="prc"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Coffee +</span><BR><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial Demo 3</span></TD> <!-- mon -->
+			<TD class="prc"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Coffee</span></TD> <!-- thu -->
+			<TD class="pra"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></TD> <!-- fri -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >16:00</span></TD>
+			<TD class="prb" rowspan="3"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="keynote-tutorials.html#tutorial3"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial</span><BR><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Mike Kishinevsky</span></span></TD> <!-- mon -->
+			<TD class="prc"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Coffee</span></TD> <!-- tue -->
+			<TD class="prb" rowspan="3"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="#async5"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Async-5</span></span></TD> <!-- thu -->
+			<TD class="pra"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></TD> <!-- fri -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >16:30</span></TD>
+			<TD class="prb" rowspan="3"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="#nocs2"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >NoCS-2</span></span></TD> <!-- tue -->
+			<TD class="pra"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></TD> <!-- fri -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >17:00</span></TD>
+			<TD class="pra"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></TD> <!-- fri -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >17:30</span></TD>
+			<TD class="prc"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial Demo 4</span></TD> <!-- mon -->
+			<TD class="pre"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="#bestpaper"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Best Paper Award</span></span></TD> <!-- thu -->
+			<TD class="pra"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></TD> <!-- fri -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >18:00</span></TD>
+			<TD class="pre"><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></TD> <!-- mon -->
+			<TD class="pre" rowspan="2"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Industrial Demos</span><BR><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >&amp; Reception</span></TD> <!-- tue -->
+			<TD class="pra"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></TD> <!-- wed -->
+			<TD class="pra"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></TD> <!-- thu -->
+			<TD class="pra"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></TD> <!-- fri -->
+		</TR>
+		<TR>
+			<TD class="prog-small"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >19:00</span></TD>
+			<TD class="pre"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Welcome Reception</span></TD> <!-- mon -->
+			<TD class="pre"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="banquet-excursion.html"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Banquet</span></span></TD> <!-- wed -->
+			<TD class="pra"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></TD> <!-- thu -->
+			<TD class="pra"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></TD> <!-- fri -->
+		</TR>
+
+	</TABLE>
+
+<P><span onclick="return false" style="text-decoration:underline; color:blue" HREF="printable-programme.html"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Printable Programme</span></span></P>
+
+	<H3 class="middle"><span onclick="return false" style="text-decoration:underline; color:blue" NAME="opening"><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Official Opening</span></span> <span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Tuesday/Welcome-talk-ASYNC-NOCS-2008.pdf"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Slides (740KB PDF)</span></span></H3>
+	<UL type=disc>
+	<LI><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday 8th 08:15-08:30</span><BR>
+	<span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Welcome from Newcastle University Pro-Vice Chancellor, Professor Oliver Hinton.</span><BR>
+	<span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Welcome from General Chairs, Alex Yakovlev and John Bainbridge</span><BR>
+	<span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >ASYNC PC Chairs, Jordi Cortadella and Alexander Taubin</span><BR>
+	<span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >NOCS PC Chairs, Davide Bertozzi and Kees Goossens</span>
+	</UL>
+
+<HR>
+	<H3 class="middle"><span onclick="return false" style="text-decoration:underline; color:blue" NAME="async1"><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Async-1</span></span><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >: Data-driven asynchronous circuits</span><BR>
+	      <span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Jordi Cortadella</span></H3>
+
+      <UL type="disc">
+	      <LI><B><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Compilation of Data-Driven Circuits</span></B> <span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Tuesday/Async-1/Doug-Edwards.pdf"><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Slides (270KB PDF)</span></span><BR>
+<span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Doug Edwards, Sam Taylor and Luis Plana</span><BR>
+		<span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >09:30-10:00</span>
+              
+<LI><B><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Concurrency-Enhancing Transformations for Asynchronous Behavioral Specifications:
+	A Data-Driven Approach</span></B> <span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Tuesday/Async-1/John-Hansen.pdf"><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Slides (1.5MB PDF)</span></span><BR>
+<span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >John Hansen and Montek Singh</span><BR>
+		<span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >10:00-10:30</span>
+
+</UL>
+<HR>
+ 
+<H3 class="middle"><span onclick="return false" style="text-decoration:underline; color:blue" NAME="async2"><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Async-2</span></span><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >: Variability, power and nanoelectronics</span><BR>
+      	<span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Chair: John Bainbridge</span></H3>
+
+      <UL type="disc">
+	      <LI><B><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >High-Level Time-Accurate Model for the Design of Self-Timed Ring Oscillators</span></B> <span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Tuesday/Async-2/ASYNC_Jeremie_Hamon_final.pdf"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Slides (1.5MB PDF)</span></span><BR>
+<span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Jérémie Hamon, Laurent Fesquet, Benoît Miscopein and Marc Renaudin</span><BR>
+<span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >11:00-11:30</span>
+
+<LI><B><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Adapting Synchronizers to the Effects of On Chip Variability</span></B> <span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Tuesday/Async-2/Jun-Zhou.pdf"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Slides (775KB PDF)</span></span><BR>
+<span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Jun Zhou, David Kinniment, Gordon Russell and Alex Yakovlev</span><BR>
+<span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >11:30-12:00</span>
+
+<LI><B><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Power regulation based on an Asynchronous Activity Detection and  its Application to ANOC Node Leakage Reduction</span></B> <span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Tuesday/Async-2/Automatic_Power_Regulation.pdf"><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Slides (1.8MB PDF)</span></span><BR>
+<span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Yvain Thonnart, Edith Beigne, Alexandre Valentian and Pascal Vivet</span><BR>
+<span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >12:00-12:30</span>
+
+<LI><B><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Asynchronous Nano-electronics: Preliminary Investigation</span></B> <span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Tuesday/Async-2/ajm.pdf"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Slides (9.0MB PDF)</span></span><BR>
+<span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Alain J. Martin and Piyush Prakash, Caltech</span><BR>
+<span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >12:30-13:00</span>
+
+
+</UL>
+<HR>
+    
+<H3 class="middle"><span onclick="return false" style="text-decoration:underline; color:blue" NAME="async3"><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Async-3</span></span><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >: Latch protocols and pipelines</span><BR>
+	<span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Chair: David Bormann</span></H3>
+
+      <UL type="disc">
+	      <LI><B><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >The family of 4-phase latch protocols</span></B> <span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Thursday/Async-3/3t3.pdf"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Slides (88KB PDF)</span></span><BR>
+<span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Graham Birtwistle and Kenneth Stevens</span><BR>
+<span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >09:30-10:00</span>
+
+<LI><B><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Heterogeneous Latch-based Asynchronous Pipelines</span></B> <span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Thursday/Async-3/async08b.pdf"><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Slides (270KB PDF)</span></span><BR>
+<span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Girish Venkataramani, Tiberiu Chelcea and Seth Goldstein</span> <BR>
+<span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >10:00-10:30</span>
+
+</UL>
+<HR>
+ 
+<H3 class="middle"><span onclick="return false" style="text-decoration:underline; color:blue" NAME="async4"><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Async-4</span></span><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >: Efficient and reliable schemes for computation and communication</span><BR>
+	<span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Jim Garside</span></H3>
+
+      <UL type="disc">
+	      <LI><B><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Block-Level Relaxation for Timing-Robust Asynchronous Circuits Based on Eager Evaluation</span></B> <span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Thursday/Async-4/fin-jeong-nowick-async-08-talk.pdf"><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Slides (605KB PDF)</span></span><BR>
+<span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Cheoljoo Jeong and Steven Nowick, Columbia University</span><BR>
+<span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >11:00-11:30</span>
+
+<LI><B><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Asynchronous Computing in Sense Amplifier-based Pass Transistor Logic</span></B> <span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Thursday/Async-4/Async08_TTL.pdf"><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Slides (1.5MB PDF)</span></span><BR>
+<span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Tsung-Te Liu, Louis Alarcón, Matthew Pierson and Jan Rabaey</span><BR>
+<span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >11:30-12:00</span>
+
+<LI><B><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >A Level-Encoded Transition Signaling Protocol for High-Throughput Asynchronous Global Communication</span></B> <span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Thursday/Async-4/LETS_slides.pdf"><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Slides (480KB PDF)</span></span><BR>
+<span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Peggy McGee, Melinda Agyekum, Moustafa Mohamed and Steven Nowick</span><BR>
+<span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >12:00-12:30</span>
+
+<LI><B><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >FPGA Implementation of an Asynchronous Processor with Online and Offline Testing Capabilities</span></B> <span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Thursday/Async-4/ASYNC_2008_mod.pdf"><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Slides (680KB PDF)</span></span><BR>
+<span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Nikolaos Minas, Matthew Marshall, Gordon Russell and Alex Yakovlev</span><BR>
+<span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >12:30-13:00</span>
+
+</UL>
+<HR>
+
+<H3 class="middle"><span onclick="return false" style="text-decoration:underline; color:blue" NAME="async5"><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >Async-5</span></span><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >: Synthesis and verification of asynchronous controllers</span><BR>
+	<span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Luciano Lavagno</span></H3>
+
+      <UL type="disc">
+	      <LI><B><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Derivation of Monotonic Covers for Standard-C Implementation Using STG Unfoldings</span></B> <span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Thursday/Async-5/Khomenko_async08.pdf"><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >Slides (560KB PDF)</span></span><BR>
+<span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Victor Khomenko, Newcastle University</span><BR>
+<span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >16:00-16:30</span>
+
+<LI><B><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Coping with Soft Errors in Asynchronous Burst-Mode Machines</span></B> <span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Thursday/Async-5/Soft-Errors-Almukhaizim.pdf"><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Slides (360KB PDF)</span></span><BR>
+	<span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >Sobeeh Almukhaizim, Feng Shi and Yiorgos Makris</span><BR>
+<span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >16:30-17:00</span>
+
+	<LI><B><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Automated verification of asynchronous circuits using circuit Petri nets</span></B> <span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Thursday/Async-5/Poliakov_verification.pdf"><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Slides (680KB PDF)</span></span><BR>
+<span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >Ivan Poliakov, Andrey Mokhov, Ashur Rafiev, Danil Sokolov and Alex Yakovlev</span><BR>
+<span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >17:00-17:30</span>
+
+</UL>
+
+<HR>
+
+<H3 class="middle"><span onclick="return false" style="text-decoration:underline; color:blue" NAME="nocs1"><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >NoCS-1</span></span><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >: TUNING NOC ARCHITECTURE FOR SPECIFIC PURPOSES</span><BR>
+<span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Ran Ginosar</span></H3>
+
+      <UL type="disc">
+	      <LI><I><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >The papers presented in this session show how network building blocks or an entire architecture can be optimized for specific purposes, such as debugging, fault-tolerance, or low power.</span> </I>
+
+	      <LI><B><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >Debugging Distributed-Shared-Memory Communication at Multiple Granularities in Networks on Chip</span></B>  <span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Tuesday/NoCS-1/20080408-nocs-debug.v3.pdf"><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >Slides (540KB PDF)</span></span><BR>
+<span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Bart Vermeulen, Kees Goossens and Siddharth Umrani</span><BR>
+<span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >14:30-15:00</span>
+
+<LI><B><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >A Lightweight Fault-tolerant Mechanism for Network-on-chip</span></B> <span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Tuesday/NoCS-1/dbp-nocs08-v5.pdf"><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >Slides (267KB PDF)</span></span><BR>
+<span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Michihiro Koibuchi, Hiroki Matsutani, Hideharu Amano and Timothy Pinkston</span><BR>
+<span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >15:00-15:30</span>
+
+<LI><B><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Adding Slow-Silent Virtual Channels for Low-Power On-Chip Networks</span></B> <span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Tuesday/NoCS-1/matsutani-nocs.pdf"><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Slides (510KB PDF)</span></span><BR>
+<span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >Hiroki Matsutani, Michihiro Koibuchi, Daihan Wang and Hideharu Amano</span><BR>
+<span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >15:30-16:00</span>
+
+</UL>
+<HR>
+
+<H3 class="middle"><span onclick="return false" style="text-decoration:underline; color:blue" NAME="nocs2"><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >NoCS-2</span></span><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >: FPGA-BASED AND RECONFIGURABLE NOC DESIGN</span><BR>
+<span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Davide Bertozzi</span></H3>
+
+      <UL type="disc">
+	      <LI><I><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >The papers in this session extend FPGAs with networks on chip techniques, or conversely, networks are augmented with circuit-switching techniques around the routers.</span></I>
+
+		      <LI><B><span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >A Network of Time-Division Multiplexed Wiring for FPGAs</span></B> <span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Tuesday/NoCS-2/slides_rmf_pdf.pdf"><span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >Slides (112KB PDF)</span></span><BR>
+<span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >Rosemary Francis, Simon Moore and Robert Mullins</span><BR>
+<span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >16:30-17:00</span>
+
+<LI><B><span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >Hardwired Networks on Chip in FPGAs to unify Functional and Configuration Interconnects</span></B> <span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Tuesday/NoCS-2/20080408-nocs-fpga.v1.pdf"><span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >Slides (488kB PDF)</span></span><BR>
+<span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >Kees Goossens, Martijn Bennebroek, Jae Young Hur and Muhammad Aqeel Wahlah</span><BR>
+<span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >17:00-17:30</span>
+   
+<LI><B><span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >ReNoC: A Network-on-Chip Architecture with Reconfigurable Topology</span></B> <span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Tuesday/NoCS-2/ReNoC2008.pdf"><span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >Slides (481KB PDF)</span></span><BR>
+<span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >Mikkel B. Stensgaard and Jens Sparsø</span><BR>
+<span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >17:30-18:00</span>
+
+</UL>
+<HR>
+
+<H3 class="middle"><span onclick="return false" style="text-decoration:underline; color:blue" NAME="nocs3"><span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >NoCS-3</span></span><span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >: LOW-POWER AND RELIABLE LINK DESIGN</span><BR>
+<span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Marcello Lajolo</span></H3>
+
+      <UL type="disc">
+	      <LI><I><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >The papers in this session present link design techniques trading off power with reliability.</span></I>
+
+	      <LI><B><span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >SEU-Hardened Energy Recovery Pipelined Interconnects for On-Chip Networks</span></B> <span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Wednesday/NoCS-3/NOCS_Presentation_Ver3.pdf"><span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >Slides (493KB PDF)</span></span><BR>
+<span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >Alireza Ejlali and Bashir M Al-Hashimi</span><BR>
+<span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >09:30-10:00</span>
+
+<LI><B><span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >Low Power and Reliable Interconnection with Self-Corrected Green Coding Scheme for Network-on-Chip</span></B> <span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Wednesday/NoCS-3/NoCS-coding.v5.pdf"><span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >Slides (463KB PDF)</span></span><BR>
+<span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >Po-Tsang Huang, Wei-Li Fang, Yin-Ling Wang and Wei Hwang</span><BR>
+<span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >10:00-10:30</span>
+
+</UL>
+<HR>
+
+<H3 class="middle"><span onclick="return false" style="text-decoration:underline; color:blue" NAME="nocs4"><span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >NoCS-4</span></span><span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >: TOPOLOGY AND ROUTING DESIGN: methodologies and tools</span><BR>
+<span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Andreas Hansson</span></H3>
+
+      <UL type="disc">
+	      <LI><I><span class="coloringspan" id="282" onmousedown="md(this)" onmouseup="mu(this)" >Topology and routing design require high-level exploration tools and methodologies and an interaction
+		      of these latter with physical synthesis tools.  All these issues are covered by the papers presented in this session.</span></I>
+
+<LI><B><span class="coloringspan" id="283" onmousedown="md(this)" onmouseup="mu(this)" >An Efficient Implementation of Distributed Routing Algorithms for NoCs</span></B> <span class="coloringspan" id="284" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Wednesday/NoCS-4/isnoc.pdf"><span class="coloringspan" id="285" onmousedown="md(this)" onmouseup="mu(this)" >Slides (2.2MB PDF)</span></span><BR>
+<span class="coloringspan" id="286" onmousedown="md(this)" onmouseup="mu(this)" >José Flich, Samuel Rodrigo and José Duato</span><BR>
+<span class="coloringspan" id="287" onmousedown="md(this)" onmouseup="mu(this)" >11:00-11:30</span>
+
+<LI><B><span class="coloringspan" id="288" onmousedown="md(this)" onmouseup="mu(this)" >Design of Bandwidth Aware and Congestion Avoiding Efficient Routing Algorithms for Networks-on-Chip Platforms</span></B> <span class="coloringspan" id="289" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Wednesday/NoCS-4/palesi_nocs.pdf"><span class="coloringspan" id="290" onmousedown="md(this)" onmouseup="mu(this)" >Slides (545KB PDF)</span></span><BR>
+<span class="coloringspan" id="291" onmousedown="md(this)" onmouseup="mu(this)" >Maurizio Palesi, Giuseppe Longo, Salvatore Signorino, Rickard Holsmark, Shashi Kumar and Vincenzo Catania</span><BR>
+<span class="coloringspan" id="292" onmousedown="md(this)" onmouseup="mu(this)" >11:30-12:00</span>
+
+<LI><B><span class="coloringspan" id="293" onmousedown="md(this)" onmouseup="mu(this)" >Exploring High-Dimensional Topologies for NoC Design Through an Integrated Analysis and Synthesis Framework</span></B> <span class="coloringspan" id="294" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Wednesday/NoCS-4/Gilabert.pdf"><span class="coloringspan" id="295" onmousedown="md(this)" onmouseup="mu(this)" >Slides (1.5MB PDF)</span></span><BR>
+<span class="coloringspan" id="296" onmousedown="md(this)" onmouseup="mu(this)" >Francisco Gilabert, Simone Medardoni, Davide Bertozzi, Luca Benini, Maria Engracia Gomez, Pedro Lopez and Jose Duato</span><BR>
+<span class="coloringspan" id="297" onmousedown="md(this)" onmouseup="mu(this)" >12:00-12:30</span>
+
+<LI><B><span class="coloringspan" id="298" onmousedown="md(this)" onmouseup="mu(this)" >Impact of Process and Temperature Variations on Network-on-Chip Design Exploration</span></B> <span class="coloringspan" id="299" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Wednesday/NoCS-4/PolarisPT-NoCs-08-Bin.pdf"><span class="coloringspan" id="300" onmousedown="md(this)" onmouseup="mu(this)" >Slides (1.7MB PDF)</span></span><BR>
+<span class="coloringspan" id="301" onmousedown="md(this)" onmouseup="mu(this)" >Bin Li, Li-Shiuan Peh and Priyadarsan Patra</span><BR>
+<span class="coloringspan" id="302" onmousedown="md(this)" onmouseup="mu(this)" >12:30-13:00</span>
+
+</UL>
+<HR>
+
+<H3 class="middle"><span onclick="return false" style="text-decoration:underline; color:blue" NAME="nocs5"><span class="coloringspan" id="303" onmousedown="md(this)" onmouseup="mu(this)" >NoCS-5</span></span><span class="coloringspan" id="304" onmousedown="md(this)" onmouseup="mu(this)" >: GALS NOC IMPLEMENTATION</span><BR>
+<span class="coloringspan" id="305" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Jens Sparsø</span></H3>
+
+      <UL type="disc">
+	      <LI><I><span class="coloringspan" id="306" onmousedown="md(this)" onmouseup="mu(this)" >GALS NoC design is addressed at different levels of abstraction in this session. Proposed papers range form comprehensive system-wide implementation and design choices to design-for-test implementation for asynchronous interconnects.</span></I>
+
+	      <LI><B><span class="coloringspan" id="307" onmousedown="md(this)" onmouseup="mu(this)" >Dynamic Voltage and Frequency Scaling Architecture for Units Integration within a GALS NoC</span></B> <span class="coloringspan" id="308" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Thursday/NoCS-5/ALPIN_NOCS_presentation.pdf"><span class="coloringspan" id="309" onmousedown="md(this)" onmouseup="mu(this)" >Slides (1.1MB PDF)</span></span><BR>
+<span class="coloringspan" id="310" onmousedown="md(this)" onmouseup="mu(this)" >Edith Beigné, Fabien Clermidy, Sylvain Miermont and Pascal Vivet</span><BR>
+<span class="coloringspan" id="311" onmousedown="md(this)" onmouseup="mu(this)" >14:00-14:30</span>
+
+<LI><B><span class="coloringspan" id="312" onmousedown="md(this)" onmouseup="mu(this)" >Physical Implementation of the DSPIN Network-on-Chip in the FAUST Architecture</span></B> <span class="coloringspan" id="313" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Thursday/NoCS-5/DSPINvsANOC.pdf"><span class="coloringspan" id="314" onmousedown="md(this)" onmouseup="mu(this)" >Slides (2.3MB PDF)</span></span><BR>
+<span class="coloringspan" id="315" onmousedown="md(this)" onmouseup="mu(this)" >Ivan Miro Panades, Fabien Clermidy, Pascal Vivet and Alain Greiner</span><BR>
+<span class="coloringspan" id="316" onmousedown="md(this)" onmouseup="mu(this)" >14:30-15:00</span>
+
+<LI><B><span class="coloringspan" id="317" onmousedown="md(this)" onmouseup="mu(this)" >A Design-for-Test Implementation of an Asynchronous Network-on-Chip Architecture and its Associated Test Pattern Generation and Application</span></B> <span class="coloringspan" id="318" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Thursday/NoCS-5/NOCS2008_TranXT_final.pdf"><span class="coloringspan" id="319" onmousedown="md(this)" onmouseup="mu(this)" >Slides (648KB PDF)</span></span><BR>
+<span class="coloringspan" id="320" onmousedown="md(this)" onmouseup="mu(this)" >Xuan-Tu Tran, Yvain Thonnart, Jean Durupt, Vincent Beroulle and Chantal Robach</span><BR>
+<span class="coloringspan" id="321" onmousedown="md(this)" onmouseup="mu(this)" >15:00-15:30</span>
+
+
+</UL>
+<HR>
+
+<H3 class="middle"><span onclick="return false" style="text-decoration:underline; color:blue" NAME="nocs6"><span class="coloringspan" id="322" onmousedown="md(this)" onmouseup="mu(this)" >NoCS-6</span></span><span class="coloringspan" id="323" onmousedown="md(this)" onmouseup="mu(this)" >: QUALITY OF SERVICE</span><BR>
+<span class="coloringspan" id="324" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Kees Goossens</span></H3>
+
+      <UL type="disc">
+	      <LI><I><span class="coloringspan" id="325" onmousedown="md(this)" onmouseup="mu(this)" >The papers in this session discuss NoC performance and quality of service.</span></I>
+
+		      <LI><B><span class="coloringspan" id="326" onmousedown="md(this)" onmouseup="mu(this)" >Real-Time Communication Analysis for On-Chip Networks with Wormhole Switching</span></B> <span class="coloringspan" id="327" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Friday/NoCS-6/Real-time-communication-analysis-for-NoCs.pdf"><span class="coloringspan" id="328" onmousedown="md(this)" onmouseup="mu(this)" >Slides (346KB PDF)</span></span><BR>
+<span class="coloringspan" id="329" onmousedown="md(this)" onmouseup="mu(this)" >Zheng Shi and Alan Burns</span><BR>
+<span class="coloringspan" id="330" onmousedown="md(this)" onmouseup="mu(this)" >09:30-10:00</span>
+
+<LI><B><span class="coloringspan" id="331" onmousedown="md(this)" onmouseup="mu(this)" >Statistical Approach to NoC Design</span></B> <span class="coloringspan" id="332" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Friday/NoCS-6/Statistical-Approach.pdf"><span class="coloringspan" id="333" onmousedown="md(this)" onmouseup="mu(this)" >Slides (862KB PDF)</span></span><BR>
+<span class="coloringspan" id="334" onmousedown="md(this)" onmouseup="mu(this)" >Itamar Cohen, Ori Rottenstreich and Isaac Keslassy</span><BR>
+<span class="coloringspan" id="335" onmousedown="md(this)" onmouseup="mu(this)" >10:00-10:30</span>
+
+</UL>
+<HR>
+
+<H3 class="middle"><span onclick="return false" style="text-decoration:underline; color:blue" NAME="nocs7"><span class="coloringspan" id="336" onmousedown="md(this)" onmouseup="mu(this)" >NoCS-7</span></span><span class="coloringspan" id="337" onmousedown="md(this)" onmouseup="mu(this)" >: COHERENCE REQUIREMENTS ON THE INTERCONNECT</span><BR>
+<span class="coloringspan" id="338" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Federico Angiolini</span></H3>
+
+      <UL type="disc">
+	      <LI><I><span class="coloringspan" id="339" onmousedown="md(this)" onmouseup="mu(this)" >The coherence protocol in CMP systems poses requirements on the system interconnect which have to be met through proper architecture design choices, as described by the papers in this session.</span></I>
+
+		      <LI><B><span class="coloringspan" id="340" onmousedown="md(this)" onmouseup="mu(this)" >Reducing the Interconnection Network cost of Chip Multiprocessors</span></B> <span class="coloringspan" id="341" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Friday/NoCS-7/NOCS-Rotary.pdf"><span class="coloringspan" id="342" onmousedown="md(this)" onmouseup="mu(this)" >Slides (888KB PDF)</span></span><BR>
+<span class="coloringspan" id="343" onmousedown="md(this)" onmouseup="mu(this)" >Pablo Abad, Valentin Puente and Jose Angel Gregorio</span><BR>
+<span class="coloringspan" id="344" onmousedown="md(this)" onmouseup="mu(this)" >11:00-11:30</span>
+
+
+<LI><B><span class="coloringspan" id="345" onmousedown="md(this)" onmouseup="mu(this)" >Circuit-Switched Coherence</span></B> <span class="coloringspan" id="346" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Friday/NoCS-7/circuit-switched-coherence.pdf"><span class="coloringspan" id="347" onmousedown="md(this)" onmouseup="mu(this)" >Slides (695KB PDF)</span></span><BR>
+<span class="coloringspan" id="348" onmousedown="md(this)" onmouseup="mu(this)" >Natalie Enright Jerger, Li-Shiuan Peh and Mikko Lipasti</span><BR>
+<span class="coloringspan" id="349" onmousedown="md(this)" onmouseup="mu(this)" >11:30-12:00</span>
+
+</UL>
+<HR>
+
+<H3 class="middle"><span onclick="return false" style="text-decoration:underline; color:blue" NAME="nocs8"><span class="coloringspan" id="350" onmousedown="md(this)" onmouseup="mu(this)" >NoCS-8</span></span><span class="coloringspan" id="351" onmousedown="md(this)" onmouseup="mu(this)" >: POSTER SESSION</span><BR>
+<span class="coloringspan" id="352" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Kees Goossens</span></H3>
+
+<P><span onclick="return false" style="text-decoration:underline; color:blue" HREF="posters.html"><span class="coloringspan" id="353" onmousedown="md(this)" onmouseup="mu(this)" >Poster requirements</span></span><span class="coloringspan" id="354" onmousedown="md(this)" onmouseup="mu(this)" >.</span></P>
+
+      <UL type="disc">
+	      <LI><B><span class="coloringspan" id="355" onmousedown="md(this)" onmouseup="mu(this)" >Simulation and Evaluation of On-Chip Interconnect Architectures: 2D Mesh, Spidergon, and WK-recursive network</span></B> <span class="coloringspan" id="356" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Friday/NoCS-8/SubohPoster.jpg"><span class="coloringspan" id="357" onmousedown="md(this)" onmouseup="mu(this)" >Poster (474KB JPG)</span></span><BR>
+<span class="coloringspan" id="358" onmousedown="md(this)" onmouseup="mu(this)" >Suboh Suboh, Mohamed Bakhouya and Tarek El-Ghazawi</span>
+   
+
+<LI><B><span class="coloringspan" id="359" onmousedown="md(this)" onmouseup="mu(this)" >Low-cost VC allocator design for virtual channel wormhole routers in networks-on-chip</span></B><BR>
+<span class="coloringspan" id="360" onmousedown="md(this)" onmouseup="mu(this)" >Min Zhang and Chiu-Sing Choy</span>
+   
+
+<LI><B><span class="coloringspan" id="361" onmousedown="md(this)" onmouseup="mu(this)" >Network Simplicity for Latency Insensitive Cores</span></B><BR>
+<span class="coloringspan" id="362" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Gebhardt and Kenneth Stevens</span>
+    
+
+<LI><B><span class="coloringspan" id="363" onmousedown="md(this)" onmouseup="mu(this)" >Applying Dataflow Analysis to Dimension Buffers for Guaranteed Performance in Networks on Chip</span></B><BR>
+<span class="coloringspan" id="364" onmousedown="md(this)" onmouseup="mu(this)" >Andreas Hansson, Maarten Wiggers, Arno Moonen, Kees Goossens and Marco Bekooij</span>
+
+
+<LI><B><span class="coloringspan" id="365" onmousedown="md(this)" onmouseup="mu(this)" >Analysis and Design of Wave-Pipelined Global Interconnects in FPGAs</span></B><BR>
+<span class="coloringspan" id="366" onmousedown="md(this)" onmouseup="mu(this)" >Terrence Mak, Crescenzo D'Alessandro, Pete Sedcole, Peter Y.K. Cheung, Alex Yakovlev and Wayne Luk</span>
+    
+
+<LI><B><span class="coloringspan" id="367" onmousedown="md(this)" onmouseup="mu(this)" >An on-Chip and inter-Chip Communications Network for the SpiNNaker Massively-Parallel Neural Net Simulator</span></B><BR>
+<span class="coloringspan" id="368" onmousedown="md(this)" onmouseup="mu(this)" >Luis Plana, John Bainbridge, Steve Furber, Yebin Shi and Jian Wu</span>
+
+
+<LI><B><span class="coloringspan" id="369" onmousedown="md(this)" onmouseup="mu(this)" >Dual-channel access mechanism for cost-effective NoC design</span></B> <span class="coloringspan" id="370" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Friday/NoCS-8/Shijun-Lin.pdf"><span class="coloringspan" id="371" onmousedown="md(this)" onmouseup="mu(this)" >Poster (460KB PDF)</span></span> <span class="coloringspan" id="372" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Friday/NoCS-8/Shijun-Lin-notes.pdf"><span class="coloringspan" id="373" onmousedown="md(this)" onmouseup="mu(this)" >Notes (15KB PDF)</span></span><BR>
+<span class="coloringspan" id="374" onmousedown="md(this)" onmouseup="mu(this)" >Shijun Lin, Li Su, Depeng Jin and Lieguang Zeng</span>
+
+</UL>
+
+<HR>
+<H3 class="middle"><span onclick="return false" style="text-decoration:underline; color:blue" NAME="bestpaper"><span class="coloringspan" id="375" onmousedown="md(this)" onmouseup="mu(this)" >Best Paper Award</span></span> <span class="coloringspan" id="376" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="../async2008/async-nocs-slides/Thursday/BPA/ASYNC08-Best-Paper-Award.pdf"><span class="coloringspan" id="377" onmousedown="md(this)" onmouseup="mu(this)" >Slides (120KB PDF)</span></span><BR>
+	<span class="coloringspan" id="378" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Jens Sparsoe</span></H3>
+      <UL type="disc">
+	<LI><span class="coloringspan" id="379" onmousedown="md(this)" onmouseup="mu(this)" >17:30-17:45</span>
+</UL>
+
+</DIV>
+<!-- end Programme contents -->
+
+<!-- include footer file -->
+		<DIV id="footer">
+			<img onmousedown="imd(this)" SRC="photos/Image8.png" alt="8 Tyne Bridge C elements" width="800px" height="75px"><BR>
+			<P class="footer"><span onclick="return false" style="text-decoration:underline; color:blue" HREF="http://async.org.uk/async2008/"><span class="coloringspan" id="380" onmousedown="md(this)" onmouseup="mu(this)" >Async 2008</span></span><span class="coloringspan" id="381" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="http://www.ncl.ac.uk/"><span class="coloringspan" id="382" onmousedown="md(this)" onmouseup="mu(this)" >Newcastle University</span></span><span class="coloringspan" id="383" onmousedown="md(this)" onmouseup="mu(this)" >, UK. &nbsp;&nbsp;|&nbsp;&nbsp; General Chair:</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="mailto:Alex.Yakovlev@ncl.ac.uk?subject=Async2008"><span class="coloringspan" id="384" onmousedown="md(this)" onmouseup="mu(this)" >Alex Yakovlev</span></span> <span class="coloringspan" id="385" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;|&nbsp;&nbsp; Local Arrangements Co-Chairs:</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="mailto:Albert.Koelmans@ncl.ac.uk?subject=Async2008"><span class="coloringspan" id="386" onmousedown="md(this)" onmouseup="mu(this)" >Albert Koelmans</span></span> <span class="coloringspan" id="387" onmousedown="md(this)" onmouseup="mu(this)" >&amp;</span> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="mailto:Fei.Xia@ncl.ac.uk?subject=Async2008"><span class="coloringspan" id="388" onmousedown="md(this)" onmouseup="mu(this)" >Fei Xia</span>

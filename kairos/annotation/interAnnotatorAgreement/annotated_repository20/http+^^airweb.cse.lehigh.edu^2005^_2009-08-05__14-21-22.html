@@ -1,0 +1,716 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" 
+"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/12/annotation/annotated_repository/http+^^airweb.cse.lehigh.edu^2005^_2009-08-05__14-21-22.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/12/annotation/annotated_repository/http+^^airweb.cse.lehigh.edu^2005^_2009-08-05__14-21-22.yaml created on Thu Aug 13 13:57:53 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+<title>AIRWeb '05: First International Workshop on 
+Adversarial Information Retrieval on the Web</title>
+<link rel="stylesheet" href="main.css" /></head>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<table border="1" cellpadding="5" width="100%"><tr><td bgcolor="white">
+<b style="font-size:300%"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >AIRWeb&nbsp;'05</span></b></td><td>
+<b style="font-size:90%"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >First International Workshop on</span></b><br />
+<b style="font-size:150%"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Adversarial Information Retrieval on the Web</span></b>
+</td></tr>
+</table><div align="center">
+<span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >At the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www2005.org/"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >14th International World Wide Web Conference (WWW2005)</span></span><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >, 10-14&nbsp;May&nbsp;2005, Chiba,&nbsp;Japan</span>
+</div>
+<p><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+
+<p align="center">
+<i><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Workshop sponsored by</span></i><br/>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ask.com/"><img onmousedown="imd(this)" src="sig_logo.gif" alt="Ask 
+Jeeves"/></span>
+</p>
+
+<p><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+
+<p align="center">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="#"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Top</span></span>
+<span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#welcome"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Welcome</span></span>
+<span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#overview"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Overview</span></span>
+<span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#program"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span>
+<span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#proceedings"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></span>
+<span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#pc"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span> </span>
+<span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://airweb.cse.lehigh.edu/"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Website</span></span>
+</p>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="welcome"></span>
+<h1><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Welcome</span></h1>
+
+<p>
+<span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Dear Participant:</span>
+</p>
+<p>
+<span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Welcome to the First International Workshop on Adversarial Information 
+Retrieval on the Web (AIRWeb).  This workshop is intended to 
+bring together researchers and practitioners that are concerned with 
+the on-going efforts in adversarial information retrieval on the Web. 
+We have a total of eight peer-reviewed papers to be presented -- five 
+research presentations and three synopses of work in progress.  All convey the 
+latest results in adversarial web IR, and address topics such as 
+web spam, blog spam, cloaking, redirection, link optimization for 
+PageRank, automated link spam detection, 
+link bombs, reverse engineering of ranking algorithms, and propaganda.
+In addition, we will have a panel 
+session in which workshop participants may raise additional questions of
+interest to industry experts and researchers.</span>
+</p>
+<p>
+<span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >I extend my thanks to the authors and presenters, and to the members of 
+the program committee for their work in contributing to the material 
+that forms an outstanding first workshop.  I also sincerely thank Ask 
+Jeeves for their support of the workshop, enabling us to partially 
+cover travel costs for many of the student presenters.  It is my hope 
+that you 
+will find the work presented interesting enough that you will ask 
+questions, contribute ideas, and perhaps get involved in future work in 
+this area.</span>
+</p>
+<p><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+<i><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Brian D. Davison, Program Chair</span><br/>
+<span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Lehigh University, Bethlehem, PA</span><br/>
+<span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >19 April 2005</span><br/></i>
+<p><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+
+<p align="center">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="#"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Top</span></span>
+<span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#welcome"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Welcome</span></span>
+<span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#overview"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Overview</span></span>
+<span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#program"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span>
+<span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#proceedings"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></span>
+<span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#pc"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span> </span>
+<span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://airweb.cse.lehigh.edu/"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Website</span></span>
+</p>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="overview"></span>
+<h1><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Overview</span></h1>
+
+<p>
+<span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Search is the single most common application used on the Web.  The
+attraction of hundreds of millions of searches per day provides
+significant incentive to content providers to do whatever necessary to
+rank highly in search engine results.  The use of techniques that push
+rankings higher than they belong is often called spamming a search
+engine (or spamdexing).  Such methods typically include textual as well 
+as link-based
+techniques.  Like e-mail spam, search engine spam is a form of 
+adversarial
+information retrieval; the conflicting goals of accurate results of
+search providers and high positioning by content providers provides an
+interesting and real-world environment to study techniques in
+optimization, obfuscation, and reverse engineering,
+in addition to the application of information retrieval and 
+classification.</span>
+</p>
+
+<p>
+<span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >The AIRWeb'05 workshop solicited technical papers on any aspect of 
+adversarial information retrieval on the Web.  Particular areas of 
+interest included, but were not limited to:</span>
+</p>
+<ul>
+<li> <span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >search engine spam and optimization,</span>
+</li><li> <span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >crawling the web without detection,</span>
+</li><li> <span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >link-bombing,</span>
+</li><li> <span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >reverse engineering of ranking algorithms,</span>
+</li><li> <span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >advertisement blocking, and</span>
+</li><li> <span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >web content filtering.</span>
+</li></ul>
+<p>
+<span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Papers addressing higher-level concerns
+(e.g., whether 'open' algorithms can succeed in an adversarial
+environment, whether permanent solutions are possible, etc.) were
+also welcome.</span>
+</p>
+
+<p>
+<span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Authors were invited to submit</span> <strong><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >papers</span></strong> <span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >and</span> 
+<strong><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >synopses</span></strong> <span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >in PDF format. We encouraged submissions 
+presenting novel ideas and work in progress, as well as more mature 
+work.  Submissions were judged by multiple experts on relevance, 
+significance, originality, clarity, and technical merit.</span>
+</p>
+
+
+<p><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+
+<p align="center">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="#"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Top</span></span>
+<span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#welcome"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Welcome</span></span>
+<span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#overview"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Overview</span></span>
+<span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#program"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span>
+<span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#proceedings"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></span>
+<span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#pc"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span> </span>
+<span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://airweb.cse.lehigh.edu/"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Website</span></span>
+</p>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="program"></span>
+<h1><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></h1>
+
+<table border="1" cellpadding="4" width="100%">
+<tr><td align="right"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >9:00am</span></td><td>
+<b><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Welcome</span></b>
+</td></tr>
+<tr><td align="right" valign="top"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >9:15am</span></td><td>
+<b><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Session 1</span></b>
+<ul>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="gyongyi.pdf"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Web Spam Taxonomy</span></span><br />
+<i><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Zolt&aacute;n Gy&ouml;ngyi, Stanford University</span><br />
+<span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Hector Garcia-Molina, Stanford University</span></i></li>
+<li><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Synopsis:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="bifet.pdf"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >An Analysis of Factors Used in Search 
+Engine Ranking</span></span><br />
+<i><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Albert Bifet, Technical University of Catalonia</span><br />
+<span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Carlos Castillo, University of Chile</span><br />
+<span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Paul-Alexandru Chirita, L3S Research Center</span><br />
+<span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Ingmar Weber, Max-Planck-Institute for Computer Science</span></i></li>
+<li><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Synopsis:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="metaxas.pdf"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Web Spam, Propaganda and 
+Trust</span></span><br />
+<i><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Panagiotis T. Metaxas, Wellesley College</span><br />
+<span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Joseph DeStefano, College of the Holy Cross</span></i>
+</li></ul>
+</td></tr>
+<tr><td align="right"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >10:30am</span></td><td>
+<b><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Morning Break</span></b>
+</td></tr>
+<tr><td align="right" valign="top"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >11:00am</span></td><td>
+<b><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Session 2</span></b>
+<ul>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="baeza-yates.pdf"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Pagerank Increase under Different 
+Collusion Topologies</span></span><br />
+<i><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Ricardo Baeza-Yates, ICREA-Univ. Pompeu Fabra and University of 
+Chile</span><br />
+<span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Carlos Castillo, Universitat Pompeu Fabra</span><br />
+<span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Vicente L&oacute;pez, Universitat Pompeu Fabra</span></i></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="wu.pdf"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Cloaking and Redirection: A Preliminary 
+Study</span></span><br />
+<i><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Baoning Wu, Lehigh University</span><br />
+<span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Brian D. Davison, Lehigh University</span></i></li>
+<li><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Synopsis:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="adali.pdf"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Optimal Link Bombs are 
+Uncoordinated</span></span><br />
+<i><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Sibel Adali, Renssalaer Polytechnic Institute</span><br />
+<span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Tina Liu, Renssalaer Polytechnic Institute</span><br />
+<span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Malik Magdon-Ismail, Renssalaer Polytechnic Institute</span></i>
+</li></ul>
+</td></tr>
+<tr><td align="right"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >12:30pm</span></td><td>
+<b><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></b>
+</td></tr>
+<tr><td align="right" valign="top"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >2:00pm</span></td><td>
+<b><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Expert Panel Session</span></b><br />
+<ul>
+<li><b><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Moderator:</span></b>
+<ul>
+<li><i><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Brian D. Davison, Lehigh University</span></i></li>
+</ul>
+<li><b><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Panelists:</span></b>
+<ul>
+<li><i><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Andrei Broder, IBM Research</span></i></li>
+<li><i><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Soumen Chakrabarti, IIT Bombay</span></i></li>
+<li><i><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >David Cohn, Google</span></i></li>
+<li><i><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Tim Converse, Yahoo</span></i></li>
+<li><i><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Marc Najork, Microsoft Research</span></i></li>
+</ul>
+</ul>
+</td></tr>
+<tr><td align="right"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >3:30pm</span></td><td>
+<b><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Afternoon Break</span></b>
+</td></tr>
+<tr><td align="right" valign="top"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >4:00pm</span></td><td>
+<b><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Session 3</span></b><br />
+<ul>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="mishne.pdf"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Blocking Blog Spam with Language Model 
+Disagreement</span></span><br />
+<i><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Gilad Mishne, University of Amsterdam</span><br />
+<span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >David Carmel, IBM Research</span><br />
+<span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Ronny Lempel, IBM Research</span></i>
+</li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="benczur.pdf"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >SpamRank -- Fully Automatic Link Spam 
+Detection</span></span><br />
+<i><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Andr&aacute;s A. Bencz&uacute;r, Hungarian Academy of Sciences (MTA SZTAKI) and 
+E&ouml;tv&ouml;s University</span><br />
+<span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >K&aacute;roly Csalog&aacute;ny, Hungarian Academy of Sciences (MTA SZTAKI) and E&ouml;tv&ouml;s
+University</span><br />
+<span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Tam&aacute;s Sarl&oacute;s, Hungarian Academy of Sciences (MTA SZTAKI) and E&ouml;tv&ouml;s
+University</span><br />
+<span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >M&aacute;t&eacute; Uher, Hungarian Academy of Sciences (MTA SZTAKI)</span></i>
+</li></ul>
+</td></tr>
+<tr><td align="right" valign="top"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >5:00pm</span></td><td>
+<b><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Discussion</span></b>
+<ul>
+<li><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Directions for future work</span></li>
+<li><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Organization of AIRWeb '06</span></li>
+</ul>
+</td></tr>
+</table>
+<p><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+
+<p align="center">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="#"><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Top</span></span>
+<span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#welcome"><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Welcome</span></span>
+<span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#overview"><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Overview</span></span>
+<span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#program"><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span>
+<span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#proceedings"><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></span>
+<span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#pc"><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span> </span>
+<span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://airweb.cse.lehigh.edu/"><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Website</span></span>
+</p>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="proceedings"></span>
+<h1><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></h1>
+
+<h3><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Full Papers</span></h3>
+<ul>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="mishne.pdf"><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Blocking Blog Spam with Language Model 
+Disagreement</span></span><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >, by
+  Gilad Mishne, David Carmel and Ronny Lempel</span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="wu.pdf"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Cloaking and Redirection: A Preliminary Study</span></span><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >, 
+by Baoning Wu and Brian D. Davison</span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="baeza-yates.pdf"><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Pagerank Increase under Different 
+Collusion Topologies</span></span><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >, by
+  Ricardo Baeza-Yates, Carlos Castillo and Vicente L&oacute;pez</span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="benczur.pdf"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >SpamRank -- Fully Automatic Link Spam 
+Detection</span></span><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >, by
+Andr&aacute;s A. Bencz&uacute;r, 
+K&aacute;roly Csalog&aacute;ny, 
+Tam&aacute;s Sarl&oacute;s, and
+M&aacute;t&eacute; Uher</span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="gyongyi.pdf"><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Web Spam Taxonomy</span></span><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >, by
+  Zolt&aacute;n Gy&ouml;ngyi and Hector Garcia-Molina</span></li>
+</ul>
+
+<h3><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Synopses</span></h3>
+<ul>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="bifet.pdf"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >An Analysis of Factors Used in Search Engine 
+Ranking</span></span><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >, by
+  Albert Bifet, Carlos Castillo, Paul-Alexandru Chirita and Ingmar 
+Weber</span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="adali.pdf"><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Optimal Link Bombs are Uncoordinated</span></span><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >, 
+by Sibel Adali, Tina Liu and Malik Magdon-Ismail</span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="metaxas.pdf"><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Web Spam, Propaganda and Trust</span></span><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >, by
+  Panagiotis T. Metaxas and Joseph DeStefano</span></li>
+</ul>
+
+<p><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+
+<p align="center">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="#"><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Top</span></span>
+<span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#welcome"><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Welcome</span></span>
+<span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#overview"><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Overview</span></span>
+<span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#program"><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span>
+<span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#proceedings"><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></span>
+<span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#pc"><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span> </span>
+<span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://airweb.cse.lehigh.edu/"><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Website</span></span>
+</p>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="pc"></span>
+<h1><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></h1>
+
+<h2><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Program Chair</span></h2>
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cse.lehigh.edu/~brian/"><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Brian D. Davison</span></span><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >,
+Lehigh University</span>
+</p>
+
+<h2><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee Members</span></h2>
+<p><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Andrei Broder, IBM Research</span>
+<br/><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >David Carmel, IBM Research Haifa</span>
+<br/><span onclick="return false" style="text-decoration:underline; color:blue" href="http://timconverse.com/"><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Tim Converse</span></span><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >, Yahoo</span>
+<br/><span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.microsoft.com/users/nickcr/"><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Nick 
+Craswell</span></span><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >, Microsoft Research Cambridge</span>
+<br/><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.unc.edu/~cutts/"><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Matt Cutts</span></span><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >, Google</span>
+<br/><span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.microsoft.com/users/fetterly/"><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Dennis 
+Fetterly</span></span><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >, Microsoft Research</span>
+<br/><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >David Gibson, IBM Research</span>
+<br/><span onclick="return false" style="text-decoration:underline; color:blue" href="http://es.csiro.au/people/Dave/"><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >David Hawking</span></span><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >, CSIRO</span>
+<br/><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.daviddlewis.com/"><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >David D. Lewis</span></span><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >, 
+Independent Consultant</span>
+<br/><span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.microsoft.com/users/manasse/"><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Mark 
+Manasse</span></span><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >, Microsoft Research</span>
+<br/><span onclick="return false" style="text-decoration:underline; color:blue" href="http://mccurley.org/"><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Kevin 
+McCurley</span></span><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >, IBM Research</span>
+<br/><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Urban Mueller, Search.ch</span>
+<br/><span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.microsoft.com/~najork/"><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >Marc Najork</span></span><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >, 
+Microsoft Research</span>
+<br/><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >Jan Pedersen, Yahoo</span>
+<br/><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.bernhardseefeld.ch/"><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Bernhard Seefeld</span></span><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >, 
+Search.ch</span>
+<br/><span onclick="return false" style="text-decoration:underline; color:blue" href="http://wume.cse.lehigh.edu/~wu/"><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >Baoning Wu</span></span><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >, Lehigh 
+University</span>
+<br/><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.ucsb.edu/~tyang/"><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Tao Yang</span></span><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >, Ask 
+Jeeves/Univ. of California, Santa Barbara</span>
+</p>
+
+<p align="center">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="#"><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Top</span></span>
+<span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#welcome"><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >Welcome</span></span>
+<span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#overview"><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Overview</span></span>
+<span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#program"><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span>
+<span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#proceedings"><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></span>
+<span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#pc"><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span> </span>
+<span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://airweb.cse.lehigh.edu/"><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Website</span></span>
+</p>
+
+<hr/>
+<div align="right" style="font-size:70%"><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >Last modified: 3 May 2005,</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cse.lehigh.edu/~brian/"><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Brian D. Davison</span>

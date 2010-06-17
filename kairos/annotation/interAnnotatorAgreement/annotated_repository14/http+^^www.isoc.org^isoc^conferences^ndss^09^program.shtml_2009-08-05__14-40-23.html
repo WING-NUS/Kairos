@@ -1,0 +1,690 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/6/annotation/annotated_repository/http+^^www.isoc.org^isoc^conferences^ndss^09^program.shtml_2009-08-05__14-40-23.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/6/annotation/annotated_repository/http+^^www.isoc.org^isoc^conferences^ndss^09^program.shtml_2009-08-05__14-40-23.yaml created on Thu Aug 13 13:57:13 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<TITLE>Network and IT Security Conference: NDSS 2009</TITLE>
+<META NAME="description" CONTENT="NDSS Symposium 2009: The 15th Annual Network & Distributed System Security Conference.">
+<META NAME="keywords" CONTENT="NDSS, Conferences, IT, Network, Security, 2009, Symposium, Conference, San Diego, Network security technologies, Internet Society, ISOC">
+
+<script type="text/javascript" language="javascript" src="/includes/javascript.js"></script>
+<link href="/includes/styles.css" rel="stylesheet" type="text/css">
+
+<style type="text/css">
+em { color: 405060; font-style:normal}
+</style>
+
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<div class="top">
+
+<span onclick="return false" style="text-decoration:underline; color:blue" HREF="/" title="Internet Society Frontpage">
+<img onmousedown="imd(this)" src="/graphics/isoc/isoc_logo.gif" alt="Internet Society Frontpage" ></span><!-- Google CSE Search Box Begins -->
+  <form id="searchbox_015267653312545538371:dihpk_sjx-e" action="/help">
+    <input type="hidden" name="cx" value="015267653312545538371:dihpk_sjx-e">
+    <input type="hidden" name="cof" value="FORID:9">
+    <input name="q" type="text" style="border:1px solid #75687A; width:130px">
+    <input type="submit" name="sa" value="Search" class="search">
+  </form>
+<!-- Google CSE Search Box Ends -->
+
+
+<map  id="top" name="top" title="Navigation Bar">
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="#content" class="skip"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Go to Main Content</span></span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="#sidenav" class="skip"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Go to Side Navigation</span></span>
+</p>
+<div style="width: 1px; padding: 0px; height: 70px;"></div>
+<div style="width: 110px">
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="/isoc/conferences/" title="Conferences &amp; Events"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Events</span></span>
+	<span onclick="return false" style="text-decoration:underline; color:blue" HREF="/membership/" title="Individual Members, Chapters, and Organisation Members"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Membership</span></span>
+</div>
+<div style="width: 121px">
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="/internet/" title="History, law, statistics and other interesting topics related to the Internet"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >About&nbsp;the&nbsp;Internet</span></span>
+	<span onclick="return false" style="text-decoration:underline; color:blue" HREF="/standards/" title="Standards Programs"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Standards</span></span>
+</div>
+<div style="width: 90px">
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="/pubs/" title="ISOC's Publications"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Publications</span></span>
+	<span onclick="return false" style="text-decoration:underline; color:blue" HREF="/pubpolpillar/" title="ISOC's Public Policy activities"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Public&nbsp;Policy</span></span>
+</div>
+<div style="background-image:none">
+	<span onclick="return false" style="text-decoration:underline; color:blue" HREF="/isoc/" style="text-align:right" title="About the Internet Society"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >About ISOC</span></span>
+	<span onclick="return false" style="text-decoration:underline; color:blue" HREF="/educpillar/" style="text-align:right" title="Education and Training Activities"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Education</span></span>
+</div>
+</map>
+</div>
+<h1><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Events&nbsp;</span></h1> 
+<table class="main">
+<tr>
+<TD class="left">
+<div class="border1" style="width: 110px; margin-left: 22px; margin-right: 4px; margin-top: 8px; margin-bottom: 8px;">
+<div style="background-color: #c00; width: 110px; text-align:center; color: #fff"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></div>
+<img onmousedown="imd(this)" src="/isoc/conferences/ndss/09/img/sponsors.gif" alt="NDSS Sponsors">
+</div>
+
+<div class="sidenav" id="sidenav">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/isoc/conferences/ndss/09/"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >NDSS Symposium 2009</span></span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/isoc/conferences/ndss/09/cfp.shtml"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/isoc/conferences/ndss/09/program.shtml"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Symposium Program</span></span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/isoc/conferences/ndss/09/proceedings.shtml"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/isoc/conferences/ndss/09/register.shtml"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/isoc/conferences/ndss/09/committee.shtml"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/isoc/conferences/ndss/09/steering.shtml"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Steering Group</span></span>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/isoc/conferences/ndss/09/sponsors.shtml"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Sponsor NDSS</span></span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/isoc/conferences/ndss/09/sandiego.shtml"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >About San Diego</span></span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="/isoc/conferences/ndss/09/hotel.shtml"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Hotel Information</span></span>
+
+
+</div>
+
+</TD>
+<td class="content">
+ <span onclick="return false" style="text-decoration:underline; color:blue" href="/isoc/conferences/ndss/09/">
+<img onmousedown="imd(this)" src="https://www.isoc.org/isoc/conferences/ndss/09/img/ndss09_logo.gif" alt="NDSS 2009 - The Network and Security Conference" style="float:right; margin-left: 5px; margin-top: 17px">
+</span> 
+<h2 id="content"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >NDSS Symposium 2009</span></h2>
+<span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >The Catamaran Resort Hotel and Spa</span><br /><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >San Diego, CA - 8 - 11 February</span>
+<h3><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >16th Annual Network &amp; Distributed System Security Symposium</span></h3>
+
+
+<h3><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Symposium Program</span></h3>
+<table class="table2">
+  <tr>
+<th colspan="2"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Sunday, February 8, 2009</span></th>
+  </tr>
+  <tr>
+<td style="width: 80px"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >16:00-19:00</span></td>
+<td><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >18:00-20:00</span></td>
+<td><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Welcome Reception</span></td>
+ </tr>
+ <tr>
+<th colspan="2"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Monday,February 9, 2009</span></th>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >07:30</span></td>
+<td><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span> </td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >07:30-08:30</span></td>
+<td><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Continental Breakfast</span> </td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >08:30-09:00</span></td>
+<td><strong><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Introductory Remarks</span></strong> <br>
+ <span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >General Chair: Doug Szajda, University of Richmond</span><br>
+ <span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Program Chair: Giovanni Vigna, University of California, Santa Barbara</span></td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >09:00-10:30</span></td>
+<td><span onclick="return false" style="text-decoration:underline; color:blue" href="#keynote"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Keynote: 
+    Penetration Testing for Grown Ups</span></span><br>
+<span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Ivan Arce</span><br>
+<span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >CTO and Co-Founder, Core Security Technologies</span></td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >10:30-11:00</span></td>
+<td><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Break</span> </td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >11:00-12:30</span></td>
+<td><strong><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Session 1: Web Security</span></strong>
+      <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#security1"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Document Structure Integrity: A Robust Basis for Cross-site Scripting Defense</span></span><br>
+    <span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Prateek Saxena and Dawn Song, University of California Berkeley;Yacin Nadji, Illinois Institute of Technology</span></p>
+      <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#security2"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >An Efficient Black-box Technique for Defeating Web Application Attacks</span></span><br>
+        <span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >R Sekar,Stony Brook University</span></p>
+      <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#security3"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Noncespaces: Using Randomization to Enforce Information Flow Tracking and Thwart Cross-site Scripting Attacks</span></span><br>
+        <span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Matthew Van Gundy and Hao Chen, University of California Davis</span></p></td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >12:30-13:30</span></td>
+<td><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span> </td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >13:30-15:00</span></td>
+<td><strong><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Session 2: Distributed Systems</span></strong>
+  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#distributed1"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >The Blind Stone Tablet: Outsourcing Durability</span></span><br>
+    <span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >PeterWilliams and Radu Sion, Stony Brook University; Dennis Shasha, New York University</span></p>
+  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#distributed2"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Two-Party Computation Model for Privacy-Preserving Queries over Distributed Databases</span></span><br>
+    <span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Sherman S.M. Chow, Jie-Han Lee and Lakshminarayanan Subramanian, New York University</span></p>
+  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#distributed3"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >SybilInfer: Detecting Sybil Nodes using Social Networks</span></span><br>
+    <span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >George Danezis, Microsoft Research; Prateek Mittal, University of Illinoisat Urbana-Champaign</span></p></td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >15:00-15:30</span></td>
+<td><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Break</span> </td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >15:30-17:00</span></td>
+<td><strong><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Session 3: Intrusion Detection</span></strong>
+  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#intrusion1"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Spectrogram: A Mixture-of-Markov-Chains Model for Anomaly Detection in Web Traffic</span></span><br>
+    <span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >YingboSong, Angelos Keromytis and Salvatore Stolfo, Columbia University</span></p>
+  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#intrusion2"><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Detecting Forged TCP Reset Packets</span></span><br>
+    <span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Nicholas Weaver, ICSI; Robin Sommer, ICSI and LBNL; Vern Paxson, University of California Berkeley and ICSI</span></p>
+  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#intrusion3"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Coordinated Scan Detection</span></span><br>
+    <span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >CarrieGates, CA Labs</span></p></td></tr>
+ <tr>
+<th colspan="2"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday,February 10, 2009</span></th>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >07:30-08:30</span></td>
+<td><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Continental Breakfast</span> </td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >08:30-10:00</span></td>
+<td><strong><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Session 4: Malware</span></strong>
+  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#malware1"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >RB-Seeker:Auto-detection of Redirection Botnets</span></span><br>
+    <span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Xin Hu,Matt Knysz and Kang G. Shin, Universityof Michigan Ann Arbor</span></p>
+  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#malware2"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Scalable,Behavior-Based Malware Clustering</span></span><br>
+    <span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Ulrich Bayer, Paolo Milani Comparetti and Clemens Hlauschek, Technical University Vienna; Christopher Kruegel, University of California Santa Barbara; Engin Kirda, Institute Eurecom</span></p>
+  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#malware3"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >K-Tracer: A System for Extracting Kernel Malware Behavior</span></span><br>
+    <span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >AndreaLanzi, Monirul Sharif and Wenke Lee, Georgia Institute of Technology</span></p></td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >10:00-10:30</span></td>
+<td><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >10:30-12:00</span></td>
+<td><strong><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Session 5: Traffic Protection and Infrastructure Security</span> </strong>
+  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#traffic1"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >RAINBOW: A Robust and Invisible Non-Blind Watermark for Network Flows</span></span><br>
+    <span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Amir Houmansadr, Negar Kiyavash and Nikita Borisov, University of Illinoisat Urbana-Champaign</span></p>
+  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#traffic2"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Traffic Morphing: An Efficient Defense Against Statistical Traffic Analysis</span></span><br>
+    <span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Charles Wright, MIT Lincoln Laboratory; Scott Coull, Johns HopkinsUniversity; Fabian Monrose, University of North Carolina</span></p>
+  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#traffic3"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Recursive DNS Architectures and Vulnerability Implications</span></span><br>
+    <span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >David Dagon, Manos Antonakakis, Xiapu Luo, Christopher P. Lee and Wenke Lee, Georgia Institute of Technology; Kevin Day, kevinday.com</span></p></td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >12:00-13:30</span></td>
+<td><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span> </td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >13:30- 14:30</span></td>
+<td><strong><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Session 6: Host Security</span></strong>
+  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#hostsec1"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Analyzing and Comparing the Protection Quality of Security Enhanced Operating Systems</span></span><br>
+    <span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Hong Chen, Ninghui Li and Ziqing Mao, Purdue University</span></p>
+  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#hostsec2"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Automatically Detecting Integer Overflow Vulnerability In X86 Binary Using Symbolic Execution</span></span><br>
+    <span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Tielei Wang, Tao Wei and Wei Zou, Peking University; Zhiqiang Lin, Purdue University</span></p></td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >14:30- 15:30</span></td>
+<td><strong><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Special Presentation on GENI</span> 
+  </strong>
+  <p><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >The Global Environment for Network Innovations (GENI) is an experimental suite of infrastructure designed to support Network Science and Engineering experiments ranging from new research in network and distributed system design to the theoretical underpinnings of network science, network policy and economics, societal values, and the dynamic interactions of the physical and social spheres with communications networks. Such research holds great promise for new knowledge about the structure, behavior, and dynamics of our most complex systems-- networks of networks -- with potentially huge social and economic impact.</span></p>
+  <p><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Researchers will be able to build their own new versions of the &quot;net&quot; or to study the &quot;net&quot; in ways that are not possible today. Compatibility with the Internet is NOT required. The purpose of GENI is to give researchers the opportunity to experiment unfettered by assumptions or requirements and to support those experiments at a large scale with real user populations.</span></p></td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >15:30- 16:00</span></td>
+<td><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Break</span> </td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >16:00-17:00</span></td>
+<td><strong><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Works in Progress</span></strong> </td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >19:00- 21:00</span></td>
+<td><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Dinner</span> </td>
+ </tr>
+ <tr>
+<th colspan="2"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, February 11, 2009</span></th>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >08:00-09:00</span></td>
+<td><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Continental Breakfast</span> </td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >09:00-10:30</span></td>
+<td><strong><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span></strong>
+  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#invitedtalk"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Secure Programming with Static Analysis</span></span><br>
+    <span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Brian Chess, Chief Scientist, Fortify Software</span></p></td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >10:30-11:00</span></td>
+<td><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Break</span> </td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >11:00-12:30</span></td>
+<td><strong><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Session 7: Authentication and Accountability</span></strong>
+  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#authentication1"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Safe Passage for Passwords and Other Sensitive Data</span></span><br>
+  <span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Jonathan McCune and Adrian Perrig, Carnegie Mellon University; Michael Reiter, University of North Carolina</span></p>
+  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#authentication2"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Conditioned-safe Ceremonies and a User Study of an Application to Web Authentication</span></span><br>
+  <span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Chris Karlof, J.D. Tygar and David Wagner, University of California Berkeley</span> </p>
+  <p><span onclick="return false" style="text-decoration:underline; color:blue" href="#authentication3"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >CSAR: A Practical and Provable Technique to Make Randomized Systems Accountable</span></span><br>
+  <span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Michael Backes, Saarland Universityand MPI-SWS; Peter Druschel, MPI-SWS; Andreas Haeberlen, MPI-SWS and Rice University; Dominique Unruh, Saarland University</span></p></td>
+ </tr>
+ <tr>
+<td><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >12:30-13:30</span></td>
+<td><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span> </td>
+ </tr>
+</table>
+<p><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >NDSS &rsquo;09 will focus on practical aspects of network and distributed system security, with emphasis on actual system design and implementation rather than theory. A major goal of the Symposium is to encourage and enable the Internet community to apply, deploy, and advance the state of available security technology. The following presentations are planned.</span></p>
+<h5 id="keynote"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Address: Penetration Testing for Grown Ups</span></h5>
+<p><em><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Ivan Arce, CTO and Co-Founder of Core Security Technologies</span></em><br>
+  <span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Penetration testing is over 30 years old yet for the most part of its history has been deemed a costly, obscure and narrowly focused security practice delivered as craftsmanship of limited value by very technically skilled security teams. The appearance in the early 2000s of commercial penetration testing software, open source tools and more formalized methodologies signaled the trend towards industrialization and more widespread adoption of the practice.</span></p>
+<p><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >This growing adoption of penetration testing software and methodologies and their underlying philosophy imply a shift in the way of doing and thinking about security at the operational and tactical levels. To transcend the perception of being simply a &quot;badness-o-meter&quot; and leap to the more respectable status of key component of one's overall security strategy numerous technical, scientific and epistemological dilemmas must be addressed and, hopefully, solved.</span></p>
+<p><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >In this talk I will go over the past decade's evolution of penetration testing, the current challenges and opportunities and the open and unexplored territory that grown up security practitioners will face in the next decade.</span></p>
+<h5 id="invitedtalk"><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk: Secure Programming with Static Analysis</span></h5>
+<p><em><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Brian Chess, Chief Scientist, Fortify Software</span></em><br>
+  <span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Creating secure code requires more than just good intentions. Programmers need to know how to make their code safe in an almost infinite number of scenarios and configurations. Static source code analysis gives programmers the ability to review their work with a fine tooth comb and uncover many of the kinds of errors that lead directly to vulnerabilities. This talk will frame the software security problem and show how static analysis is part of the solution. We will look at how static analysis works, how to integrate it into the software development processes, and how to make the most of it during security code review. Along the way we'll look at examples taken from real-world security incidents, showing how coding errors are exploited, how they could have been prevented, and how static analysis can rapidly uncover similar errors.</span></p>
+<h4><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Paper Presentations</span></h4>
+<h5 id="security1"><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Document Structure Integrity: A Robust Basis for Cross-site Scripting Defense</span></h5>
+<p><em><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Prateek Saxena and Dawn Song, University of California Berkeley; Yacin Nadji, Illinois Institute of Technology</span></em><br>
+  <span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Cross-site scripting is the most dominant category of vulnerabilities, with over 17,000 attacks documented in 2007 alone. Web markup and client-side languages provide no principled mechanisms to ensure secure, ground-up isolation of user-generated data in web applications. We propose a mechanism to isolate user-generated data in web applications, to ensure structural integrity of trusted web application code, from its point of generation on the web server to its rendering on the browser. Our preliminary evaluation on more than 5,000 real-world vulnerable websites reveals that enforcement of a single policy using our mechanism defeats over 98% of the attacks we study.</span></p>
+<h5 id="security2"><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >An Efficient Black-box Technique for Defeating Web Application Attacks</span></h5>
+<p><em><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >R Sekar, Stony Brook University</span></em><br>
+  <span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Taint-tracking has emerged as one of the most promising techniques for defeating a wide range of exploits such as SQL injection, command injection, and cross-site scripting. Unfortunately, it requires intrusive, fine-grained instrumentation of applications that exacts heavy performance overheads, and can impact application robustness. In contrast, we present taint-inference, a new technique that infers taint from an observation of inputs and outputs of a web application. We show that it can accurately detect the above-mentioned attacks across a range of web applications written in multiple programming languages, while imposing runtime overheads below 5%.</span></p>
+<h5 id="security3"><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Noncespaces: Using Randomization to Enforce Information Flow Tracking and Thwart Cross-site Scripting Attacks</span></h5>
+<p><em><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Matthew Van Gundy and Hao Chen, University of California Davis</span></em><br>
+  <span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Cross-Site Scripting (XSS) is among the most common, serious web application vulnerabilities. Eliminating XSS is challenging because it is difficult for web applications to sanitize all user inputs appropriately. Our solution, Noncespaces, neutralizes XSS exploits by using randomization and XML namespaces in a novel way. After the web application randomizes the namespace prefixes of trusted content, clients can identify all untrusted content reliably. We demonstrate how to apply Noncespaces to web applications built using the Model-View-Controller design pattern with minimal modifications.</span></p>
+<h5 id="distributed1"><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >The Blind Stone Tablet: Outsourcing Durability</span></h5>
+<p><em><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Peter Williams and Radu Sion, Stony Brook University; Dennis Shasha, New York University</span></em><br>
+<span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >We introduce a new paradigm for outsourcing the durability property of a transactional database to an untrusted service provider, who supports transaction serialization, backup and recovery for clients, with full confidentiality and correctness. Moreover, providers learn nothing about transactions (except their size and timing), achieving read and write access pattern privacy. Our proof-of-concept implementation of this protocol for the MySQL database management system achieves tens of transactions per second in a two-client scenario with full transaction privacy and guaranteed correctness.</span></p>
+<h5 id="distributed2"><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Two-Party Computation Model for Privacy-Preserving Queries over Distributed Databases</span></h5>
+<p><em><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Sherman S.M. Chow, Jie-Han Lee and Lakshminarayanan Subramanian, New York University</span></em><br>
+<span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >We show how to perform various privacy preserving queries over distributed databases under the honest-but-curious model. Our system provides the same level of scalability as a trusted central party based solution while providing privacy without using heavyweight cryptography. The key idea is to develop a Two-Party Query Computation Model comprising of a randomizer and a computing engine which do not reveal any information between themselves. We prove that our system is secure and demonstrate its practicality using a real-world implementation.</span></p>
+<h5 id="distributed3"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >SybilInfer: Detecting Sybil Nodes using Social Networks</span></h5>
+<p><em><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >George Danezis, Microsoft Research; Prateek Mittal, University of Illinois at Urbana-Champaign</span></em><br>
+<span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >SybilInfer is an algorithm for labeling nodes in a social network as honest users or Sybils controlled by an adversary. At the heart of SybilInfer lies a probabilistic model of honest social networks, and an inference engine that returns potential regions of dishonest nodes. The Bayesian inference approach to Sybil detection comes with the advantage label has an assigned probability, indicating its degree of certainty. We prove through analytical results as well as experiments on simulated and real-world network topologies that, given standard constraints on the adversary, SybilInfer is secure, in that it successfully distinguishes between honest and dishonest nodes and is not susceptible to manipulation by the adversary. Furthermore, our results show that SybilInfer outperforms state of the art algorithms, both in being more widely applicable, as well as providing vastly more accurate results.</span></p>
+<h5 id="intrusion1"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Spectrogram: A Mixture-of-Markov-Chains Model for Anomaly Detection in Web Traffic</span></h5>
+<p><em><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Yingbo Song, Angelos Keromytis and Salvatore Stolfo, Columbia University</span></em><br>
+  <span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >We present Spectrogram, a machine learning based sensor for defense against web-layer code-injection attacks. Spectrogram is a network situated sensor that dynamically reassembles packets to reconstruct web requests, allowing it to monitor content flows. Unlike many existing sensors, Spectrogram does not rely on signatures to detect malicious content. Instead, it learns models for legitimate input. We describe an efficient model for this task in the form of mixtures of Markov chains and derive the corresponding training algorithm.</span></p>
+<h5 id="intrusion2"><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Detecting Forged TCP Reset Packets</span></h5>
+<p><em><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Nicholas</span></em><em> <span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Weaver, ICSI; Robin Sommer, ICSI and LBNL; Vern Paxson, University of California Berkeley and ICSI</span></em><br>
+  <span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Many network management tools, including censorship, traffic management, and IDS systems, terminate connections by injecting TCP Reset (RST) packets into &quot;undesired&quot; flows. We developed an efficient network detector for these injected packets based on race conditions and then a set of fingerprints which allow us to identify many of the devices as well as various benign sources. We were able to detect P2P disruptions, dynamic spam and malcode blocking, and Chinese censorship.</span></p>
+<h5 id="intrusion3"><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Coordinated Scan Detection</span></h5>
+<p><em><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Carrie Gates, CA Labs</span></em><br>
+  <span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Coordinated attacks distribute the tasks involved in an attack amongst multiple sources. We present a detection algorithm that is based on an adversary model of desired information gain and employs heuristics similar to those for solving the set covering problem. A detector is developed and tested against coordinated horizontal and strobe scanning activity. Experimental results demonstrate an acceptably low false positive rate, and we discuss the conditions required to maximize the detection rate.</span></p>
+<h5 id="malware1"><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >RB-Seeker: Auto-detection of Redirection Botnets</span></h5>
+<p><em><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Xin Hu, Matt Knysz and Kang G. Shin, University of Michigan AnnArbor</span></em><br>
+  <span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >This paper presents the design, implementation and evaluation of Redirection Bot Seeker (RB-Seeker) for automatic detection of redirection botnets. As a misdirection mechanism for evading detection, RBs are used in tandem with other criminal scams e.g., spam/phishing to misdirect victims to the actual host of nefarious contents. RB-seeker makes uses of comprehensive and abundant data sources (i.e., netflow, DNS-logs, spams) and develops a 2-tier detection strategy utilizing hyperplane decision functions to achieve better detection capability of both aggressive and stealthy RBs with low a false positive rate.</span></p>
+<h5 id="malware2"><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Scalable, Behavior-Based Malware Clustering</span></h5>
+<p><em><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Ulrich Bayer, Paolo Milani Comparetti and Clemens Hlauschek, Technical University Vienna; Christopher Kruegel,University of California Santa Barbara; Engin Kirda, Institute Eurecom</span></em><br>
+<span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Anti-malware companies receive thousands of malware samples every day. Many of these samples are in fact variations (or even automatic mutations) of previously known malware. We propose an algorithm for clustering malware samples based on an accurate characterization of their behavior that is capable of scaling up to the size of real-world malware databases. We present results on datasets of up to 75000 malware samples, and show that our approach achieves better precision than previous techniques.</span></p>
+<h5 id="malware3"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >K-Tracer: A System for Extracting Kernel Malware Behavior</span></h5>
+<p><em><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Andrea Lanzi, Monirul Sharif and Wenke Lee, Georgia Institute of Technology</span></em><br>
+<span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Kernel rootkits provide user level-malware programs with additional capabilities of hiding their malicious activities by altering the legitimate kernel behavior of the operating system. In this paper, we present an approach that enables automatic discovery of the system data manipulation behaviors of rootkits. We have performed experiments on several kernel malware samples and shown that our system can successfully extract all malicious data manipulation behaviors from them. We also discuss the limitations of our current system on newer rootkit strategies.</span></p>
+<h5 id="traffic1"><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >RAINBOW: A Robust and Invisible Non-Blind Watermark for Network Flows</span></h5>
+<p><em><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Amir Houmansadr, Negar Kiyavash and Nikita Borisov, University of Illinois at Urbana-Champaign</span></em><br>
+<span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Linking network flows is an important problem in intrusion detection as well as anonymity. Passive traffic analysis can link flows but requires long periods of observation to reduce errors. We propose a new, non-blind watermarking scheme called RAINBOW, inheriting features from passive schemes and blind watermarking schemes. RAINBOW provides practically negligible false errors using tiny valued watermarks on small number of packets. RAINBOW does so while providing high degrees of invisibility and also robustness to flow modifications.</span> </p>
+<h5 id="traffic2"><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Traffic Morphing: An Efficient Defense Against Statistical Traffic Analysis</span></h5>
+<p><em><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Charles Wright, MIT Lincoln Laboratory; Scott Coull, Johns Hopkins University; Fabian Monrose, University of North Carolina</span></em><br>
+<span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >In this paper, we propose a novel method of thwarting statistical traffic analysis by optimally morphing one class of traffic to look like another class with respect to a given set of features. Through the use of mathematical optimization techniques, we are able to optimally change these features in real-time to significantly reduce the accuracy of the classifier while incurring far less overhead than padding. We demonstrate this technique against two recent traffic classifiers from the literature: one for VoIP and one for web traffic.</span></p>
+<h5 id="traffic3"><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Recursive DNS Architectures and Vulnerability Implications</span></h5>
+<p><em><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >David Dagon, Manos Antonakakis, Xiapu Luo, Christopher P. Lee and Wenke Lee, Georgia Institute of Technology; Kevin Day, kevinday.com</span></em><br>
+<span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >We explore how different DNS resolver architectures affect the risk of DNS poisoning. To measure the threat found in existing and recent DNS attacks, we create a comprehensive DNS poisoning model, and demonstrate its sensitivity compared to previous work. We further catalog major architectural choices DNS implementers can make in query management. We note real-world instances where these choices have weakened the security of resolvers. Our study points to the need for secure DNS replacements.</span></p>
+<h5 id="hostsec1"><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Analyzing and Comparing the Protection Quality of Security Enhanced Operating Systems</span></h5>
+<p><em><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Hong Chen, Ninghui Li and Ziqing Mao, Purdue University</span></em><br>
+<span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Recently, several Mandatory Access Control protection systems, e.g., SELinux and AppArmor, have been proposed to enhance the security of operating systems. We propose an approach to analyze and compare the quality of protection of these protection systems. We introduce the notion of vulnerability surfaces under attack scenarios as the measurement of protection quality, and implement a tool for computing the vulnerability surfaces. We use our tool to analyze and compare SELinux and AppArmor in several Linux distributions.</span></p>
+<h5 id="hostsec2"><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Automatically Detecting Integer Overflow Vulnerability In X86 Binary Using Symbolic Execution</span></h5>
+<p><em><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Tielei Wang, Tao Wei and Wei Zou, Peking University; Zhiqiang Lin, Purdue University</span></em><br>
+<span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >We present a system, IntScope, which can automatically detect integer overflow vulnerabilities in x86 binaries. IntScope simulates program execution, tracks the propagation of taint data, and identifies the vulnerabilities caused by the misuse of overflowed values. IntScope is scalable to large software as it can just symbolically execute the interesting program paths. Experimental results show that IntScope is highly effective and practical. IntScope has detected more than 20 zero-day integer overflow vulnerabilities in several popular software packages including QEMU, Xen and Xine.</span></p>
+<h5 id="authentication1"><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Safe Passage for Passwords and Other Sensitive Data</span></h5>
+<p><em><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Jonathan McCune and Adrian Perrig, Carnegie Mellon University; Michael Reiter, University of North Carolina</span></em><br>
+  <span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >The prevalence of malware such as keyloggers and screen scrapers has made the prospect of providing sensitive information via web pages disconcerting. We present a system that totally circumvents the legacy input path, thereby excluding the operating system and the entire software stack running thereupon from the TCB for sensitive input, without a VMM. We allow the user to specify strings of input as sensitive, and ensure that these inputs reach the legacy platform already in a protected state.</span></p>
+<h5 id="authentication2"><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Conditioned-safe Ceremonies and a User Study of an Application to Web Authentication</span></h5>
+<p><em><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Chris Karlof, J.D. Tygar and David Wagner, University of California Berkeley</span></em><br>
+<span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >We introduce the notion of conditioned-safe ceremonies for humans. A ceremony is similar to the conventional notion of a network protocol, except that a ceremony explicitly includes human participants as nodes in the network. We argue that designers should build ceremonies such that human tendencies reinforce security rather than undermine it, as with many current ceremonies, such as password authentication. We propose several design principles towards building conditioned-safe ceremonies and apply these principles to develop a registration ceremony for machine authentication based on email. We evaluated our email registration ceremony with a user study of 200 participants, and we present the results.</span></p>
+<h5 id="authentication3"><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >CSAR: A Practical and Provable Technique to Make Randomized Systems Accountable</span></h5>
+<p><em><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Michael Backes, Saarland University and MPI-SWS; Peter Druschel, MPI-SWS; Andreas Haeberlen, MPI-SWS and Rice University; Dominique Unruh, Saarland University</span></em><br>
+<span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >We describe CSAR, a novel technique for generating cryptographically strong, accountable randomness. Using CSAR, we can generate a pseudo-random sequence and a proof that the elements of this sequence up to a given point have been correctly generated, while future values in the sequence remain unpredictable. CSAR enables accountability for distributed systems that use randomized protocols. External auditors can check if a node has deviated from its expected behavior without learning anything about the node's future random choices. In particular, an accountable node does not need to leak secrets that would make its future actions predictable. We demonstrate that CSAR is practical and efficient, and we apply it to implement accountability for a server that uses random sampling for billing purposes.</span></p></td>
+</tr>
+</table>
+<div class="footer"><div style="text-align:right; float:right; width: 550px"><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Copyright &copy; 2009 Internet Society  | Last Modified on 28 Apr 2009  |</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/help/map/"><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Sitemap</span></span> <span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/help/privacy/"><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Privacy Statement</span></span> <span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/isoc/contact.shtml"><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Contact us</span></span></div><span onclick="return false" style="text-decoration:underline; color:blue" href="http://validator.w3.org/check?uri=referer"><img onmousedown="imd(this)" src="/graphics/isoc/validhtml.gif" alt="Valid HTML 4.01!" style="margin-bottom: -3px"></span><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>

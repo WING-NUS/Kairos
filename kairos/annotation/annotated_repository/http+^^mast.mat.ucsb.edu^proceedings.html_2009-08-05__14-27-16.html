@@ -1,0 +1,593 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^mast.mat.ucsb.edu^proceedings.html_2009-08-05__14-27-16.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^mast.mat.ucsb.edu^proceedings.html_2009-08-05__14-27-16.yaml created on Wed Aug 05 17:31:23 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<title>MAST Workshop</title>
+<style type="text/css">
+<!--
+.style1 {	font-family: Verdana, Arial, Helvetica, sans-serif;
+	font-size: small;
+}
+.style2 {font-family: Verdana, Arial, Helvetica, sans-serif; font-weight: bold; }
+.style3 {
+	font-family: Verdana, Arial, Helvetica, sans-serif;
+	font-size: small;
+}
+a:link {
+	text-decoration: none;
+	color: #000066;
+}
+a:visited {
+	text-decoration: none;
+	color: #000066;
+}
+a:hover {
+	text-decoration: none;
+	color: #800000;
+	background-color:#FFFFEE;
+	font-weight: bold;
+}
+a:active {
+	text-decoration: none;
+}
+.style5 {font-family: Verdana, Arial, Helvetica, sans-serif; font-size: small; color: #666666;}
+body {
+	background-image: url(banner.jpg);
+	background-repeat: repeat-x;
+	margin-left: 0px;
+}
+.style6 {color: #606060}
+.style7 {font-size: medium}
+.style8 {
+	font-family: Verdana, Arial, Helvetica, sans-serif;
+	font-size: medium;
+	font-weight: bold;
+}
+.style10 {font-family: Verdana, Arial, Helvetica, sans-serif; font-size: large; font-weight: bold; }
+.style11 {color: #800000}
+.style12 {font-family: Verdana, Arial, Helvetica, sans-serif; font-size: small; font-weight: bold; color: #800000; }
+.style15 {font-size: small; color: #800000; font-family: Verdana, Arial, Helvetica, sans-serif;}
+.style16 {font-family: Verdana, Arial, Helvetica, sans-serif; font-size: small; color: #550000; }
+.style17 {font-family: Verdana, Arial, Helvetica, sans-serif; font-size: small; color: #7F0000; }
+.style19 {font-family: Verdana, Arial, Helvetica, sans-serif; font-size: small; color: #2A1FAA; }
+-->
+</style>
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<table width="100%" height="100%" border="0" cellpadding="0" cellspacing="5" bordercolor="#000000" bgcolor="#FFFFFF">
+  <tr valign="middle">
+    <td height="147" bordercolor="#FF0000"><div align="center"><img onmousedown="imd(this)" src="nsf4c.jpg" alt="NSF" width="100" height="100" /></div></td>
+    <td><p align="center" class="style2"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >The Future of Interactive Media:</span></p>
+      <p align="center" class="style2" style="margin-top:-10px"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Workshop on Media Arts, Science, and Technology (MAST)</span></p>
+      <p align="center" class="style3" style="margin-top:-10px"><span class="style7 style3" style="margin-top:-10px"><strong><span class="style3 style7 style6" style="margin-top:-10px"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >January 29-30, 2009</span><br />
+    <span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Santa Barbara, CA</span></span></strong></span></p>    </td>
+  </tr>
+  <tr>
+    <td width="17%" height="675" valign="top"><p align="center" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></p>
+      <p align="center" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="CFP.html"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Call for</span><br />
+        <span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >participation</span></span></p>
+      <p align="center" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="format.html"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Workshop</span><br />
+        <span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >program</span></span></p>
+      <p align="center" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings.html"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></span></p>
+	  <p align="center" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="video.htm"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Video Archives</span></span></p>
+      <p align="center" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="sessions.html"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >For Presenters</span></span></p>
+      <p align="center" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="people.html"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >People</span></span></p>
+      <p align="center" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="dates.html"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Key dates</span></span></p>
+      <p align="center" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="registration.html"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></p>
+      <p align="center" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="venue.html"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Venue, hotel,</span> <br />
+        <span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >and travel</span></span></p>
+      <p align="center" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="help.html"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Help</span></span></p></td>
+    <td width="83%" valign="top"><h1 class="style6"><font color="#000000"><span class="style10"><font face="Verdana, Arial, Helvetica, sans-serif"> 
+        <span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></font></span></font></h1>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_0.pdf"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Analysis and 
+        Synthesis of Real-World Objects</span></span><br />
+        <span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Alex Fink, Harvey Thornburg, Andreas Spanias</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_3.pdf"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Improving Music 
+        Information Retrieval using Higher-level Segmentation-related Statistics</span> 
+        </span><br />
+        <span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Stephen Pope</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_7.pdf"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Fast Modeling 
+        with a Single-Point Laser Range Finder</span> </span><br />
+        <span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Jason Wither, Chirs Coffin, Jonathan Ventura, Tobias Hollerer</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_9.pdf"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >sonicSENSE_a 
+        collaborative interactive platform for artists to develop and exhibit 
+        work.</span> </span><br />
+        <span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Jennifer Parker, Barney Haynes</span> </p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_10.pdf"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >PAPAGEI: An 
+        Extensible Automatic Accompaniment System with User-Defined Parametric 
+        Mapping</span> </span><br />
+        <span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Salman Bakht, Clarence Barlow</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_11.pdf"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Design of 
+        Blimps for Interactive Media and Arts</span> </span><br />
+        <span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Hideki Yoshimoto, Koichi Hori</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_13.pdf"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >IssueBrowser: 
+        Knowledge Acquisition via Multimedia Data</span> </span><br />
+        <span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Jonathan Ventura, Angus Forbes, Benjamin Adams, Swapna Joshi, Karl Grossner, 
+        Monica Bulger, Tobias Höllerer, B.S. Manjunath</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_14.pdf"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Video Interaction 
+        for Swarm Art</span> </span><br />
+        <span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Jeffrey Boyd, Gerald Hushlak, Christian Jacob</span> </p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_15.pdf"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >The Kamza 
+        and Bar Kamza Project: Participatory Digital Storytelling by Networked 
+        Data Sharing.</span></span> <br />
+        <span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >José Ignacio López Ramírez-Gastón, Chuk Moran, Chris Ahead, Shlomo Dubnov</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_16.pdf"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Integrating 
+        Arts and Computation in Mixed Reality Stroke Rehabilitation</span> </span><br />
+        <span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Suneth Attygale</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_17.pdf"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Low-cost Home 
+        System for Assessment and Rehabilitation of Stroke</span> </span><br />
+        <span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Jeffrey Boyd, Michael Baran</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/submission_18.pdf"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Nonverbal 
+        Communication Analysis for Collaborative Environments</span> </span><br />
+        <span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Jessica Mumford, Stjepan Rajko, Cristóbal Martínez, Lisa Tolentino, Brandon 
+        Mechtley, Todd Ingalls, Harvey Thornburg, Ellen Campana, Gang Qian</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_19.pdf"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >User Availability 
+        Detection in E2E Systems</span> </span><br />
+        <span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Vivek Singh, Ish Rishabh, Ramesh Jain</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_20.pdf"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Improvement 
+        in reaching kinematics from training in a mixed reality stroke rehabilitation 
+        environment</span> </span><br />
+        <span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Margaret Duff, Jiping He</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_21.pdf"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >SpiritTagger: 
+        A Location-Aware Interactive Web Tool for Annotating Your Photo Collection</span> 
+        </span><br />
+        <span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Jim Kleban, Emily Moxley, B.S. Manjunath</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_22.pdf"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Constructed 
+        Narratives Electronic Construction Kit</span> </span><br />
+        <span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Pamela Jennings</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_23.pdf"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Making invisible, 
+        communication as Core Mechanic in non-Mimetic Simulation Games</span></span><br />
+        <span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Zachary O. Toups, Andruid Kerne</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_24.pdf"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Interactive 
+        Visual Feedback for Mixed Reality Stroke Rehabilitation</span> </span><br />
+        <span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Nicole Lehrer, Loren Olson</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_25.pdf"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Dictionary-Based 
+        Methods for Building efficient and Meaningful Signal Models</span></span><br />
+        <span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Curtis Roads, Aaron Mcleran, Bob Sturm, John Shynk</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_26.pdf"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Towards a 
+        General-purpose Infrastructure for Novel Collaborative Multimodal Human-Computer 
+        Interfaces</span> </span><br />
+        <span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >JoAnn Kuchera-Morin, Tobias Hollerer, Bo Bell, Stephen Mangiat, Lance 
+        Putnam, Charlie Roberts</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_28.pdf"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >NextSlidePlease: 
+        designing tools for creating flexible presentations</span> </span><br />
+        <span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Ryan Spicer, Aisling Kelliher</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_29.pdf"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Media Adaptation 
+        Framework for Mixed Reality Stroke Rehabilitation</span> </span><br />
+        <span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Yinpeng Chen, Hari Sundaram, Thanassis Rikakis</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_30.pdf"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Intra-Sense</span></span> 
+        <br />
+        <span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Stjepan Rajko, Jessica Mumford, Cristóbal Martínez, Todd Ingalls, Gang 
+        Qian, Harvey Thornburg, Ellen Campana, Grisha Coleman</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_31.pdf"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Shared Visualization 
+        Spaces for Environment to Environment Communication</span> </span><br />
+        <span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Hamed Pirsiavash, Vivek Singh, Aditi Majumder, Ramesh Jain</span> </p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_32.pdf"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Musical Applications 
+        for Multi-Touch Interfaces</span> </span><br />
+        <span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Jordan Hochenbaum, Owen Vallis, Memo Akten, Dimitri Diakopoulos, Ajay 
+        Kapur</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_34.pdf"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Parametric 
+        Musical Sonification for Mixed Reality Stroke Rehabilitation</span> </span><br />
+        <span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Isaac Wallis, Todd Ingalls</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_35.pdf"><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >In-Context 
+        Visualization and Authoring of Metadata for Information Collections</span> </span><br />
+        <span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Andrew Webb, Andruid Kerne</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_36.pdf"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Scatter: A 
+        Software Tool for Visualizing, Transforming, and Performing Atomic Decompositions 
+        of Sound</span></span> <br />
+        <span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Aaron McLeran, Curtis Roads, Bob Sturm</span></p>
+      <p align="justify" class="style1"><font color="#000000"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_38.pdf"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Integrating 
+        Video Games and Robotic Play in Physical Environments</span> </span><br />
+        <span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Winslow Burleson, Camilla Jensen, Byron Lahey</span></font></p>
+      <p align="justify" class="style1"><font color="#000000"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_39.pdf"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Pendaphonics</span></span> 
+        <br />
+        <span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Winslow Burleson</span></font></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_40.pdf"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >A Gesture 
+        Learning and Recognition System for Multitouch Interaction Design</span> </span><br />
+        <span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Sashikanth Damaraju, Andruid Kerne</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_41.pdf"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Ceremony and 
+        Digital Place Making: Culturally Sensitive Design for the Mediated Talking 
+        Circle</span> </span><br />
+        <span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Christopher Martinez, Randy Kemp, David Birchfield, Ellen Campana, Todd 
+        Ingalls</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_43.pdf"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >AME Patterns 
+        library - a generic, open source C++ library for pattern recognition</span> </span><br />
+        <span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Stjepan Rajko, Gang Qian, Todd Ingalls</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_44.pdf"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >MINT/VXF - 
+        A High-Performance Computing Framework for Interactive Multimedia</span> </span><br />
+        <span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Rama Hoetzlein, Dennis Adderton</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_45.pdf"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Sound Space 
+        Manifold</span> </span><br />
+        <span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Phillip Popp</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_46.pdf"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >SMALLab for 
+        Special Needs: Using a Mixed-Reality Platform to Explore Learning for 
+        Children with Autism</span> </span><br />
+        <span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >David Birchfield, Christopher Martinez, Lisa Tolentino, Sarah Hatton, 
+        Aisling Kelliher, Ellen Campana</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_47.pdf"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Tilt: An Aesthetic 
+        Interface For An Additive Synthesizer</span> </span><br />
+        <span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Aaron McLeran</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_49.pdf"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Coil Maps: 
+        Animated Deformation of Geographic Nodes</span> </span><br />
+        <span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Angus Forbes</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_50.pdf"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >A Hybrid Physical-Digital 
+        Environment for Mediating Complexity in Water Use Scenarios</span> </span><br />
+        <span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Brandon Mechtley, Harvey Thornburg, Shawn Cook, Jinru Liu, Thanassis Rikakis, 
+        Grisha Coleman</span></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_51.pdf"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Computational 
+        Composition and Creativity</span> </span><br />
+        <span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Wesley Smith, Graham Wakefield</span> </p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_52.pdf"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Artificial 
+        Nature</span> </span><br />
+        <span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Haru Ji, Graham Wakefield</span></p>
+      <p align="justify" class="style1"><font color="#000000"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/submission_53.pdf"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Computer 
+        Visions of Computer Games: analysis and visualization of play recordings</span> 
+        </span><br />
+        <span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Jeremy Douglass</span></font></p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_54.pdf"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >TagRiver Visualization</span> 
+        </span><br />
+        <span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Basak Alper, Angus Forbes</span> </p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_55.pdf"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >K-12 Embodied 
+        and Mediated Learning: the SMALLab Mixed-Reality Learning Environment</span> 
+        </span><br />
+        <span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >David Birchfield, Christopher Martinez, Lisa Tolentino, Sarah Hatton, 
+        Aisling Kelliher, Ellen Campana</span> </p>
+      <p align="justify" class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" href="docs/paper_56.pdf"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Incorporating 
+        Semantics into a Query-by-Example Paradigm for Audio Information Retrieval</span> 
+        </span><br />
+        <span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Gordon Wichern, Harvey Thornburg, Andreas Spanias</span></p>
+      <blockquote>
+        <p align="justify" class="style1"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>

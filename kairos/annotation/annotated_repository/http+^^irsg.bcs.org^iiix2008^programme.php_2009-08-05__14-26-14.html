@@ -1,0 +1,691 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+﻿<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^irsg.bcs.org^iiix2008^programme.php_2009-08-05__14-26-14.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^irsg.bcs.org^iiix2008^programme.php_2009-08-05__14-26-14.yaml created on Wed Aug 05 17:31:20 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+ <meta http-equiv="content-type" content="text/html;charset=utf-8" />
+ <link rel="stylesheet" href="iiix2008.css" type="text/css" -->
+ <title>IIiX 2008 - London</title>
+<script type="text/javascript">
+function unhide(divID) {
+  var item = document.getElementById(divID);
+  if (item) {
+    item.className=(item.className=='hidden')?'unhidden':'hidden';
+  }
+}
+
+</script>
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<!--left_nav.php  -->
+  <div id="leftNav" class="leftNavBar">
+          <br>
+		  <br>
+		  <br>
+          <br>
+		  <br>
+		  <br>                  
+		  <b>
+		  <span onclick="return false" style="text-decoration:underline; color:blue" href="./index.php"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span> <br><br><!--&#183;-->                  
+                  <span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >For Contributors</span><br>
+					<span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./themes.php"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Symposium Themes</span></span> <br>
+					<span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./papers.php"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span> <br>
+					<span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./tutorials.php"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Call for Tutorials</span></span> <br>
+					<span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./doctoralforum.php"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Doctoral Forum</span></span> <br>
+					<span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./importantdates.php"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span> <br>
+					<span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./submission.php"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Submissions</span></span> <br>                  
+                  <br>
+                  <span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >For Participants</span><br>
+		  <span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./venue.php"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Venue</span></span> <br>
+                  <!--<span onclick="return false" style="text-decoration:underline; color:blue" href="./travel.php">Travel</span> <br>-->
+		  <span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./registration.php"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span> <br>
+		  <span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./accommodation.php"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation</span></span> <br>                  
+                  <br>
+                  <span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Programme</span><br>
+                    <span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./keynotespeakers.php"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Speakers</span></span> <br>	
+					<span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./acceptedpapers.php"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers</span></span> <br>
+					<span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./programme.php"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Programme</span></span> <br>
+					<span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./bestpaperaward.php"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Best Paper Award</span></span> <br>
+					<span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./tutorialsp.php"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span> <br>
+					<span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./doctoralforump.php"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Doctoral Forum</span></span> <br>
+					<span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./workshopsp.php"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span> <br>	  
+					<span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./social.php"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Social Events</span></span> <br>
+                  <br>
+                  <span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >About IIiX</span><br>
+                  <span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./organisers.php"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Organisers</span></span> <br>
+                  <span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./committee.php"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Programme Committee</span></span> <br>
+                  <span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./contacts.php"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Contacts</span></span> <br>
+                  <span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >-</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.db.dk/IIiX/"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >First IIiX</span></span><br>
+                  <!--<span onclick="return false" style="text-decoration:underline; color:blue" href="./schedule.php">Schedule</span> <br>-->
+		  </b>
+  </div>
+<!--End left_nav.php  -->  
+<!-- MAIN -->
+  <!-- <div id="level0">-->
+    <div id="level1">
+    <!-- top_navbar.php -->
+               <div id="topNavBar">
+          <!--<form method=get action="">
+            <input type="text" name="query" size="12"><input type="submit" value="Search">
+          </form>-->
+          <b>
+		  <span onclick="return false" style="text-decoration:underline; color:blue" href="./index.php"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span> <span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >|</span><!--&#183;-->
+		  <span onclick="return false" style="text-decoration:underline; color:blue" href="./organisers.php"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Organisers</span></span> <span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+		  <span onclick="return false" style="text-decoration:underline; color:blue" href="./committee.php"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Committee</span></span> <span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+		  <!--<span onclick="return false" style="text-decoration:underline; color:blue" href="./themes.php">Themes</span> |-->
+		  <span onclick="return false" style="text-decoration:underline; color:blue" href="./importantdates.php"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span> <span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >|</span> 
+		  <span onclick="return false" style="text-decoration:underline; color:blue" href="./submission.php"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Submission</span></span> <span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+		  <span onclick="return false" style="text-decoration:underline; color:blue" href="./venue.php"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Venue</span></span> <span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+		  <span onclick="return false" style="text-decoration:underline; color:blue" href="./accommodation.php"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation</span></span> <span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+          </b>
+        <div id="advNavBar">
+          <!--<span class="txt">IIiX 2007 - London</span> height="218" width="800"-->
+          <img onmousedown="imd(this)" src="./images/top_banner_v3.jpg">
+        </div>
+      </div>           <!-- End navbar.php -->
+      <div id="level2"> 
+      <!--right_nav.php  -->
+                <div id="rightNav" class="rightNavBar">
+          <!--<h3><span onclick="return false" style="text-decoration:underline; color:blue" href="#">Newsletters</span></h3>
+          <span>Newsletter will be available soon.</span><br><br>
+          <h3><span onclick="return false" style="text-decoration:underline; color:blue" href="#">Experts</span></h3>
+          <span>Why not read some of the experts articles? Coming soon.</span><br><br>
+          <h3><span onclick="return false" style="text-decoration:underline; color:blue" href="#">Comments</span></h3>
+          <span>For your commnents and suggestions please click <span onclick="return false" style="text-decoration:underline; color:blue" href="#">here</span></span><br><br>-->
+          <h3><span onclick="return false" style="text-decoration:underline; color:blue" href="#"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Organizers</span></span></h3><br>
+			<span><center><img onmousedown="imd(this)" src="./images/irsg.gif"></center></span><br><br>
+			<span><center><img onmousedown="imd(this)" width="140" height="50" src="./images/qm_logo.gif"></center></span><br><br>
+			<h3><span onclick="return false" style="text-decoration:underline; color:blue" href="#"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></span></h3><br>
+           <span><center><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ir-facility.org"><img onmousedown="imd(this)" width="130" height="90" src="./images/IRF_LOGO.gif"></span></center></span><br><br>
+          <h3><span onclick="return false" style="text-decoration:underline; color:blue" href="#"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Best Paper Award by</span></span></h3><br>
+          <span><center><img onmousedown="imd(this)" src="./images/yahoo_research_stacked_5.jpg"></center></span><br><br>
+		  <h3><span onclick="return false" style="text-decoration:underline; color:blue" href="#"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >In cooperation</span></span></h3><br>
+		  <span><center><span onclick="return false" style="text-decoration:underline; color:blue" href="www.acm.org"><img onmousedown="imd(this)" src="./images/LogoACM.gif"></span></center></span><br>
+		  
+          <h3><span onclick="return false" style="text-decoration:underline; color:blue" href="./images/GuardAngle_leaflet.jpg"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Leaflet</span></span></h3><br>
+          <span><center><span onclick="return false" style="text-decoration:underline; color:blue" href="./images/GuardAngle_leaflet.jpg"><img onmousedown="imd(this)" src="./images/GA_small.jpg"></span></center></span><br><br>          
+        </div>      
+      <!-- End right_nav.php  -->
+      
+          <div id="main">
+<!-- MAIN END -->
+                       <h1><span style="color:#FFF;"><b></b></span></h1>
+            <dl>
+            <dt>
+                <span onclick="return false" style="text-decoration:underline; color:blue" class="pathway" href="#"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Programme</span> </span>
+            </dt>
+            <dd>
+            <center>
+            <p align="left">
+            <span onclick="return false" style="text-decoration:underline; color:blue" href="#tuesday"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Day 1 - Tuesday, October 14</span></span><br>
+            <span onclick="return false" style="text-decoration:underline; color:blue" href="#wednesday"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Day 2 - Wednesday, October 15</span></span><br>
+            <span onclick="return false" style="text-decoration:underline; color:blue" href="#thursday"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Day 3 - Thursday, October 16</span></span><br>
+            <span onclick="return false" style="text-decoration:underline; color:blue" href="#friday"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Day 4 - Friday, October 17</span></span><br>
+            <span onclick="return false" style="text-decoration:underline; color:blue" href="./workshopsp.php"><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Day 5 - Saturday, October 18</span></span><br>
+            </p>
+            </center>
+                <p>
+                
+                <!-- TUESDAY -->
+                <h3><span onclick="return false" style="text-decoration:underline; color:blue" name="tuesday"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday, October 14</span></span></h3>
+                <span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >08.15-09.00 Registration & Welcome coffee</span><br><br>
+                <b><span onclick="return false" style="text-decoration:underline; color:blue" href="./tutorialsp.php" ><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span></b><br><br>
+                <b><span onclick="return false" style="text-decoration:underline; color:blue" href="./doctoralforump.php"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Doctoral Forum</span></span></b>
+                <br>
+                <br>
+                
+                <!-- WEDNESDAY -->
+                <h3><span onclick="return false" style="text-decoration:underline; color:blue" name="wednesday"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, October 15</span></span></h3>
+                <span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >09.00-10.00 Registration & Welcome coffee</span><br><br>
+                <b><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >10.00	Opening</span></b><br>
+                <i><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; &nbsp; &nbsp; &nbsp; Chair: Mounia Lalmas</span></i><br><br>
+
+                <b><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >10.15	Keynote 1: The study of information retrieval - a long view</span> </b><br>
+                <i> <span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; &nbsp; &nbsp; &nbsp; by Stephen Robertson, Microsoft Research Cambridge, UK</span></i><br><br>
+                <i><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; &nbsp; &nbsp; &nbsp;  Chair: Mounia Lalmas</span></i><br>
+                <br><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >11.00	Coffee break</span><br><br>
+                
+
+                <h4><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >11.30	Session 1: Interactive IR – 1</span></h4>
+                <i><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; &nbsp; &nbsp; &nbsp;Chair: Gareth Jones</span></i><br><br>
+                <ul>
+                        <li><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Tagging for Use: an analysis of use-centred resource description</span><br>
+                                <i><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Luanne Freund, University of British Columbia, Canada &amp; Richard Butterworth, UK</span></i>
+                        </li>
+                        <li><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Search strategies in multimodal image retrieval</span><br>
+                                <i><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Stina Westman, Antti Lustila &amp; Pirkko Oittinen, Helsinki University of Technology, Finland</span></i>
+                        </li>
+                </ul>
+                <br><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >12.30	Lunch</span><br>
+
+
+                <h4><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >13.30	Session 2: Context retrieval models</span></h4>
+                <i><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; &nbsp; &nbsp; &nbsp;Chair: Tassos Tombros</span></i><br><br>
+                <ul>
+                <li><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Types of query reformulation, search performance, and term suggestion device in question-answering tasks</span><br>
+                        <i><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Ying-Hsang Liu &amp; Nicholas Belkin, Rutgers University, USA</span></i>
+                </li>
+                <li><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Novelty as a form of contextual re-ranking: Efficient KLD models and mixture models</span><br>
+                        <i><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Ronald Teijeira Fernández &amp; David Enrique Losada Carril, Universidad de Santiago de Compostela, Spain</span></i>
+                </li>
+                <li><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >A graph based approach to estimating lexical cohesion</span><br>
+                        <i><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Hayrettin Gürkök, Murat Karamuftuoglu &amp; Markus Schaal, Bilkent University, Turkey</span></i>
+                </li>
+                </ul>
+                <br><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >15.00	Coffee break</span><br>
+
+
+                <h4><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >15.20	Session 3: Personalisation</span></h4>
+                <i><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; &nbsp; &nbsp; &nbsp;Chair: Joemon Jose</span></i><br><br>
+                <ul>
+                <li><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >A study of remembered context for information access from personal digital Archives</span><br>
+                        <i><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Liadh Kelly, Yi Chen, Marguerite Fuller &amp; Gareth Jones, Dublin City University, Ireland</span></i>
+                </li>
+                <li><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Activity put in context: Passively monitoring the user’s document interaction to identify implicit task context</span><br>
+                        <i><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Karl Gyllstrom, University of North Carolina Chapel Hill, USA; Craig Soules &amp; Alistair Veitch, HP Labs, USA</span></i>
+                </li>
+                <li><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Learning user interests for a session-based personalized search</span><br>
+                        <i><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Mariam Daoud, Lynda Tamine-Lechani &amp; Mohand Boughanem, IRIT, France</span></i>
+                </li>
+                </ul>
+                <br><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >18-20.00</span>	<span onclick="return false" style="text-decoration:underline; color:blue" href="./social.php"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Reception</span></span><br><br>
+
+
+
+
+
+                <!-- THURSDAY -->
+                <h3><span onclick="return false" style="text-decoration:underline; color:blue" name="thursday"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, October 16</span></span></h3>
+                <span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >09.00-09.30 Welcome coffee</span><br>
+                <h4><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >9.30	Session 4: Evaluation &amp; relevance – 1</span></h4>
+                <i><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; &nbsp; &nbsp; &nbsp;Chair: Pia Borlund</span></i><br><br>
+
+                <ul>
+                <li><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Retrieval of context-aware applications on mobile devices: How to evaluate?</span><br>
+                        <i><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Stefano Mizzaro, Elena Nazzi &amp; Luca Vassena, University of Udine, Italy</span></i>
+                </li>
+                <li><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Content or context? Searching for musical meaning in task-based interactive information retrieval (research-in-progress)</span><br>
+                        <i><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Charlie Inskip, Andy Macfarlane, City University London, UK &amp; 
+                                Pauline Rafferty, University of Aberystwyth, Wales</span></i>
+                        </li>
+                <li><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >The effects of performance feedback on users’ evaluations of an interactive IR System</span><br>
+                <i><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Diane Kelly, Chirag Shah, Cassidy Sugimoto, Earl Bailey, Rachel Clemens, Ann K. Irvine, Nicholas A. Johnson, Weimao Ke, Sanghee Oh, Anezka Poljakova, Marcos A. Rodriguez, Megan G. van Noord &amp; Yan Zhang All, University of North Carolina, USA</span></i>
+                </li>
+                </ul>
+
+                <br><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >10.50	Coffee break</span><br>
+                <h4><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >11.10	Session 5: Interactive IR – 2</span></h4>
+                <i><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; &nbsp; &nbsp; &nbsp;Chair: Diane Kelly</span></i><br><br>
+                <ul>
+                        <li><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Improving skim reading for document triage</span><br>
+                                <i><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >George Buchanan &amp; Tom Owen, Swansea University, UK</span> </i>
+                        </li>
+                        <li><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Comparing collaborative and independent search in a recall-oriented task</span><br>
+                                <i><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Hideo Joho, David Hannah &amp; Joemon M. Jose, University of Glasgow, UK</span></i>
+                        </li>
+                        <li><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >A task-based information retrieval interface to support bioinformatics analysis (research-in-progress)</span><br>
+                                <i><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Joan Bartlett, McGill University, Canada &amp; Tomasz Neugebauer, Concordia University, Canada</span></i>
+                        </li>
+                </ul>
+                <br><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >12.30	Lunch</span><br>
+
+
+                <br><b><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >13.30	Panel session: Information Interaction: Problems &amp; Challenges</span></b><br><br>    
+				<span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >The panel intends to address current problems and near-future challenges concerned
+				with theoretical and methodological, as well as application issues of Information
+				Interaction. We appreciate that Information Interaction research and development
+				incorporate IR Interaction processes, Information Retrieval in Context, Information
+				Integration, Social Interaction issues, as well as Mobile IR and Information Use.</span><br><br>
+				<i><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; &nbsp; &nbsp; &nbsp;Chair: Peter Ingwersen, Royal School of Library and Information Science, Denmark</span></i><br>
+				<i><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; &nbsp; &nbsp; &nbsp;Panelists:</span></i>
+				<ul>	
+				<li><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Nick Belkin, Rutgers University, US</span></li>
+				<li><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Ayse Goker, City University London, UK</span></li>
+				<li><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Diane Kelly, University of North Carolina, US</span></li> 
+				<li><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Steve Robertson, Microsoft Cambridge, UK</span></li>
+				<li><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Ian Ruthven, University of Strathclyde, UK</span></li>				
+				</ul>
+                <br><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >15.00	Coffee break</span><br>
+
+
+                <h4><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >15.30	Session 6: Museum &amp; archives in contexts</span></h4>
+                <i><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; &nbsp; &nbsp; &nbsp;Chair: Eero Sormunen</span></i><br><br>
+                <ul>
+                <li><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Access to archival material in context</span><br>
+                        <i><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Khairun Nisa Fachry, Jaap Kamps &amp; Junte Zhang, University of Amsterdam, The Netherlands</span></i>
+                </li>
+                <li><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Exploring information seeking behaviour in a digital museum context (research-in-progress)</span><br>
+                        <i><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Mette Skov &amp; Peter Ingwersen, Royal School of Library and Information Science, Denmark</span></i>
+                </li>
+                <li><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Characteristics of information needs for television broadcasts of scholars and students in media studies</span><br>
+                        <i><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Brian Kirkegaard &amp; Pia Borlund, Royal School of Library and Information Science, Denmark</span></i>
+                </li>
+                </ul>
+
+                <br><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >16.50 	Close of day</span>
+                <br><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >19.00</span>	<span onclick="return false" style="text-decoration:underline; color:blue" href="./social.php"><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Conference dinner</span></span><br><br>
+
+
+
+
+                <!-- FRIDAY -->
+                <h3><span onclick="return false" style="text-decoration:underline; color:blue" name="friday"><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Friday, October 17</span></span></h3>
+                <span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >09.00-10.00 Welcome coffee</span><br><br>
+                <b><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >10.00	Keynote 2: The context of the interface</span></b><br>
+                <i><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; &nbsp; &nbsp; &nbsp; by Ian Ruthven, University of Strathclyde, Glasgow, UK</span></i><br><br>
+                <i><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; &nbsp; &nbsp; &nbsp;  Chair: Pia Borlund</span></i><br>
+                <br><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >10.45	Coffee break</span>
+
+
+                <h4><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >11.15	Session 7: Evaluation &amp; relevance – 2</span></h4>
+                <i><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; &nbsp; &nbsp; &nbsp; Chair: Jesper W. Schneider</span></i><br><br>
+                <ul>
+                   <li><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Searchers' relevance judgments and criteria in evaluating Web pages in a learning style perspective</span>
+                <i><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Chariste Papaeconomou, Annemarie Zijlema &amp; Peter Ingwersen, Royal School of Library and Information Science, Denmark</span>
+</i></li>
+                        <li><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Deriving context from users’ evaluations to inform software development (research-in-progress)</span>
+                <i><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Stevie Barrett, Royal Scottish Academy of Music and Drama, UK &amp; Charlie Inskip, City University London, UK</span></i>
+                        </li>
+                        <li><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Experiences evaluating personal metasearch (research-in-progress)</span>
+                <i><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Paul Thomas &amp; David Hawking, CSIRO, Australia</span></i>
+</li>
+                </ul>
+                <br><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >12.25	Lunch</span><br>
+
+
+                <h4><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >13.30	Session 8: Information Seeking</span></h4>
+                <i><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; &nbsp; &nbsp; &nbsp;Chair: John Feather</span></i><br><br>
+                <ul>
+                   <li><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Optimal access to information while writing: Writing in the Internet age</span>
+                        <i><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Olga Muñoz Ramos, Radboud University of Nijmegen, The Netherland; Maria Gracia Castillo Vergara, University of Granada, Spain; Mari Carmen Puerta Melguizo &amp; 
+Lou Boves, Radboud University of Nijmegen, The Netherlands</span></i>
+                    </li>
+                    <li><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Towards a model of children’s information seeking behavior in using digital libraries</span>
+                        <i><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Dania Bilal &amp; Sonia Sarangthem, University of Tennessee, USA; Imad Bachir, Lebanese University, Lebanon</span></i>
+                    </li>
+                    <li><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Differences between informational and transactional tasks in information seeking on the Web</span>
+                        <i>
+<span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Hitoshi Terai, Tokyo Denki University, Japan; 
+Hitomi Saito, Aichi University of Education, Japan; 
+Yuka Egusa, National Institute for Educational Policy Research, Japan; 
+Masao Takaku, Research Organization of Information and Systems, Japan; 
+Makiko Miwa, National Institute of Multimedia Education, Japan &amp;
+Noriko Kando, National Institute of Informatics, Japan</span></i>
+                    </li>
+                </ul>
+                <br><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >15.00	Next venue – 2010</span><br>
+                <br><b><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >15.15	Symposium close</span></b><br>
+                <i><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;&nbsp;Mounia Lalmas</span></i><br>
+
+            </dd>
+</p>
+<!--</td>
+</tr>
+</table>
+
+<div align="center"><span class="copyright"><br /><br />
+The BCS is a member of the Council of European Professional Informatics Societies (CEPIS) and a registered charity. <br />
+The IR Group is a specialist group of the BCS and a European IR Specialist Group. <br /><br />
+
+Page last modified: Oct 08, 2008 <br />
+
+</span></div>
+
+
+<table width="80%" cellpadding="0" cellspacing="0" border="0">
+<tr><td valign="top" class="copybar" align="right">
+ Copyright &copy; British Computer Society
+</td></tr></table>-->
+            <br>
+          </div>
+		  <center><span style=""><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >© Murat Yakici, 2008, All rights reserved.</span>

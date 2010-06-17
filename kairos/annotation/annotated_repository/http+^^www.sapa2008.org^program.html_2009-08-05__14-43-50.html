@@ -1,0 +1,628 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML><head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.sapa2008.org^program.html_2009-08-05__14-43-50.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.sapa2008.org^program.html_2009-08-05__14-43-50.yaml created on Wed Aug 05 17:32:23 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+<!-- -*- html -*- -->
+  <META http-equiv="Content-Type" content="text/html; charset=ISO-8859-1">
+  <TITLE>SAPA2008 - program</TITLE>
+  <STYLE type="text/css">
+  dt {margin-top: 6pt; font-weight: bold}
+  li {margin-top: 6pt}
+  .small,.indent {font-size: 12pt}
+  .indent {margin-left: 0.5in}
+  .time {font-style: italic; vertical-align: top; background: #EEF8F8; font-size: 10pt}
+  .talk {background: #EEF8F8; font-size: 10pt}
+  .break {background: #EEF8F8; font-size: 10pt; font-style: italic; color: #777777}
+  .breaktime {font-style: italic; vertical-align: top; background: #EEF8F8; font-size: 10pt; color: #777777}
+  .tabtitle {font-weight: bold; background: #EEF8F8; margin-top: 6pt; font-size: 12pt; padding: 0.5em}
+  </STYLE>
+  <link rel="icon" href="http://www.sapa2008.org/favicon.ico">
+  <link rel="shortcut icon" href="http://www.sapa2008.org/favicon.ico">
+  <!-- $Header: /homes/dpwe/public_html/e6820/private/RCS/template.shtml,v 1.4 2003/06/13 03:57:16 dpwe Exp $ -->
+</HEAD>
+<body onload="on_load()" onkeyup="on_key_up(event)" BGCOLOR="#D6E6E6" TEXT="#000000" LINK="#000000"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<TABLE BORDER="0" CELLSPACING="5" CELLPADDING="10" WIDTH="100%">
+
+<TR>
+<TD COLSPAN="2" STYLE="background-color: #98BADC">
+<img onmousedown="imd(this)" ALIGN="left" SRC="/merged1-clean.gif" ALT="[SAPA logo]">
+<img onmousedown="imd(this)" ALIGN="right" SRC="/isca.gif" ALT="[ISCA logo]">
+<CENTER>
+<font color="#666666">
+<font face="Helvetica, Arial" size="+3"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >ISCA Tutorial and Research Workshop on</span> 
+<BR><B><font color="#000000"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Statistical And Perceptual Audition</span></font></B><BR>
+<span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >SAPA 2008</span></font>
+<font face="Helvetica, Arial" size="+1"><BR><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >21 September 2008, Brisbane, Australia</span>
+<br>
+<!-- &nbsp;&nbsp;&#183;&nbsp;&nbsp -->
+<span onclick="return false" style="text-decoration:underline; color:blue" HREF="http://www.sapa2008.org/"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >http://www.sapa2008.org/</span></span><br>
+</font></font>
+</CENTER>
+</TD>
+</TR>
+
+
+<TR>
+<TD VALIGN="TOP" WIDTH="140">
+
+<TABLE CELLPADDING="10">
+<TR><TD STYLE="background-color: #DEEEEE">
+
+<TABLE BORDER="0">
+
+<tr>
+<td><img onmousedown="imd(this)" SRC = "/workshop_pics/bullets/medium_green.gif" border=0 alt="*"></td>
+<td>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.sapa2008.org/">
+
+<font face="Garamond, Arial"><b><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></b></font>
+
+</span>
+
+</td>
+</tr>
+
+<!--
+<tr>
+<td><img onmousedown="imd(this)" SRC = "/workshop_pics/bullets/medium_red.gif" border=0 alt="*"></td>
+<td>
+
+<FONT COLOR="red">
+
+<font face="Garamond, Arial"><b>Technical Program</b></font>
+
+</FONT>
+
+</td>
+</tr>
+ -->
+
+<!--
+<tr>
+<td><img onmousedown="imd(this)" SRC = "/workshop_pics/bullets/medium_red.gif" border=0 alt="*"></td>
+<td>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" href="register.html">
+
+<font face="Garamond, Arial"><b>Registration</b></font>
+
+</span>
+
+</td>
+</tr>
+ -->
+
+<tr>
+<td><img onmousedown="imd(this)" SRC = "/workshop_pics/bullets/medium_green.gif" border=0 alt="*"></td>
+<td>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" href="aims.html">
+
+<font face="Garamond, Arial"><b><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Aims</span></b></font>
+
+</span>
+
+</td>
+</tr>
+
+<tr>
+<td><img onmousedown="imd(this)" SRC = "/workshop_pics/bullets/medium_green.gif" border=0 alt="*"></td>
+<td>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" href="people.html">
+
+<font face="Garamond, Arial"><b><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >People</span></b></font>
+
+</span>
+
+</td>
+</tr>
+
+<tr>
+<td><img onmousedown="imd(this)" SRC = "/workshop_pics/bullets/medium_green.gif" border=0 alt="*"></td>
+<td>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" href="dates.html">
+
+<font face="Garamond, Arial"><b><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Dates</span></b></font>
+
+</span>
+
+</td>
+</tr>
+
+<tr>
+<td><img onmousedown="imd(this)" SRC = "/workshop_pics/bullets/medium_green.gif" border=0 alt="*"></td>
+<td>
+
+<FONT COLOR="red">
+
+<font face="Garamond, Arial"><b><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></b></font>
+
+</FONT>
+
+</td>
+</tr>
+
+<!--
+
+<tr>
+<td><img onmousedown="imd(this)" SRC = "/workshop_pics/bullets/medium_green.gif" border=0 alt="*"></td>
+<td>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" href="submit.html">
+
+<font face="Garamond, Arial"><b>Submit</b></font>
+
+</span>
+
+</td>
+</tr>
+
+-->
+
+<!--
+<tr>
+<td><img onmousedown="imd(this)" SRC = "/workshop_pics/bullets/medium_green.gif" border=0 alt="*"></td>
+<td>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" href="format.html">
+
+<font face="Garamond, Arial"><b>Formatting instructions</b></font>
+
+</span>
+
+</td>
+</tr>
+ -->
+
+<!-- papers, schedule, registration, contact -->
+<tr><td><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td></tr>
+<tr>
+<td><img onmousedown="imd(this)" SRC = "/workshop_pics/bullets/medium_purple.gif" border=0 alt="*"></td>
+<td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.sapa2006.org/"><font face="Garamond, Arial"><b><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >SAPA2006</span></b></font></span></td>
+</tr>
+<tr>
+<td><img onmousedown="imd(this)" SRC = "/workshop_pics/bullets/medium_purple.gif" border=0 alt="*"></td>
+<td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.sapa2004.org/"><font face="Garamond, Arial"><b><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >SAPA2004</span></b></font></span></td>
+</tr>
+
+</TABLE>
+</TD></TR>
+</TABLE>
+
+</TD>
+
+
+<TD>
+
+<H3><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Technical Program</span></H3>
+
+<!--
+<P>This is the final program as it actually happened on the day.  You can look at <span onclick="return false" style="text-decoration:underline; color:blue" HREF="papers/all.pdf">all the papers</span> in a single PDF file, or you can click on the talk titles below to view the corresponding paper.</P>
+-->
+
+<TABLE BORDER="0" CELLSPACING="5" CELLPADDING="5">
+<TR><TD CLASS="time"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >1000-1015</span></TD><TD CLASS="talk"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Welcome and introduction</span></TD></TR>
+<TR><TD COLSPAN="2" CLASS="tabtitle"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Morning Session: Perception</span></TD></TR>
+
+<TR><TD CLASS="time"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >1015-1100</span></TD>
+<TD CLASS="talk"><B><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Keynote 1:</span></B> 
+<span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Richard M. Stern, Carnegie Mellon University</span>
+</TD></TR>
+
+<TR><TD CLASS="time"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >1100-1125</span></TD>
+<TD CLASS="talk">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="papers/119.pdf"> <span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Computational Auditory Induction by Missing-Data Non-Negative Matrix Factorization</span></span> <FONT COLOR="#808080"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >(pp.1-6)</span></FONT>
+<BR><I> <span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Jonathan Le Roux, The University of Tokyo; Hirokazu Kameoka, NTT Communication Science Laboratories; Nobutaka Ono, The University of Tokyo; Alain de Cheveigne, CNRS/Universite Paris 5/ENS; Shigeki Sagayama, The University of Tokyo</span> </I>
+</TD></TR>
+
+<TR><TD CLASS="time"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >1125-1150</span></TD>
+<TD CLASS="talk">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="papers/122.pdf"> <span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Singing voice detection using modulation frequency features</span></span> <FONT COLOR="#808080"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >(pp.7-10)</span></FONT>
+<BR><I> <span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Maria Markaki, Computer Science Department, University of Crete; Andre Holzapfel, Computer Science Department, University of Crete; Yannis Stylianou, Computer Science Department, University of Crete</span> </I>
+</TD></TR>
+
+<TR><TD CLASS="time"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >1150-1215</span></TD>
+<TD CLASS="talk"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/112.pdf"> <span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Preliminary Intelligibility Tests of a Monaural Speech Segregation System</span></span> <FONT COLOR="#808080"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >(pp.11-16)</span></FONT>
+<BR><I> <span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Ke Hu, Department of Computer Science Engineering and Center for Cognitive Science, the Ohio State University, Columbus OH; Pierre Divenyi, Speech and Hearing Research, VA Medical Center, Martinez, CA; Dan Ellis, Department of Electrical Engineering, Columbia University, New York, NY; Zhaozhang Jin, Department of Computer Science Engineering and Center for Cognitive Science, the Ohio State University, Columbus OH; Barbara G. Shinn-Cunningham, Departments of Cognitive Neural Systems and Biomedical Engineering, Boston University, Boston, MA; DeLiang Wang, Department of Computer Science Engineering and Center for Cognitive Science, the Ohio State University, Columbus OH</span> </I>
+</TD></TR>
+
+<TR><TD CLASS="breaktime"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >1215-1400</span></TD>
+<TD CLASS="break"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></TD></TR>
+
+<TR><TD COLSPAN="2" CLASS="tabtitle"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Afternoon session: Statistics</span></TD></TR>
+
+<TR><TD CLASS="time"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >1410-1435</span></TD>
+<TD CLASS="talk">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="papers/107.pdf"> <span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Combining Pitch-Based Inference and Non-Negative Spectrogram Factorization in Separating Vocals from Polyphonic Music</span></span> <FONT COLOR="#808080"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >(pp.17-22)</span></FONT>
+<BR><I> <span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Tuomas Virtanen, Tampere University off Technology; Annamaria Mesaros, Tampere University of Technology; Matti Ryyn&auml;nen, Tampere University of Technology</span> </I>
+</TD></TR>
+
+<TR><TD CLASS="time"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >1435-1500</span></TD>
+<TD CLASS="talk">
+ <span onclick="return false" style="text-decoration:underline; color:blue" href="papers/120.pdf"> <span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Explicit consistency constraints for STFT spectrograms and their application to phase reconstruction</span></span> <FONT COLOR="#808080"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >(pp.23-28)</span></FONT>
+<BR><I> <span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Jonathan Le Roux, The University of Tokyo; Nobutaka Ono, The University of Tokyo; Shigeki Sagayama, The University of Tokyo</span> </I>
+</TD></TR>
+
+<TR><TD CLASS="time"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >1500-1545</span></TD><TD CLASS="talk"><B><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Keynote 2:</span></B> 
+<span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Hideki Kawahara, Wakayama University</span>
+</TD></TR>
+
+<TR><TD CLASS="time"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >1545-1610</span></TD>
+<TD CLASS="talk">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="papers/127.pdf"> <span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Data-driven articulatory inversion incorporating articulator priors</span></span> <FONT COLOR="#808080"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >(pp.29-34)</span></FONT>
+<BR><I> <span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Adam Lammert, EBIRE; Daniel P. W. Ellis, Columbia; Pierre Divenyi, EBIRE</span> </I>
+</TD></TR>
+
+<TR><TD CLASS="time"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >1610-1635</span></TD>
+<TD CLASS="talk">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="papers/123.pdf"> <span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Discriminative Word-Spotting Using Ordered Spectro-Temporal Patch Features</span></span> <FONT COLOR="#808080"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >(pp.35-40)</span></FONT>
+<BR><I> <span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Tony Ezzat, MIT; Tomaso Poggio, MIT</span> </I>
+</TD></TR>
+
+<TR><TD CLASS="time"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >1635-1700</span></TD>
+<TD CLASS="talk"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Panel / wrap-up</span></TD></TR>
+
+
+</TABLE>
+
+
+<HR ALIGN=LEFT>
+<ADDRESS>
+    <span onclick="return false" style="text-decoration:underline; color:blue" HREF="http://validator.w3.org/check/referer"><img onmousedown="imd(this)" BORDER="0"
+        SRC="http://www.w3.org/Icons/valid-html401" ALIGN="right"
+        ALT="Valid HTML 4.01!" HEIGHT="31" WIDTH="88"></span>
+<span onclick="return false" style="text-decoration:underline; color:blue" HREF="http://www.ee.columbia.edu/~dpwe/"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Dan Ellis</span></span>
+<span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >&lt;dpwe@ee.columbia.edu&gt;</span><BR>
+<span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Last updated: Thu Sep 25 10:34:02 EDT 2008</span>

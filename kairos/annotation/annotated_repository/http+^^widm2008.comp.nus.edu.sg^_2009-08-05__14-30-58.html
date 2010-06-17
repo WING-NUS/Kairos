@@ -1,0 +1,1048 @@
+<HTML>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^widm2008.comp.nus.edu.sg^_2009-08-05__14-30-58.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^widm2008.comp.nus.edu.sg^_2009-08-05__14-30-58.yaml created on Wed Aug 05 17:31:30 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<TITLE>CIKM 2008 | WIDM</TITLE>
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+
+<STYLE media="screen, print" type="text/css">
+body {
+  	text-align: center;
+	background: #fff url(http://www.cikm2008.org/images/index_03.png) top center repeat-x; 
+	font-family: verdana, arial, sans-serif;
+	font-size: 12px;
+  }
+
+body h1 {
+		font-family: verdana, arial, sans-serif;
+		font-size: 13px;
+		font-weight: bold;
+		}
+		
+body h2,h3 {
+		font-family: verdana, arial, sans-serif;
+		font-size: 12px;
+		font-weight: bold;
+		}
+
+body td {
+		font-family: verdana, arial, sans-serif;
+		font-size: 12px;
+		font-weight: normal;
+		}
+
+#wrapper {width: 845px; 
+		height:220px;
+		margin-left: auto;
+		margin-right: auto;
+		/* background: #fff url(http://www.cikm2008.org/images/index_03.png) top center repeat-x;  */
+		text-align: left; 
+
+		}
+
+#logo {
+		width: 844px;
+		height: 25px;
+		margin: 0 auto;
+		padding: 170px 0px 10px 0px;
+		background: url(http://www.cikm2008.org/images/index_04.png) top center no-repeat;
+		border-left: 1px solid #999;
+		border-bottom: 1px solid #999;
+		border-right: 1px solid #999;
+		text-align: left;
+	}
+	
+#logo font{
+		font: verdana;	
+	}
+	
+	
+	
+#title {
+		float: left;
+		width: 300px;
+		text-align: left;
+		padding-left: 5px;
+		}
+		
+		
+#subtitle {
+			float:right;
+			width: 450px;
+			text-align: right;
+			padding-right: 5px;
+			}
+
+#footer {
+		clear: both;
+		width: 645px;
+		position: relative; 
+		margin-top: 20px;
+		border-top: 1px solid #999;
+		padding: 5px 100px 0 100px;
+		font-family: verdana, arial, sans-serif;
+		font-size: 10px;
+		font-weight: normal;
+		color: #999;
+		min-height: 40px;
+		}
+
+#footer A{color: #999;}
+#footer A:link {text-decoration: none}
+#footer A:visited {text-decoration: none}
+#footer A:active {text-decoration: none}
+#footer A:hover {text-decoration: underline; color: red;}	
+	
+	
+#content-text {
+	width: 653px;
+	min-height: 650px;
+	padding: 0px 20px 0 10px;
+	margin-top: 20px;
+	margin-bottom: 15px;
+	float:left;
+/*	margin-left:155px;
+	margin-right:195px; */
+	text-align: top;
+	border-left: 1px solid #999;
+	border-right: 1px solid #999;
+
+}
+
+
+/* for Internet Explorer */
+/*\*/
+* html #content_text {
+height: 650px;
+}
+/**/
+	
+	
+#nav {
+		float:left;
+		width: 140px;
+		min-height: 200px;
+		margin-top: 20px;
+		margin-bottom: 20px;
+		padding: 0 20px 0 0;
+	}
+
+
+
+
+#nav A{color: #000;}
+#nav A:link {text-decoration: none}
+#nav A:visited {text-decoration: none}
+#nav A:active {text-decoration: none}
+#nav A:hover {text-decoration: underline; color: red;}
+
+#nav dl{
+	width:100%;
+	border:0;
+	padding:0;
+	margin:0;
+	}
+	
+#nav dd{
+	width:100%;
+	border:0;
+	padding-left:20px;
+	margin:0;
+	color: #999;
+	}
+
+#nav dt{
+	
+	background: url(http://www.cikm2008.org/images/logo_09.png) top left no-repeat;
+	padding: 5px 5px 0px 10px;
+	height: 30px;
+	width: 130px;
+	margin-top: 4px;
+	margin-left: 0px;
+	}
+
+
+.announcement{
+	color: #9e0000;
+	font-family: verdana, arial, sans-serif;
+	font-size: 12px;
+	
+}
+	</STYLE>
+
+</HEAD>
+<body onload="on_load()" onkeyup="on_key_up(event)" BGCOLOR=#FFFFFF LEFTMARGIN=0 TOPMARGIN=0 MARGINWIDTH=0 MARGINHEIGHT=0><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<div id="wrapper">
+  <div id="logo">
+  		<div id="title">
+  			<span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >ACM 17th Conference on Information and Knowledge Management</span>
+  		</div>	
+  		<div id="subtitle">
+  			<span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Napa Valley Marriott Hotel & Spa: Napa Valley, California</span><br />
+  	 		<span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >October 26-30, 2008</span>
+  	 	</div>
+	</div>
+  
+ 	 <div id="nav">  
+  		<dl>
+  			<dt><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Participants</span></dt>
+
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/index.php"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span> </dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/news.php"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >News</span></span></dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/themes.php"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Themes</span></span></dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/important_dates.php"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></dd>  			 	
+				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/registration.php"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></dd>
+  			 	<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/student_travel_support.php"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Student Travel</span></span></dd>
+
+
+  			 
+  			<dt><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></dt>
+  				 <dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/schedule.php"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Schedule</span></span></dd>  	
+  				 <dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/keynote_speakers.php"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Speakers</span></span></dd>  	
+  				 <dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/workshops.php"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></dd>  	
+  				 <dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/industry_event.php"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Industry Event</span></span></dd>  	
+  				 <dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/publicity.php"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Publicity</span></span></dd>  	
+  				
+
+  			<dt><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Contributors</span></dt>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/call_for_papers.php"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span> </dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/call_for_tutorials.php"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Call for Tutorials</span></span> </dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/call_for_workshops.php"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Call for Workshops</span></span> </dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/sponsorship.php"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Call for Sponsorship</span></span> </dd>
+
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/how_to_submit.php"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >How to Submit</span></span></dd>  			
+
+  			<dt><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Location</span></dt>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/location.php"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Conference Site</span></span></dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/local_information.php"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Accomodation</span></span></dd>
+
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/napa_valley.php"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Napa Valley</span></span></dd>
+  			 	<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/travel.php"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Travel</span></span></dd>
+
+  			<dt><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >About Us</span></dt>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/organizers.php"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Organizers</span></span> </dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/history.php"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >History</span></span> </dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/program_committee.php"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></span> </dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/contact.php"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Contact Us</span></span></dd>
+			
+			<p>
+			<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/RSS"><img onmousedown="imd(this)" src="http://www.cikm2008.org/images/feed-icon-14x14.png" border="0"> <span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >RSS 2.0 Feed</span></span></dd>
+			
+		</dl>
+  
+	  </div>
+    
+
+ 
+ <div id="content-text">
+<!-- LEAVE CODE ABOVE THIS MARKER ALONE  -->
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<h1><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >10th ACM International Workshop on Web Information and Data Management (WIDM)&nbsp;</span></h1>
+
+<h2><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >October 30, 2008</span></h2>
+
+
+<p style="font-family: Tahoma;"></p>
+
+
+<span class='announcement'><b><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Early registration deadline: August 22, 2008 (23:59 EDT(GMT-5))</span></b></span>
+<br/>
+<br/>
+
+
+<span class='announcement'><b><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Registration website:</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/registration.php"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >http://www.cikm2008.org/registration.php</span></span>
+</b></span>
+
+
+<h5 style="font-family: Tahoma;"><br>
+      </h5>
+      <h5 style="font-weight: bold; font-family: Tahoma;"><big><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >WORKSHOP PROGRAM</span></big></h5>
+
+<body>
+<table style="text-align: left; width: 100%;" border="1"
+ cellpadding="2" cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="width: 147px; font-family: Tahoma;"><span
+ style="font-weight: bold; color: rgb(51, 102, 102);"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >8:45 - 9:00</span> </span></td>
+      <td
+ style="width: 750px; font-family: Tahoma; font-weight: bold;"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Opening Remarks</span></td>
+    </tr>
+    <tr>
+      <td style="width: 147px; font-family: Tahoma;"><span
+ style="font-weight: bold; color: rgb(51, 102, 102);"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >9:00 - 10:30</span> </span></td>
+      <td
+ style="width: 750px; font-family: Tahoma; font-weight: bold;"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Session 1: Data Mining and Clustering</span></td>
+    </tr>
+    <tr>
+      <td style="width: 147px; font-family: Tahoma;"></td>
+      <td style="width: 750px; font-family: Tahoma;">
+<span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Event Detection with Common User Interests</span>
+<br />
+<span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Meishan Hu, Aixin Sun and Ee-Peng Lim</span>
+</td>
+    </tr>
+    <tr>
+      <td style="width: 147px; font-family: Tahoma;"></td>
+      <td style="width: 750px; font-family: Tahoma;">
+<span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Wrapper Induction from Hidden-Web Sources with Domain Knowledge</span>
+<br />
+<span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Pierre Senellart, Avin Mittal, Daniel Muschick, Remi Gilleron and Marc Tommasi</span> 
+</td>
+    </tr>
+    <tr>
+      <td style="width: 147px; font-family: Tahoma;"></td>
+      <td style="width: 750px; font-family: Tahoma;">
+<span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >PIXSAR: Incremental Reclustering of Augmented XML Trees</span>
+<br />
+<span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Lila Shnaiderman, Oded Shmueli and Rajesh Bordawekar</span>
+</td>
+    </tr>
+    <tr>
+      <td style="width: 147px; font-family: Tahoma;"></td>
+      <td style="width: 750px; font-family: Tahoma;">
+<span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >A Study of the Relationship between Ad Hoc Retrieval and Expert Finding in Enterprise Environment</span>
+      <br />
+<span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Jianhan Zhu
+&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;</span> </td>
+    </tr>
+    <tr>
+      <td style="width: 147px; font-family: Tahoma;"></td>
+      <td style="width: 750px; font-family: Tahoma;">
+<span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >The Effect of Title Term Suggestion on E-commerce Sites</span>
+      <br />
+<span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Shen Huang, Xiaoyuan Wu and Alvaro Bolivar
+&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;</span> </td>
+    </tr>
+    <tr>
+      <td style="font-family: Tahoma;"><span
+ style="font-weight: bold; color: rgb(51, 102, 102);"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >10:30 - 11:00</span></span></td>
+      <td style="font-family: Tahoma; font-weight: bold;"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Coffee
+Break</span></td>
+    </tr>
+    <tr>
+      <td style="font-family: Tahoma;"><span
+ style="font-weight: bold; color: rgb(51, 102, 102);"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >11:00 - 12:30</span></span></td>
+      <td style="font-family: Tahoma; font-weight: bold;"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Session 2: System Issues</span></td>
+    </tr>
+    <tr>
+      <td style="font-family: Tahoma;"></td>
+      <td style="font-family: Tahoma;">
+<span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >A Comparison of Techniques for Estimating IDF Values to generate Lexical Signatures for the Web</span>
+<br />
+<span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Martin Klein and Michael Nelson</span>
+</td>
+    </tr>
+    <tr>
+      <td style="font-family: Tahoma;"></td>
+      <td style="font-family: Tahoma;">
+<span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >High-Performance Priority Queues for Parallel Crawlers</span>
+      <br />
+<span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Mauricio Marin, Rodrigo Paredes and Carolina Bonacic</span>
+<br />
+      </td>
+    </tr>
+    <tr>
+      <td style="font-family: Tahoma;"></td>
+      <td style="font-family: Tahoma;">
+<span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Information Retrieval from Digital Libraries in SQL</span>
+      <br />
+<span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Carlos Garcia-Alvarado and Carlos Ordonez</span> 
+</td>
+    </tr>
+    <tr>
+      <td style="font-family: Tahoma;"></td>
+      <td style="font-family: Tahoma;"> 
+<span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >HiPPIS: An Online P2P System for Efficient Lookups on d-Dimensional Hierarchies</span>
+      <br />
+<span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Katerina Doka, Dimitrios Tsoumakos and Nectarios Koziris</span>
+</td>
+    </tr>
+    <tr>
+      <td style="font-family: Tahoma;"></td>
+      <td style="font-family: Tahoma;"> 
+<span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Approximating Query Completeness by Predicting the Number of Answers in DHT-based Web Applications</span>
+      <br />
+<span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Marcel Karnstedt, Kai-Uwe Sattler, Michael Haß, Manfred Hauswirth, Brahmananda Sapkota and Roman Schmidt</span>
+</td>
+    </tr>
+    <tr>
+      <td
+ style="font-family: Tahoma; color: rgb(51, 102, 102); font-weight: bold;"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >12:30 - 14:00</span></td>
+      <td style="font-family: Tahoma;"><span
+ style="font-weight: bold;"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Lunch&nbsp; Break (on your own)&nbsp;</span></span>
+      </td>
+    </tr>
+    <tr>
+      <td
+ style="font-family: Tahoma; color: rgb(51, 102, 102); font-weight: bold;"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >14:00 - 15:30</span></td>
+      <td style="font-family: Tahoma;"><b><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Session 3: Web 2.0 and Social Networks</span></b></td>
+    </tr>
+    <tr>
+      <td style="font-family: Tahoma;"></td>
+      <td style="font-family: Tahoma;">
+<span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >From Web 1.0 to Web 2.0 and back - How did your Grandma use to tag?</span>
+<br />
+<span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Sheila Kinsella, Adriana Budura, Gleb Skobeltsyn, Sebastian Michel, John Breslin and Karl Aberer
+&nbsp;&nbsp;&nbsp;&nbsp;</span> </td>
+    </tr>
+    <tr>
+      <td style="font-family: Tahoma;"></td>
+      <td style="font-family: Tahoma;">
+<span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Modeling the Mashup Space</span> 
+      <br />
+<span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Serge Abiteboul, Ohad Greenshpan and Tova Milo 
+&nbsp;&nbsp;&nbsp;&nbsp;</span> <br />
+      </td>
+    </tr>
+    <tr>
+      <td style="font-family: Tahoma;"></td>
+      <td style="font-family: Tahoma;">
+<span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Nereau: Query Expansion Using Social Bookmark</span>
+<br />
+<span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Claudio Biancalana, Alessandro Micarelli and Claudio Squarcella</span>
+<br />
+      </td>
+    </tr>
+    <!--<tr>
+      <td
+ style="font-family: Tahoma; color: rgb(51, 102, 102); font-weight: bold;"></td>
+     <td style="font-family: Tahoma;">"An Online PPM
+Prediction Model for Web prefetching"<br />
+&nbsp;Zhijie Ban</td>
+    </tr>-->
+    <tr>
+      <td style="font-family: Tahoma;"></td>
+      <td style="font-family: Tahoma;">
+<span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Web Content Summarization Using Social Bookmarks: A New Approach for Social Summarization</span>
+<br />
+<span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Jaehui Park, Tomohiro Fukuhara, Ikki Ohmukai, Hideaki Takeda and Sang-goo Lee
+&nbsp;&nbsp;&nbsp;</span> <br />
+      </td>
+    </tr>
+    <tr>
+      <td style="font-family: Tahoma;"></td>
+      <td style="font-family: Tahoma;">
+<span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Granular Modeling of Web Documents: Impact on Information Retrieval Systems</span>
+<br />
+<span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Elisabetta Fersini, Enza Messina and Francesco Archetti 
+&nbsp;&nbsp;&nbsp;</span> <br />
+      </td>
+    </tr>
+    <tr>
+      <td
+ style="font-family: Tahoma; color: rgb(51, 102, 102); font-weight: bold;"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >15:30 - 16:00</span></td>
+      <td style="font-family: Tahoma; font-weight: bold;"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td>
+    </tr>
+    <tr>
+      <td
+ style="font-family: Tahoma; color: rgb(51, 102, 102); font-weight: bold;"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >16:00 - 17:30</span></td>
+      <td style="font-family: Tahoma;"><span
+ style="font-weight: bold;"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Session 4: Ranking and Similarity Search</span></span><br />
+      </td>
+    </tr>
+    <!--<tr>
+      <td style="font-family: Tahoma;"></td>
+      <td style="font-family: Tahoma;">"Extracting the
+Discussion Structure in Comments on News-Articles"<br />
+&nbsp;Anne Schuth, Maarten Marx and Maarten de
+Rijke&nbsp;&nbsp;&nbsp; <br />
+      </td>
+    </tr>-->
+    <tr>
+      <td style="font-family: Tahoma;"></td>
+      <td style="font-family: Tahoma;">
+<span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Quantify Music Artist Similarity based on Style and Mood</span>
+<br />
+<span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Bo Shao and Tao Li 
+&nbsp;&nbsp;&nbsp;&nbsp;</span> <br />
+      </td>
+    </tr>
+    <tr>
+      <td style="font-family: Tahoma;"></td>
+      <td style="font-family: Tahoma;">
+<span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Boosting the Ranking Function Learning Process using Clustering</span>
+<br />
+<span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Giorgos Giannopoulos, Theodore Dalamagas, Magdalini Eirinaki and Timos Sellis
+&nbsp;&nbsp;&nbsp;&nbsp;</span> </td>
+    </tr>
+    <tr>
+      <td style="font-family: Tahoma;"></td>
+      <td style="font-family: Tahoma;">
+<span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Personalized Ranking for Digital Libraries Based on Log Analysis</span>
+<br />
+<span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Yang Sun, Huajing Li, Isaac Councill, Jian Huang, Wang-Chien Lee and C. Lee Giles</span>
+</td>
+    </tr>
+    <tr>
+      <td style="font-family: Tahoma;"></td>
+      <td style="font-family: Tahoma;">
+<span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Online Selection of Parameters in the Rocchio Algorithm for Identifying Interesting News Articles</span>
+<br />
+<span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Raymond Pon, Alfonso Cardenas and David Buttler
+&nbsp;&nbsp;&nbsp;</span> </td>
+    </tr>
+    <tr>
+      <td style="font-family: Tahoma;"></td>
+      <td style="font-family: Tahoma;">
+<span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Supporting the Automatic Construction of Entity Aware Search Engines</span>
+<br />
+<span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Lorenzo Blanco, Valter Crescenzi, Paolo Merialdo and Paolo Papotti
+&nbsp;&nbsp;&nbsp;</span> </td>
+    </tr>
+    <tr>
+      <td style="font-family: Tahoma; font-weight: bold;"><span
+ style="color: rgb(51, 102, 102);"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >17:30-17:45</span></span></td>
+      <td style="font-family: Tahoma;"><span
+ style="font-weight: bold;"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Closing Remarks</span></span></td>
+    </tr>
+  </tbody>
+</table>
+
+<h5 style="font-weight: bold; font-family: Tahoma;"><span onclick="return false" style="text-decoration:underline; color:blue" name="scope"><big><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >SCOPE</span></big></span></h5>
+
+<p style="font-family: Tahoma;"> <span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >ACM WIDM 2008 is the tenth in a series of workshops on
+Web
+Information and Data Management to be held in conjunction with the</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/">
+<span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >17th International Conference on Information and Knowledge Management (CIKM 2008)</span></span><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >. 
+The objective of the workshop is to bring together
+researchers, industrial practitioners, and developers to study
+how the Web information can be extracted, stored, analyzed, and
+processed to provide useful knowledge to the end users for
+various advanced database and Web applications.</span> </p>
+
+      <h5 style="font-weight: bold; font-family: Tahoma;"><big><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >TOPICS
+OF INTEREST</span></big></h5>
+
+      <ul>
+
+        <li style="font-family: Tahoma;"><b><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Web
+Mining</span></b><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >: Web Usage Mining, Web
+Classification, Web Clustering, Resource Discovery, Web
+Personalization, Web Data Extraction, Web Structure Mining</span></li>
+
+        <br>
+
+        <li style="font-family: Tahoma;"><b><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Formal
+Models for Web Data and Knowledge Management</span></b><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >:&nbsp;Data
+Models and Meta-data,&nbsp;Semi-structured Data and XML, Query Languages, Annotations, Ontologies</span></li>
+
+        <br>
+
+        <li style="font-family: Tahoma;"><b><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >System
+Issues for Web Applications</span></b><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >: Performance of Web Applications,
+System Design, Caching and Indexing of Web data, P2P&nbsp;</span></li>
+
+        <br>
+
+        <li style="font-family: Tahoma;"><b><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Methodologies
+for Web Data Management:&nbsp;</span></b><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Data Integration,
+Archiving, Security, Personalization</span></li>
+
+        <br>
+
+        <li style="font-family: Tahoma;"><b><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Tools
+and Infrastructure for Web Data Management</span></b><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >: Web Site Modeling
+and Design, Web Visualization Tools,
+Intelligent Agents on the Web, Web Services</span> </li>
+
+        <br>
+
+        <li style="font-family: Tahoma;"><b><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Web
+Applications</span></b><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >: Digital
+Libraries, Web Portals, Warehousing, Web Information
+Filtering, Web Commerce, Web Monitoring</span> </li>
+
+        <br>
+
+        <li style="font-family: Tahoma;"><b><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Web
+Exploration</span></b><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >: Web Crawling,&nbsp; Web Search Engines</span> </li>
+
+      </ul>
+
+      <h5 style="font-family: Tahoma;"><big><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >PAPER
+SUBMISSION</span></big></h5>
+
+
+      <span style="font-family: Tahoma;">
+      <span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Manuscripts should be formatted using the ACM camera-ready templates available at</span> 
+      </span><span onclick="return false" style="text-decoration:underline; color:blue" style="font-family: Tahoma;" href="http://www.acm.org/sigs/pubs/proceed/template.html"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >http://www.acm.org/sigs/pubs/proceed/template.html</span></span><span style="font-family: Tahoma;">
+      <span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >and submitted electronically as PDF files via the</span> 
+      <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.easychair.org/conferences/?conf=widm2008" target="new"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >workshop submission website</span></span><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >.
+	Papers cannot exceed 8 pages in length.</span> 
+      <p><span style="font-family: Tahoma;"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >All accepted papers will appear in the Proceedings published by the ACM Press. 
+At least one author of each accepted paper must register and attend the workshop to present the paper.</span> </span>
+<!--For 2002, 2003,
+2004 and 2005 editions of WIDM, Data and Knowledge Engineering
+was the
+journal selected for publication of this special issue. We intend
+to use this prestigious journal again for the WIDM 2008 special
+issue. -->
+
+      <h5 style="font-family: Tahoma;"><big><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >IMPORTANT DATES</span></big></h5>
+
+      <table style="font-family: Tahoma; width: 603px; height: 131px;" border="1">
+
+        <tbody>
+
+          <tr>
+
+            <td bgcolor="#f8d800">
+            <ul>
+
+              <li><strike><b><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Papers due: July 20th, 2008</span></b></strike></li>
+
+              <li><strike><b><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Notification of acceptance: August 10th, 2008</span></b></strike></li>
+
+              <li><strike><b><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Camera-ready copy due: August 15th, 2008</span></b></strike></li>
+              <li><b><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Workshop: October 30th, 2008</span></b> </li>
+
+            </ul>
+
+            </td>
+
+          </tr>
+
+        </tbody>
+      </table>
+
+      <h5 style="font-family: Tahoma;"><big><span onclick="return false" style="text-decoration:underline; color:blue" name="organizers"><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >PROGRAM CO-CHAIRS</span></span></big></h5>
+
+      <ul>
+
+        <li><span onclick="return false" style="text-decoration:underline; color:blue" style="font-family: Tahoma;" href="http://www.comp.nus.edu.sg/~chancy" target="_new"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Chee-Yong
+Chan</span></span><span style="font-family: Tahoma;"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >,
+National University of Singapore (chancy [at] comp.nus.edu.sg</span></span><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >)</span> </li>
+
+        <li><span onclick="return false" style="text-decoration:underline; color:blue" style="font-family: Tahoma;" href="http://www.cse.ucsc.edu/%7Ealkis/" target="_new"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Neoklis
+Polyzotis</span></span><span style="font-family: Tahoma;"><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >,
+University of
+California-Santa Cruz
+(alkis [at] cs.ucsc.edu)</span></span> </li>
+
+      </ul>
+
+<!--<span onclick="return false" style="text-decoration:underline; color:blue" name="keynote">
+<h5>KEYNOTE SPEACH</h5>
+<p><b>"Supporting Distributed Resource Management with Distributed XQuery"</b>
+Resource allocation and management is a primary problem in the
+use of a distributed system. Examples include
+job scheduling in Grid-programming environments,
+name resolution in distributed directories like DNS and
+LDAP, and checking security policies in trust-management systems.
+Despite the diversity of these application domains, the
+data that describes their resources have common characteristics:
+the data is physically distributed and highly volatile
+and typically encodes both a logical and physical hierarchy.
+In addition, resource management can be expressed
+concisely and clearly by a query over the distributed resource data.
+We propose an extension to XQuery to support querying of
+distributed XML data and demonstrate its use in the
+concise, extensible, and secure implementation of
+resource management in distributed systems.
+Joint work with Trevor Jim, AT&T Labs Research.
+<p>-->
+<!--<p><b>Bio</b>-->
+      <h5 style="font-family: Tahoma;"><big><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >PROGRAM
+COMMITTEE</span></big> </h5>
+
+<pre>
+<span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Ashraf Aboulnaga                University of Waterloo                  Canada
+Periklis Andritsos              University of Trento                    Italy
+Michael Benedikt                Oxford University                       UK
+Omar Benjellouin                Google Inc                              USA
+Yi Chen                         Arizona State University               	USA
+Zhiyuan Chen                    University of Maryland Baltimore County USA
+Mariano Consens                 University of Toronto                   Canada
+Theodore Dalamagas              Athena Institute                        Greece
+Prasad Deshpande                IBM Research India                      India
+Luna Dong                       AT&T Research                           USA
+Irini Fundulaki                 ICS Forth                               Greece
+Ariel Fuxman                    Microsoft Research                      USA
+Minos Garofalakis               Yahoo! Research                         USA
+Floris Geerts                   University of Edinburgh                 UK
+Anastassios Gounaris            University of Manchester                UK
+Ihab Ilyas                      University of Waterloo                  Canada
+Min-Yen Kan                     National University of Singapore        Singapore
+Anastasios Kementsietsidis      IBM Research                            USA
+Georgia Koutrika                Stanford University                     USA
+Mong-Li Lee                     National University of Signapore        Singapore
+Hong-Va Leong                   Hong Kong Polytechnic University        Hong Kong
+Chen Li                         University of California Irvine         USA
+Feifei Li                       Florida State University                USA
+Lipyeow Lim                     IBM Research                            USA
+Qiong Luo                       Hong Kong Univ. of Science & Tech.      Hong Kong
+Prasenjit Mitra                 Penn State University                   USA
+Pierre Senellart                Max-Planck-Institut für Informatik      Germany
+Raymond Wong                    University of New South Wales           Australia
+Melanie Wu                      Indiana University                      USA
+Ke Yi                           Hong Kong Univ. of Science & Tech.      Hong Kong
+Cong Yu                         Yahoo! Research                         USA</span>

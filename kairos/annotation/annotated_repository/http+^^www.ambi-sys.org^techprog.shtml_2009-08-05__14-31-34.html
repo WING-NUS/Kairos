@@ -1,0 +1,937 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.ambi-sys.org^techprog.shtml_2009-08-05__14-31-34.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.ambi-sys.org^techprog.shtml_2009-08-05__14-31-34.yaml created on Wed Aug 05 17:31:33 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<title>Ambi-sys 2008</title> <!-- CHANGE TO THE ACRONYM OF THE CONFERENCE -->
+<meta name="description" content="International Conference on Ambient Media and Systems" /> <!-- CHANGE TO THE FULL NAME OF THE CONFERENCE -->
+<meta name="keywords" content="ambient intelligence, ambient systems, multimedia, quality of service, quality of information, context awareness, ubiquitous computing, smart environments, adaptive interface, ubiquity, sensor fusion, wireless communication, service provisioning, " /> <!-- ADD NEW KEYWORDS HERE, SUCH AS THE ACRONYM AND CONFERENCE TOPICS -->
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="robots" content="index,follow" />
+<meta name="distribution" content="Global" />
+<meta name="author" content="ICST" />
+<link href="include/general.css" rel="stylesheet" type="text/css" media="all" />
+<link href="include/header.css" rel="stylesheet" type="text/css" media="all" />
+<link href="include/content.css" rel="stylesheet" type="text/css" media="all" />
+<link href="include/footer.css" rel="stylesheet" type="text/css" media="all" />
+<link href="include/hintbox.css" rel="stylesheet" type="text/css" media="all" />
+<script type="text/javascript" src="include/default.js"></script>
+<script type="text/javascript" src="include/printmail.js"></script>
+<script type="text/javascript" src="include/hintbox.js"></script>
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<div id="container">
+  <div id="containerfix">
+     <div id="head">
+          <span onclick="return false" style="text-decoration:underline; color:blue" href="#"><img onmousedown="imd(this)" src="images/head_logo_new.jpg" alt="" id="head_logo" /></span>
+          <div id="head_right">
+               <div id="head_text">
+                    <span class="conference_location"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Quebec, Canada</span></span>
+                    <span class="date"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >February 11-14, 2008</span></span>
+               </div>
+               <div id="head_logos">
+			   <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.icst.org"><img onmousedown="imd(this)" src="images/icst.png" alt="ICST - The Institute for Computer Sciences, Social-Informatics and Telecommunications Engineering" /></span>
+				<span class="conftitle"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >International Conference on Ambient Media and Systems</span></span>
+               </div>
+               <div id="menu_top">
+			   <!--
+                    <div class="menuitem_top"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.shtml">HOME</span></div>
+                    <div class="menu_separator_top"></div>
+                    <div class="menuitem_top"><span onclick="return false" style="text-decoration:underline; color:blue" href="brochures.shtml">CFP/BROCHURES</span></div>
+                    <div class="menu_separator_top"></div>
+                    <div class="menuitem_top"><span onclick="return false" style="text-decoration:underline; color:blue" href="submission.shtml">SUBMISSION</span></div>
+                    <div class="menu_separator_top"></div>
+                    <div class="menuitem_top"><span onclick="return false" style="text-decoration:underline; color:blue" href="registration.shtml">REGISTRATION</span></div>
+                    <div class="menu_separator_top"></div>
+					-->
+                    <div class="menuitem_top"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.shtml"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >HOME</span></span></div>
+                    <div class="menu_separator_top"></div>
+                    <div class="menuitem_top"><span onclick="return false" style="text-decoration:underline; color:blue" href="cfp.shtml"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span></div>
+                    <div class="menu_separator_top"></div>
+                    <div class="menuitem_top"><span onclick="return false" style="text-decoration:underline; color:blue" href="submission.shtml"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >SUBMISSION</span></span></div>
+                    <div class="menu_separator_top"></div>
+                    <div class="menuitem_top"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >REGISTRATION</span></div>
+                    <div class="menu_separator_top"></div>
+
+               <!--
+                    <div class="menuitem_top"><span onclick="return false" style="text-decoration:underline; color:blue" href="submission.shtml">SUBMISSION</span></div>
+                    <div class="menu_separator_top"></div>
+                    <div class="menuitem_top"><span onclick="return false" style="text-decoration:underline; color:blue" href="registration.shtml">REGISTER</span></div>
+                    <div class="menu_separator_top"></div>
+               -->
+                    <div class="menuitem_top"><span onclick="return false" style="text-decoration:underline; color:blue" href="contact.shtml"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >CONTACT</span></span></div>
+               </div>
+          </div>
+     </div>
+     <div class="fullwidth_line"></div>
+     <div id="boxes_left">
+          <div class="box">
+               <div class="box_head">
+                    <div class="box_title"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >General</span></div>
+               </div>
+               <div class="menu_left">
+                    <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.shtml"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></div>
+                    <div class="menu_separator_left"></div>
+                    <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="impdates.shtml"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></div>
+                    <!-- <div class="menuitem_left">Important Dates</div> -->
+                    <div class="menu_separator_left"></div>
+                    <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="cfp.shtml"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Call For Papers</span></span></div>
+                    <!-- <div class="menuitem_left">Call For Papers</div>-->
+                    <div class="menu_separator_left"></div>
+                    <!--<div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="callforworkshops.shtml">Call For Workshop Proposals</span></div> -->
+                    <div class="menu_separator_left"></div> 
+					<div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="orgncomm.shtml"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Organizing Committee</span></span></div>
+                    <div class="menu_separator_left"></div>
+                    <!-- <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="tpc.shtml">Program Committeee</span></div> -->
+                    <div class="menuitem_left"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Program Committeee</span></div>
+					<div class="menu_separator_left"></div>
+                <!--
+                    <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="tpc.shtml">Program Committeee</span></div>
+					<div class="menu_separator_left"></div>
+				-->
+					<!-- <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="underconstruction.shtml">Related Events</span></div>-->
+					<div class="menuitem_left"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Related Events</span></div>
+
+                    <div class="menu_separator_left"></div>
+                    <!-- <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="registration.shtml">Registration</span></div>-->
+                    <div class="menuitem_left"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></div>
+                    <div class="menu_separator_left"></div>
+
+				<!--
+					<div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="related.shtml">Related Events</span></div>
+                    <div class="menu_separator_left"></div>
+                    <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="registration.shtml">Register</span></div>
+                    <div class="menu_separator_left"></div>
+                -->
+
+               </div>
+          </div>
+		  <div class="box">
+               <div class="box_head">
+                    <div class="box_title"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Conference</span></div>
+               </div>
+               <div class="menu_left">
+              		<!-- <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="welcomemsg.shtml">Welcome Message</span></div> -->
+              		<div class="menuitem_left"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Welcome Message</span></div>
+
+                    <div class="menu_separator_left"></div>
+
+              		<!-- <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="techprog.shtml">Technical Program</span></div> -->
+              		<div class="menuitem_left"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Technical Program</span></div>
+                    <div class="menu_separator_left"></div>
+					<!-- <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="keynote.shtml">Keynote Speakers</span></div> -->
+					<div class="menuitem_left"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Speakers</span></div>
+                    <div class="menu_separator_left"></div>
+					<!-- <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="publication.shtml">Publications</span></div> -->
+					<div class="menuitem_left"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Publications</span></div>
+					<div class="menu_separator_left"></div>
+
+
+					<!-- <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="authorskitacm.shtml">Author's Kit ACM</span></div>-->
+					<div class="menuitem_left"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Author's Kit</span></div>
+                    <div class="menu_separator_left"></div>
+					<div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="submission.shtml"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Paper Submission</span></span></div>
+					<!--<div class="menuitem_left">Paper Submission</div>-->
+                    <div class="menu_separator_left"></div>
+               <!--
+					<div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="authorskitieee.shtml">Author's Kit IEEE</span></div>
+					<div class="menu_separator_left"></div>
+					<div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="authorskiticst.shtml">Author's Kit ICST</span></div>
+                    <div class="menu_separator_left"></div>
+               -->
+					<!-- <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.shtml">Workshops</span></div>-->
+					<div class="menuitem_left"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></div>
+                    <div class="menu_separator_left"></div>
+					<!-- <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="panel.shtml">Panels</span></div>-->
+					<div class="menuitem_left"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Panels</span></div>
+                    <div class="menu_separator_left"></div>
+				<!--
+					<div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="underconstruction.shtml">Tutorials</span></div>
+                    <div class="menu_separator_left"></div>
+					<div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="underconstruction.shtml">Exhibitions / Demos</span></div>
+                    <div class="menu_separator_left"></div>
+                -->
+
+                <!--
+					<div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="panel.shtml">Panels</span></div>
+                    <div class="menu_separator_left"></div>
+					<div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorial.shtml">Tutorials</span></div>
+                    <div class="menu_separator_left"></div>
+					<div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="exhibitiondemo.shtml">Exhibitions / Demos</span></div>
+                    <div class="menu_separator_left"></div>
+                -->
+               </div>
+          </div>
+		  <!--<div class="box">
+               <div class="box_head">
+                    <div class="box_title">Workshops</div>
+               </div>
+               <div class="menu_left">
+                    <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.micpan.org/">MicPAN</span></div>
+                    <div class="menu_separator_left"></div>
+               </div>
+          </div> -->
+		  <div class="box">
+               <div class="box_head">
+                    <div class="box_title"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Lodging / Travel</span></div>
+               </div>
+               <div class="menu_left">
+                    <!-- <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="conferencelocation.shtml">Conference Site</span></div>-->
+                    <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.sarasota.usf.edu" target="_blank"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Conference Site</span></span></div>
+                    <div class="menu_separator_left"></div>
+					<div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="hotelinformation.shtml"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Hotel Information</span></span></div>
+					<!-- <div class="menuitem_left">Hotel Reservations</div> -->
+                    <div class="menu_separator_left"></div>
+					<!-- <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="underconstruction.shtml">Maps / Directions</span></div>-->
+					<div class="menuitem_left"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Maps / Directions</span></div>
+                    <div class="menu_separator_left"></div>
+					<!-- <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="visa.shtml">VISA Information</span></div>-->
+					<div class="menuitem_left"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >VISA Information</span></div>
+                    <div class="menu_separator_left"></div>
+<!--
+					<div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="hotelreservation.shtml">Hotel Reservation</span></div>
+                    <div class="menu_separator_left"></div>
+					<div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="mapdirection.shtml">Maps / Directions</span></div>
+                    <div class="menu_separator_left"></div>
+					<div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="visa.shtml">VISA Information</span></div>
+                    <div class="menu_separator_left"></div>
+-->
+               </div>
+          </div>
+		  <!--<div class="box">
+               <div class="box_head">
+                    <div class="box_title">History</div>
+               </div>
+               <div class="menu_left">
+                    <div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="photo.shtml">Photos</span></div>
+                    <div class="menu_separator_left"></div>
+					<div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="#">Previous 2006</span></div>
+                    <div class="menu_separator_left"></div>
+					<div class="menuitem_left"><span onclick="return false" style="text-decoration:underline; color:blue" href="#">Previous 2005</span></div>
+                    <div class="menu_separator_left"></div>
+               </div>
+          </div>-->
+     </div>
+     <div id="content">
+	 <div id="fontsizer">
+		<span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Font Size:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="javascript:ts('body',1)"><img onmousedown="imd(this)" src="images/plus.gif" class="fontup" alt="research conference europe" /></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="javascript:ts('body',-1)"><img onmousedown="imd(this)" src="images/minus.gif" class="fontdown" alt="communications workshop" /></span></div>
+
+
+<h1><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Conference Technical Program (</span><span onclick="return false" style="text-decoration:underline; color:blue" href="techprog.pdf"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >pdf</span></span><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >)</span></h1>
+
+<table border="1">
+ <tr>
+  <td width=563 valign=top>
+  <b><span lang=EN-GB style='color:blue'><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >February 11 (Monday): Technical program- Keynote and presentations</span></span></b>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >12:50-13:00&nbsp;&nbsp;&nbsp;&nbsp;</span><i><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Welcome</span></i><br>
+	<span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >13:00-14:00&nbsp;&nbsp;&nbsp;&nbsp;</span><b><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Plenary Session</span></b> <span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >(Keynote)</span><br>
+  	<span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >14:00-14.30&nbsp;&nbsp;&nbsp;&nbsp;</span><i><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span></i><br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >14:30-16:30&nbsp;&nbsp;&nbsp;&nbsp;</span><b><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Technical Program (5 presentations)</span></b>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >1) Enriching Music with Synchronized Lyrics, Images and Colored Lights</span><br>
+  	<span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Gijs Geleijnse, Dragan Sekulovski, Jan Korst, Steffen Pauws, Bram Kater and Fabio Vignoli.</span><br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >2) Inferring User's Context in Ubiquitous Computing</span><br>
+  	<span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Yaser Mowafi and Dongsong Zhang.</span><br>
+  </td>
+ </tr>
+ <tr>
+ <td>
+  	<span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >3) Improving Dialogue Systems in a Home Automation Environment</span> <br>
+  	<span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Raquel Justo, Oscar Saz, Victor Guijarrubia, Antonio Miguel, M. Ines Torres and Eduardo Lleida.</span><br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >4) A Formal model to handle the adaptability of Multimodal User Interface</span><br>
+	<span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >nadjet kamel, yamine AIT AMEUR, Sid Ahmed Selouani and habib hamam.</span><br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >5) A vision-based hybrid method for facial expression recognition</span><br>
+  	<span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Xianyi Huang and Yingzi Lin.</span><br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >19:00-20:00&nbsp;&nbsp;&nbsp;&nbsp;</span><b><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Welcome Reception</span></b><br>
+  </td>
+ </tr>
+
+</table>
+
+<br>
+<table border="1">
+ <tr>
+  <td width=563 valign=top>
+  <b><span lang=EN-GB style='color:blue'><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >February 12 (Tuesday): Technical program and dinner</span></span></b>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >9:00-10:30&nbsp;&nbsp;&nbsp;&nbsp;</span><b><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Technical Program (3 presentations)</span></b>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >1) A Model for Ontology-Based Scene Description for Context-Aware Driver Assistance Systems</span><br>
+  	<span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Simone Fuchs, Stefan Rass, Bernhard Lamprecht and Kyandoghere Kyamakya.</span><br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >2) The Korrontea Data Modeling</span> <br>
+  	<span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Emmanuel Bouix, Philippe Roose and Marc Dalmau.</span><br>
+  </td>
+ </tr>
+ <tr>
+ <td>
+  	<span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >3) An MPEG-21-driven Utility-based Multimedia Adaptation Decision Taking Web Service</span> <br>
+  	<span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Martin Prangl, Ingo Kofler and Hermann Hellwagner.</span><br>
+  </td>
+  </tr>
+
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >10:30-11:00&nbsp;&nbsp;&nbsp;&nbsp;</span> <i><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span></i><br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >11:00-13:00&nbsp;&nbsp;&nbsp;&nbsp;</span><b><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Technical Program (4 presentations)</span></b>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >1) Deconstructing Ambient Intelligence into Ambient Narratives: The Intelligent Shop Window</span><br>
+  	<span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Mark van Doorn, Evert van Loenen and Arjen de Vries.</span> <br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >2) Delivering Interactive Multimedia Services in Dynamic Pervasive Computing Environments</span> <br>
+  	<span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Cristian Hesselman, Pablo Cesar, Ishan Vaishnavi, Mathieu Boussard, Ralf Kernchen, Stefan Meissner, Antonietta Spedalieri, Albert Sinfreu and Christian Rack.</span> <br>
+  </td>
+ </tr>
+ <tr>
+ <td width=563 valign=top>
+  	<span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >3) Multi-agent Designs for Ambient Systems</span> <br>
+  	<span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Martin Lundell, Dianxiang Xu, Jonathan Pikalek and Kendall Nygard.</span><br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >4) Assisting Elders via Dynamic Multi-tasks Planning - A Markov Decision Processes based Approach</span><br>
+  	<span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Francois Courtemanche, Mehdi Najjar, Blandine Paccoud and Andre Mayers.</span><br>
+  </td>
+ </tr>
+
+
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >13:00-14:00&nbsp;&nbsp;&nbsp;&nbsp;</span><i><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></i><br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >14:00-15:00&nbsp;&nbsp;&nbsp;&nbsp;</span><b><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Panel and participant discussion</span></b>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >15:00-15:30&nbsp;&nbsp;&nbsp;&nbsp;</span><i><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span></i><br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >15:30-17:00&nbsp;&nbsp;&nbsp;&nbsp;</span><b><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Technical Program (3 presentations)</span></b>
+  </td>
+ </tr>
+
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >1) TaPuMa: Tangible Public Map for Information Acquirement through the Things We Carry</span> <br>
+  	<span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Pranav Mistry, Tsuyoshi Kuroki and Chaochi Chang.</span> <br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >2) Active Manipulation of Users in Haptic-Enabled Virtual Environments</span> <br>
+  	<span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Mehrdad Zadeh, David Wang and Eric Kubica.</span><br>
+  </td>
+ </tr>
+ <tr>
+ <td width=563 valign=top>
+
+  	<span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >3) 3D Interaction with Volumetric Medical Data: experiencing the Wiimote</span>  <br>
+  	<span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Luigi Gallo, Giuseppe De Pietro and Ivana Marra.</span><br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >19:00-21:00&nbsp;&nbsp;&nbsp;&nbsp;</span><b><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Banquet dinner</span></b>
+  </td>
+ </tr>
+</table>
+
+<br>
+
+<table border="1">
+ <tr>
+  <td width=563 valign=top>
+  <b><span lang=EN-GB style='color:blue'><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >February 13 (Wednesday): Technical program and presentations</span></span></b>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >9:00-10:30&nbsp;&nbsp;&nbsp;&nbsp;</span><b><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Technical Program (3 presentations)</span></b>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >1) Adaptive Data Rate Control for Throughput Improvement and Energy Efficiency in Low Rate WPAN</span><br>
+  	<span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Indong Yeo, Jonghyune Kim and Sunshin An.</span><br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >2) The Development of Wireless Sensor System for Pressure and Temperature Signals Monitoring</span>  <br>
+  	<span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Essa Jafer and Khalil Arshak.</span><br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+
+  	<span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >3) Bypass AODV: Improving Performance of Ad Hoc On-Demand Distance Vector (AODV) Routing Protocol in Wireless Ad Hoc Networks</span><br>
+  	<span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Ahed Alshanyour and Uthman Baroudi.</span><br>
+  </td>
+  </tr>
+
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >10:30-11:00&nbsp;&nbsp;&nbsp;&nbsp;</span> <i><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span></i><br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >11:00-13:00&nbsp;&nbsp;&nbsp;&nbsp;</span><b><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Technical Program (4 presentations)</span></b>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >1) An Energy Aware and Fault Tolerant Clustering Protocol for Wireless Sensor Networks</span><br>
+  	<span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Azzedine Boukerche and Anahit Martirosyan.</span> <br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >2) Cooperative Caching Techniques for Continuous Media in Wireless Home Networks</span> <br>
+  	<span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Shahram Ghandeharizadeh and Shahin Shayandeh.</span><br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >3) Context-Aware Content Filtering & Presentation for Pervasive & Mobile Information Systems</span> <br>
+  	<span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Kaijian Xu, Manli Zhu and Tao Gu.</span> <br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >4) Emergency Response Simulation Using Wireless Sensor Networks</span><br>
+  	<span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Avgoustinos Filippoupolitis, Laurence Hey, Georgios Loukas, Erol Gelenbe and Stelios Timotheou.</span><br>
+  </td>
+ </tr>
+
+
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >13:00-14:00&nbsp;&nbsp;&nbsp;&nbsp;</span><i><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></i><br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >14:00-15:00&nbsp;&nbsp;&nbsp;&nbsp;</span><b><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Panel and participant discussion</span></b>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >15:00-15:30&nbsp;&nbsp;&nbsp;&nbsp;</span><i><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span></i><br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >15:30-17:00&nbsp;&nbsp;&nbsp;&nbsp;</span><b><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Technical Program (3 presentations)</span></b>
+  </td>
+ </tr>
+
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >1) Provisioning of Multimedia Services over Open NGN Testbed</span> <br>
+  	<span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Adel Al-Hezmi, Fabricio Gouveia and Thomas Magedanz.</span> <br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >2) Simulating and Implementing Geospatially-based Binding Mechanisms for Mobile Peering</span><br>
+  	<span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Ben Falchuk and David Shallcross.</span><br>
+  </td>
+ </tr>
+ <tr>
+  <td width=563 valign=top>
+  	<span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >3) A Semiotic Multi-Agent System for Intelligent Building Control</span>  <br>
+  	<span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Darren Booy, Bing Qiao, Kecheng Liu and Chris Guy.</span> <br>
+  </td>
+ </tr>
+</table>
+
+<br>
+
+<b><span lang=EN-GB style='color:blue'><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >NOTE: The three workshops HAS, AMDIT and SOMITAS will run in parallel on February 14, 2008.</span></span> <span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Please see</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="techprogwork.shtml"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Workshops program details.</span></span></b>
+
+     </div>
+     <div id="boxes_right">
+          <div class="box">
+               <div class="box_head">
+                    <div class="box_title"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Dates &amp; News</span></div>
+               </div>
+
+				<p><b><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >-Workshop Program</span></b><br />
+			   <span onclick="return false" style="text-decoration:underline; color:blue" href="techprogwork.shtml"><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >See details...</span></span>
+			   </p>
+
+				<br />
+
+				<p><b><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >-Conference Program</span></b><br />
+			   <span onclick="return false" style="text-decoration:underline; color:blue" href="techprog.shtml"><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >See details...</span></span>
+			   </p>
+
+				<br />
+
+				<p><b><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >-Camera-ready Version</span></b><br />
+			   <del><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >December 22, 2007 (</span><span style="color: red;"><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >new</span></span><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >)</span></del>
+			   <br />
+			   </p>
+
+				<br />
+
+				<p><b><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >-Notification of Acceptance</span></b><br />
+			   <del><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >December 01, 2007 (revised)</span></del>
+			   <br />
+			   </p>
+
+				<br />
+               <p><b><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >-Paper Submission</span></b><br />
+			   <del><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Exended to October 15, 2007</span></del>
+			   <br />
+			   </p>
+
+				<br />
+
+               <p><b><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >-Workshops</span></b><br />
+			   <span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.shtml"><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >See details...</span></span>
+			   </p>
+
+			   <br />
+
+			   <!--
+			   <p class="alert"><b>Early Registration</b><br />
+			   August 31, 2007</p>
+			   <hr />
+			   <p><b>Sight-seeing tours listed</b><br />
+			   August 31, 2007</p>
+			   -->
+          </div>
+          <div class="box sponsors">
+
+               <div class="box_headright">
+                    <div class="box_title"><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Technical Cooperation</span></div>
+               </div>
+			   <span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >ACM&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href=""><img onmousedown="imd(this)" src="images/sigchi_logo.png" alt="ACM SIGCHI" /></span>
+          </div>
+
+		  <div class="box sponsors">
+		  <!--
+               <div class="box_headright">
+                    <div class="box_title">Technical Sponsorship</div>
+               </div>
+			   <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ieee.org"><img onmousedown="imd(this)" src="images/sponsor_ieee.png" alt="IEEE" /></span>
+			-->
+          </div>
+		  <div class="box sponsors">
+		  <!--
+               <div class="box_headright">
+                    <div class="box_title">Co-Sponsors</div>
+               </div>
+			   <span onclick="return false" style="text-decoration:underline; color:blue" href=""><img onmousedown="imd(this)" src="images/sponsor_css.png" alt="CSS" /></span>
+			   -->
+          </div>
+     </div>
+     <div class="clearer"></div>
+     <div id="footer">
+          <div id="footer_text">
+               <b><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Webmaster:</span></b> <span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >anwar AT mcrlab.uottawa.ca, patrey AT mcrlab.uottawa.ca</span>

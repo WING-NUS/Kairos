@@ -1,0 +1,587 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+
+<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session1/1/annotation/annotated_repository/http+^^and2009workshop.googlepages.com^programme_2009-08-05__14-21-44.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session1/1/annotation/annotated_repository/http+^^and2009workshop.googlepages.com^programme_2009-08-05__14-21-44.yaml created on Thu Aug 13 13:44:34 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+  <title>and2009workshop - Programme</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <style type="text/css">
+  #g_title p, #g_footer p, #g_description p {
+    margin: 0;
+  }
+  /*
+
+  	-- -- -- -- -- -- --
+  	Browser Fixes
+  	-- -- -- -- -- -- --
+  	
+  	This file uses CSS filtering methods to fix various
+  	layout bugs.
+
+  	Each of the following three imported files is a 
+  	separate, browser-specific CSS file that keeps all 
+  	hacks out of the main style sheet.
+  	
+  	Over time, as supporting these browsers no longer
+  	remains a priority, cleaning up the hacks is as
+  	easy as deleting the @import statement below, or
+  	simply no longer linking this file from the HTML.
+  	
+  */
+
+  /* 
+    fix ie6 "peekaboo bug" using the "holly hack". 
+    Note, this style only gets applied to ie6
+  */
+  * html .wrapper {
+    height: 0.1%;
+  }
+
+  /* 
+   * IE5 mac - overrides the IE/Win hack 
+   */
+
+  /*\*//*/
+
+  * html #threecolumn div {
+  	height: auto;
+  }
+
+  /**/
+
+
+  /* 
+   * IE5/Win-specific CSS -ensures #container wraps all content on window resize
+   */
+
+  @media tty {
+   i{content:"\";/*" "*/}} * html #container { height: 1%; } /*";}
+  }/* */
+  /* Styling for editable elements. Eventually, this will be part of the style. */
+  .editable {
+    border: 1px dashed blue;
+  }
+  
+  #footer {
+    clear: both;
+  }
+  
+  /* Extra divs hidden by default. The custom CSS can override this though */
+  #extraDiv1, #extraDiv2, #extraDiv3, #extraDiv4, #extraDiv5, #extraDiv6 {
+    display: none;
+  }
+  
+  a img,:link img,:visited img {border: none;}
+
+  body {
+    text-align: center;
+  }
+  #container {
+    width: 718px;
+    text-align: left;
+    margin: 0 auto;
+  }
+  #main-content {
+    float: right;
+    width: 470px;
+  }
+  #sidebar {
+    float: right;
+    width: 230px;
+  }
+  #footer {
+    clear: both;
+  }
+  /** BEGIN CUSTOM SKIN **/
+    /** DESIGN SCHEME, Lines **/
+    body {
+    	font: 62.5% Verdana, sans-serif;
+  	line-height: 1.4;
+    }	
+    h1,h2,h3,h4,h5,h6,pre,code,p {font-size: 1em; font-weight: normal; }
+    dl,li,dt,dd,h1,h2,h3,h4,h5,h6,pre,form,body,html,p,blockquote,fieldset,input {margin: 0; padding: 0;}
+    a img,:link img,:visited img {border: none;}
+    address {font-style: normal;}
+    
+    #container { padding: 0 10px; }
+    #sidebar, #sidebar-alternate { padding: 0 10px; margin: 0 0 1em; }
+    #footer { font-size: 1.2em; padding: 1em 0; font-family: Georgia, "Times New Roman", Times, serif;
+      font-style: italic; }
+    #header { margin: 0;
+    	text-align: center; }
+    #main-content { margin: 0 0 1em; padding: 0 10px 1em; }
+    #g_description { margin: 0 0 0; padding: 0.45em; }
+    
+    a:link:hover { text-decoration: none; }
+    a:visited:hover { text-decoration: none; }
+    p,li,blockquote,dl,caption,td,th { font-size: 1.2em; }
+    p { margin: 0 0 1em; }
+    div#g_description { font-size: 1.2em; }
+    blockquote p,dl dl,li p,blockquote li,li li,li blockquote,blockquote blockquote,div#g_description p,td p,td td,td blockquote,td li { font-size: 1em; }
+    #header p { margin: 0; }
+    blockquote { margin: 1em 0; padding: 0 1em; }
+    table { padding: 0.3em; }
+    caption { padding: 0.3em; }
+    th { padding-bottom: 0.3em; }
+    th, caption { font-family: Georgia, "Times New Roman", Times, serif; font-weight: bold; font-size: 1.3em; }
+    hr { margin: 1em 0; border-style: none; height: 1px; }
+    h1,h2,h3,h4,h5,h6 { font-family: Georgia, "Times New Roman", Times, serif; margin: 0.5em 0; }
+    h1 { font-size: 4em; padding: 0.5em 0; margin: 0; }
+    h2 { font-size: 2em; font-style: italic; padding: 0 0.2em 0.1em; }
+    h3 { font-size: 1.6em; }
+    h4 { font-size: 1.3em; font-weight: bold; font-style: italic; letter-spacing: 0.03em; }
+    h5 { font-size: 1.3em; font-weight: bold; letter-spacing: 0.03em; }
+    h6 { font-size: 1.3em; font-style: italic; letter-spacing: 0.03em; }  
+    ul { padding: 0 0 0 20px; list-style: circle; }
+    ol { padding: 0 0 0 20px; }
+    code, kbd { font-size: 1.4em; }
+    
+    #onecolumn #main-content { width: 696px; }
+    #twocolumn-left #main-content, #twocolumn-right #main-content { width: 455px; }
+    #twocolumn-left #sidebar, #twocolumn-right #sidebar { width: 220px; }
+    #threecolumn #main-content { width: 394px; }
+    #threecolumn #sidebar { width: 130px; }
+    #threecolumn #sidebar-alternate { width: 130px; } 
+    /** COLOR SCHEME, Lavender **/
+    body { background: #DEDEF2 url(/-/includes/style/lines/lavender/body-tile.gif) top left repeat-x; }
+    a:link { color: #669; }
+    a:visited { color: #806799; }
+    a:link:hover { background: #99C; color: #FFF; }
+    a:visited:hover { background: #B399CC; color: #FFF; }
+    #container { background: #FFF url(/-/includes/style/lines/lavender/border-tile.gif) top left repeat-x; }
+    #sidebar, #sidebar-alternate { background: #DEDEF2; border: 1px solid #99C; border-top: 0; }
+    #twocolumn-right #sidebar, #threecolumn #sidebar { border-left: 0; }
+    #twocolumn-left #sidebar, #sidebar-alternate { border-right: 0; }
+    #header { background: #99C; border: 1px solid #669; border-bottom: 1px solid #99C; border-top: 0; }
+    #main-content { background: #FFF; border: 1px solid #99C; border-left: 1px solid #CBCBDD; border-top: 0; }
+    #threecolumn #main-content, #twocolumn-right #main-content { border-right: 1px solid #CBCBDD; }
+    #twocolumn-right #main-content, #onecolumn #main-content { border-left: 1px solid #99C; }
+    #g_description { background: #CF6 url(/-/includes/style/lines/lavender/subhead-tile.gif) top left repeat-x; border-top: 1px solid #669; }
+    blockquote { color: #39396A; border-left: 1px dotted #669; }
+    table { border: 1px solid #99C; }
+    caption { background: #DEDEF2; }
+    th { border-bottom: 1px dotted #99C; }
+    th, caption { color: #669; }
+    hr { color: #99C; background: #99C; border-color: #99C; }
+    h2,h3,h4,h5,h6 { color: #39396A; }
+    h1 { color: #FFF; }
+    h2 { border-bottom: 1px dotted #99C; border-left: 1px dotted #99C; }
+    #sidebar h2, #sidebar-alternate h2 { border-bottom: 1px dotted #FFF; border-left: 1px dotted #FFF; }
+    h3 { border-bottom: 1px dotted #99C; }
+    #sidebar h3, #sidebar-alternate h3 { border-bottom: 1px dotted #FFF; }
+    code, kbd { color: #39396A; }
+    abbr, acronym { border-bottom: 1px dotted #669; }
+
+  /** END CUSTOM SKIN **/
+  </style>
+
+  <!-- Hack to avoid flash of unstyled content in IE -->
+  <script> </script>
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)" id="twocolumn-left"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+  <div id="container">
+    <div class="wrapper">
+      <div id="header">
+        <div class="wrapper">
+          <h1 id="page-title"><div id='g_title'><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Programme</span></div></h1>
+          <div style="clear: both"></div>
+          <p class="description"><div id='g_description'><p><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >AND 2009 in conjunction with</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cvc.uab.es/icdar2009/"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >ICDAR</span></span> <span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >2009</span><br></p></div></p>
+          <div style="clear: both"></div>
+        </div>
+      </div>
+      <!-- /wrapper --><!-- /header -->
+      <div id="main-content">
+        <div class="wrapper">
+          <div class="content-item"><div id='g_body'><p><font size="4"></font></p><p style="font-family: times new roman,serif;"><b><font size="4"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Day 1: Thursday, July 23, 2009</span></font></b></p><table style="font-family: times new roman,serif;"><tbody><tr><td style="background-color: rgb(255, 255, 153);"><font size="2"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >0845-0900</span></font></td><td style="background-color: rgb(255, 255, 153);"><span style="font-size: 12pt;"><b><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Welcome and Introductions</span></b><br></span></td></tr><tr><td style="background-color: rgb(204, 204, 204);"><font size="2"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >0900-1000</span></font></td><td style="background-color: rgb(204, 204, 204); color: rgb(255, 255, 255);"><span style="font-size: 12pt;"><span onclick="return false" style="text-decoration:underline; color:blue" href="keynotetalk1"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk by Hildelies Balk.</span> <b><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Poor Access to Digitized Historical Texts: The Solutions of the IMPACT Project</span></b></span><br></span></td></tr><tr><td style="background-color: rgb(255, 255, 204);"><font size="2"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >1000-1030</span> </font></td><td style="background-color: rgb(255, 255, 204);"><b><span style="font-size: 12pt;"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Coffee</span></span></b></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >1030-1150</span> </font></td><td style="background-color: rgb(204, 204, 255);"><span style="font-size: 12pt;"><b><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Session I</span></b><br></span></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >1030</span></font></td><td style="background-color: rgb(204, 204, 255);"><font size="2"><span style="font-size: 12pt;"><b><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >A Survey of Types of Text Noise and Techniques
+to Handle Noisy Text</span></b><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >.</span> </span><span style="font-size: 12pt;"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >L. Venkata Subramaniam, Shourya Roy, Tanveer A.
+Faruquie, Sumit Negi</span></span></font></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >1050</span></font></td><td style="background-color: rgb(204, 204, 255);"><font size="2"><span style="font-size: 12pt;"><b><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Using Domain Knowledge for Ontology-Guided
+Entity Extraction from Noisy, Unstructured Text Data</span></b><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >. Sergey Bratus, Anna Rumshisky, Rajendra Magar, Paul Thompson</span><br></span></font></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >1110</span></font></td><td style="background-color: rgb(204, 204, 255);"><font size="2"><span style="font-size: 12pt;"><b><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Studying the Effects of Noisy Text on Text
+Mining Applications</span></b><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >.</span> </span><span style="font-size: 12pt;"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Lipika Dey, S. K. Mirajul Haque</span></span></font></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >1130</span></font></td><td style="background-color: rgb(204, 204, 255);"><font size="2"><span style="font-size: 12pt;"><b><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Robust Named Entity Detection Using an Arabic
+Offline Handwriting Recognition System</span></b><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >.</span> </span><span style="font-size: 12pt;"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Krishna</span></span><span style="font-size: 12pt;"> <span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Subramanian, Rohit Prasad, Prem Natarajan</span></span></font></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >1200-1320</span><br></font></td><td style="background-color: rgb(204, 204, 255);"><span style="font-size: 12pt;"><b><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Session II</span></b><br></span></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >1200</span></font></td><td style="background-color: rgb(204, 204, 255);"><font size="2"><span style="font-size: 12pt;"><b><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Parallel Identification of the Spelling Variants
+in Corpora</span></b><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >. Martin Reynaert</span></span><span style="font-size: 12pt;"></span></font></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >1220</span></font></td><td style="background-color: rgb(204, 204, 255);"><font size="2"><span style="font-size: 12pt;"><b><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Kernel-Based Relation Extraction from
+Investigative Data</span></b><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >. Cristina Giannone, Roberto Basili, Chiara Del Vescovo,
+Paolo Naggar, Alessandro Moschitti</span></span></font></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >1240</span></font></td><td style="background-color: rgb(204, 204, 255);"><font size="2"><span style="font-size: 12pt;"><b><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Tools for Monitoring, Visualizing, and Refining Collections of Noisy Documents</span></b><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >. Daniel Lopresti, George Nagy</span></span><span style="font-size: 12pt;"></span></font></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >1300</span></font></td><td style="background-color: rgb(204, 204, 255);"><font size="2"><b><span style="font-size: 12pt;"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Discovering Voter Preferences in Blogs Using Mixtures of Topic Models</span></span></b><span style="font-size: 12pt;"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >, Pradipto Das, Rohini Srihari, Smruthi Mukund</span></span><span style="font-size: 12pt;"></span></font></td></tr><tr><td style="background-color: rgb(153, 153, 255);"><font size="2"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >1320-1330</span><br></font></td><td style="background-color: rgb(153, 153, 255);"><b><font size="2"><span style="font-size: 12pt;"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Working Group Organization 1:</span><span style=""></span> <span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Identifying topics</span></span></font></b></td></tr><tr><td style="background-color: rgb(255, 255, 204);"><font size="2"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >1330-1430</span></font></td><td style="background-color: rgb(255, 255, 204);"><b><span style="font-size: 12pt;"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></span></b></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >1430-1550</span><br></font></td><td style="background-color: rgb(204, 204, 255);"><span style="font-size: 12pt;"><b><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Session III</span></b><br></span></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >1430</span></font></td><td style="background-color: rgb(204, 204, 255);"><font size="2"><span style="font-size: 12pt;"><b><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Enabling Information Retrieval on Historical
+Document Collections – the Role of Matching Procedures and Special Lexica</span></b><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >.
+Annette Gotscharek, Andreas Neumann, Ulrich Reffle, Christoph Ringlstetter, Klaus U.
+Schulz</span></span><span style="font-size: 12pt;"></span></font></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >1450</span></font></td><td style="background-color: rgb(204, 204, 255);"><font size="2"><span style="font-size: 12pt;"><b><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Text Retrieval from Early Printed Books</span></b><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >. Simone
+Marinai</span></span></font></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >1510</span></font></td><td style="background-color: rgb(204, 204, 255);"><font size="2"><span style="font-size: 12pt;"><b><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >A Comprehensive Evaluation Methodology for Noisy
+Historical Document Recognition Techniques</span></b><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >. Nikolaos Stamatopoulos, Gerogios Louloudis, Basilis Gatos</span></span><span style="font-size: 12pt;"></span><span style="font-size: 12pt;"><br></span></font></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >1530</span></font></td><td style="background-color: rgb(204, 204, 255);"><font size="2"><span style="font-size: 12pt;"><b><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Accessing the Content of Greek Historical Documents</span></b><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >.</span> </span><span style="font-size: 12pt;"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Anastasios Kesidis, Eleni Galiotou, Basilis
+Gatos, Aristomenis Lampropoulos, Ioannis Pratikakis, Ioanna Manolessou, Angela
+Ralli</span></span><span style="font-size: 12pt;"></span></font></td></tr><tr><td style="background-color: rgb(153, 153, 255);"><font size="2"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >1550-1600</span></font></td><td style="background-color: rgb(153, 153, 255);"><b><font size="2"><span style="font-size: 12pt;"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Working Group Organization 2: Forming Groups</span></span></font></b></td></tr><tr><td style="background-color: rgb(255, 255, 204);"><font size="2"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >1600-1630</span></font></td><td style="background-color: rgb(255, 255, 204);"><b><font size="2"><span style="font-size: 12pt;"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Coffee</span></span></font></b></td></tr><tr><td style="background-color: rgb(153, 153, 255);"><font size="2"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >1630-1730</span></font></td><td style="background-color: rgb(153, 153, 255);"><b><font size="2"><span style="font-size: 12pt;"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Working Group Break-Out Session #1</span></span></font></b></td></tr></tbody></table><p style="font-family: times new roman,serif;"><font size="2"></font></p><p style="font-family: times new roman,serif;"><b><font size="4"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Day 2: Friday, July 24, 2009</span></font></b></p><table style="font-family: times new roman,serif;"><tbody><tr><td style="background-color: rgb(204, 204, 204);"><font size="2"><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >0900-1000</span></font></td><td style="background-color: rgb(204, 204, 204);"><span style="font-size: 12pt;"><span onclick="return false" style="text-decoration:underline; color:blue" href="keynotetalk2"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk by Venu Govindaraju.</span> <b><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Handwritten Document Retrieval Strategies</span></b></span><br></span></td></tr><tr><td style="background-color: rgb(255, 255, 204);"><font size="2"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >1000-1030</span></font></td><td style="background-color: rgb(255, 255, 204);"><b><span style="font-size: 12pt;"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Coffee</span></span></b></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >1030-1135</span> </font></td><td style="background-color: rgb(204, 204, 255);"><span style="font-size: 12pt;"><b><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Session IV</span></b><br></span></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >1030</span></font></td><td style="background-color: rgb(204, 204, 255);"><font size="2"><span style="font-size: 12pt;"><b><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Edge Noise in Document Images</span></b><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >. Craig
+McGillivary, Chris Hale, Elisa H. Barney Smith</span></span><span style="font-size: 12pt;"></span></font></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >1050</span></font></td><td style="background-color: rgb(204, 204, 255);"><font size="2"><b><span style="font-size: 12pt;"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Cohen’s Class Distributions for Skew Angle
+Estimation in Noisy Ancient Arabic Documents</span></span></b><span style="font-size: 12pt;"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >.</span></span><span style="font-size: 12pt;"> <span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >N. Ouwayed, A. Belaid, F. Auger</span></span></font></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >1110</span></font></td><td style="background-color: rgb(204, 204, 255);"><font size="2"><b><span style="font-size: 12pt;"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Digital Weight Watching: Reconstruction of
+Scanned Documents</span></span></b><span style="font-size: 12pt;"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >.</span> </span><span style="font-size: 12pt;"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Tim Gielissen and Maarten Marx</span></span></font></td></tr><tr><td style="background-color: rgb(204, 204, 255);"><font size="2"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >1130-1135</span> <br></font></td><td style="background-color: rgb(204, 204, 255);"><font size="2"><b><span style="font-size: 12pt;"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Effect of OCR-Errors on the Transformation of
+Semi-Structured Text Data Into Relational Database</span></span></b><span style="font-size: 12pt;"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >.</span> </span><span style="font-size: 12pt;"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Kolyo K. Onkov   </span> <i><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >[Short Paper]</span></i></span><span style="font-size: 12pt;"></span></font></td></tr><tr><td style="background-color: rgb(153, 153, 255);"><font size="2"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >1145-1300</span><br></font></td><td style="background-color: rgb(153, 153, 255);"><b><font size="2"><span style="font-size: 12pt;"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Working Group Break-Out Session #2</span></span></font></b></td></tr><tr><td style="background-color: rgb(153, 153, 255);"><font size="2"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >1300-1330</span><br></font></td><td style="background-color: rgb(153, 153, 255);"><b><font size="2"><span style="font-size: 12pt;"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Working Group Plenary Reports</span></span></font></b></td></tr><tr><td style="background-color: rgb(255, 255, 204);"><font size="2"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >1330-1430</span><br></font></td><td style="background-color: rgb(255, 255, 204);"><b><font size="2"><span style="font-size: 12pt;"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></span></font></b></td></tr><tr><td style="background-color: rgb(255, 255, 153);"><font size="2"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >1430</span><br></font></td><td style="background-color: rgb(255, 255, 153);"><b><font size="2"><span style="font-size: 12pt;"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Workshop ends</span></span></font></b></td></tr></tbody></table></div></div>
+          <div style="clear: both"></div>
+        </div>
+      </div>
+      <!-- /wrapper --><!-- /main-content -->
+      <div id="sidebar">
+        <div class="wrapper">
+          <div class="links">
+            <div class="wrapper"><div id='g_sidebar'><p></p><blockquote dir="ltr" style="margin-right: 0px;"><p style="text-align: left;"><span onclick="return false" style="text-decoration:underline; color:blue" href="home"><font size="4"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Home</span> </font></span></p><p style="text-align: left;"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://and2009workshop.googlepages.com/callforpapers"><font size="4"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></font></span></p><p style="text-align: left;"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://and2009workshop.googlepages.com/proceedings"><font size="4"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span> </font></span></p><p style="text-align: left;"><font size="4"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Programme</span></font></p><p style="text-align: left;"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://and2009workshop.googlepages.com/importantdates"><font size="4"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></font></span></p><p style="text-align: left;"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://and2009workshop.googlepages.com/people"><font size="4"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >People</span></font></span></p><p style="text-align: left;"><span onclick="return false" style="text-decoration:underline; color:blue" href="submission"><font size="4"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Submission</span></font></span></p><p style="text-align: left;"><span onclick="return false" style="text-decoration:underline; color:blue" href="registration"><font size="4"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span> </font></span></p><p style="text-align: left;"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://and2009workshop.googlepages.com/contact"><font size="4"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Contact</span></font></span></p><p style="text-align: left;"><font size="4"><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" > </span></font></p><p style="text-align: left;"><font size="4"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" > </span></font></p><p style="text-align: left;"><font size="4"></font></p><p style="text-align: left;"><font size="4"></font></p><p style="text-align: left;"><font size="4"></font></p><p style="text-align: left;"><font size="4"></font></p><p style="text-align: left;"><font size="4"></font></p><p style="text-align: left;"><font size="4"></font></p><p style="text-align: left;"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.ihost.com/and2007/"><font size="4"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >AND 2007</span></font></span></p><p style="text-align: left;"><font size="4"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://and2008workshop.googlepages.com/"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >AND 2008</span></span><br></font></p></blockquote><p><br></p><p><br></p><p><br></p><p style="text-align: center; clear: both;" class="separator"><span onclick="return false" style="text-decoration:underline; color:blue" style="border: 0pt none ; background-color: transparent; margin-left: 1em; margin-right: 1em;" href="http://www.iapr.org" imageanchor="1"><img onmousedown="imd(this)" src="http://and2008workshop.googlepages.com/iapr_logo.gif" style="border: 0pt none ;"></span></p><p style="text-align: center; clear: both;" class="separator"></p><p style="text-align: center; clear: both;" class="separator"></p><p></p><p><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Endorsed by</span></p><p></p><p><span style="background-color: rgb(102, 255, 153);"><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >International Association for Pattern Recognition</span></span></p><p></p><p><br></p><p><br></p><p><br></p><p style="text-align: center; clear: both;" class="separator"></p><p style="text-align: center; clear: both;" class="separator"></p><p style="text-align: center; clear: both;" class="separator"><span onclick="return false" style="text-decoration:underline; color:blue" style="border: 0pt none ; background-color: transparent; margin-left: 1em; margin-right: 1em;" href="http://www.bbn.com" imageanchor="1"><img onmousedown="imd(this)" src="bbn.jpg/bbn-medium;init:.jpg" style="border: 0pt none ;"></span></p><p><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Sponsored by</span></p><p><span style="background-color: rgb(102, 255, 153);"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >BBN Technologies</span> <br></span></p><p></p></div></div>
+            <div style="clear: both"></div>
+          </div>
+    <!-- /wrapper --><!-- /links -->
+        </div>
+        
+      </div>
+      <!-- /wrapper --><!-- /sidebar -->
+      <div id="footer"><div class="wrapper">
+        <hr />
+        <p><div id='g_footer'><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" > </span>

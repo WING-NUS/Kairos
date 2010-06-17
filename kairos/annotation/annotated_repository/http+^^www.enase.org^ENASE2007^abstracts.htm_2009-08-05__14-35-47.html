@@ -1,0 +1,868 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.enase.org^ENASE2007^abstracts.htm_2009-08-05__14-35-47.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.enase.org^ENASE2007^abstracts.htm_2009-08-05__14-35-47.yaml created on Wed Aug 05 17:31:52 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<title>ENASE 2007 - 2nd International Working Conference on Evaluation of Novel Approaches to Software Engineering</title>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+<meta name="Keywords" content="">
+<meta name="Description" content="">
+<link rel="stylesheet" href="style.css" type="text/css" />
+
+<SCRIPT language=JavaScript>
+<!--
+function SymError()
+{
+  return true;
+}
+
+window.onerror = SymError;
+
+var SymRealWinOpen = window.open;
+
+function SymWinOpen(url, name, attributes)
+{
+  return (new Object());
+}
+
+window.open = SymWinOpen;
+
+function MM_swapImgRestore() { //v3.0
+  var i,x,a=document.MM_sr; for(i=0;a&&i<a.length&&(x=a[i])&&x.oSrc;i++) x.src=x.oSrc;
+}
+
+function MM_preloadImages() { //v3.0
+  var d=document; if(d.images){ if(!d.MM_p) d.MM_p=new Array();
+    var i,j=d.MM_p.length,a=MM_preloadImages.arguments; for(i=0; i<a.length; i++)
+    if (a[i].indexOf("#")!=0){ d.MM_p[j]=new Image; d.MM_p[j++].src=a[i];}}
+}
+
+function MM_findObj(n, d) { //v4.01
+  var p,i,x;  if(!d) d=document; if((p=n.indexOf("?"))>0&&parent.frames.length) {
+    d=parent.frames[n.substring(p+1)].document; n=n.substring(0,p);}
+  if(!(x=d[n])&&d.all) x=d.all[n]; for (i=0;!x&&i<d.forms.length;i++) x=d.forms[i][n];
+  for(i=0;!x&&d.layers&&i<d.layers.length;i++) x=MM_findObj(n,d.layers[i].document);
+  if(!x && d.getElementById) x=d.getElementById(n); return x;
+}
+
+function MM_swapImage() { //v3.0
+  var i,j=0,x,a=MM_swapImage.arguments; document.MM_sr=new Array; for(i=0;i<(a.length-2);i+=3)
+   if ((x=MM_findObj(a[i]))!=null){document.MM_sr[j++]=x; if(!x.oSrc) x.oSrc=x.src; x.src=a[i+2];}
+}
+//-->
+</SCRIPT>
+<style type="text/css">
+<!--
+.style1 {font-size: 14px}
+-->
+</style>
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)" leftmargin="0" topmargin="17" rightmargin="0" ><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<div align="center"> 
+  <table width="970" border="0" cellpadding="0" cellspacing="0" bgcolor="ffffff">
+    <!--DWLayoutTable-->
+    <tr> 
+      <td height="130" colspan="3" valign="top"><img onmousedown="imd(this)" src="Images/up.jpg" width="970" height="130"></td>
+    </tr>
+    <tr> 
+      <td width="209" rowspan="2" valign="top">
+		<table width="209" border="0" cellpadding="0" cellspacing="0" height="515">
+          <!--DWLayoutTable-->
+          <tr>
+            <td height="19"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          </tr>
+			<tr>
+            <td height="32" valign="middle" background="Images/menu.jpg" class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.htm" class="menu"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;Home</span></span></td>
+          </tr>
+			<tr>
+            <td height="19"></td>
+          </tr>
+			<tr>
+            <td height="32" valign="middle" background="Images/menu.jpg" class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="Call_for_Papers.htm" class="menu"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;Call for Papers</span></span></td>
+          </tr>
+			<tr>
+            <td height="19"></td>
+          </tr>
+			<tr>
+            <td height="32" valign="middle" background="Images/menu.jpg" class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="Committees.htm" class="menu"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;Committees</span></span></td>
+          </tr>
+			<tr>
+            <td height="19"></td>
+          </tr>
+			<tr>
+            <td height="32" valign="middle" background="Images/menu.jpg" class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="Keynotes.htm" class="menu"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;Keynotes</span></span></td>
+          </tr>
+			<tr>
+            <td height="19"></td>
+          </tr>
+			<tr>
+            <td height="32" valign="middle" background="Images/menu.jpg" class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="Advocatus.htm" class="menu"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;Advocatus Diaboli Forum</span></span></td>
+          </tr>
+			<tr>
+            <td height="19"></td>
+          </tr>
+			<tr>
+            <td height="32" valign="middle" background="Images/menu.jpg" class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="Local_Information.htm" class="menu"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;Local Information</span></span></td>
+          </tr>
+			<tr>
+				<td height="48"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+			</tr>
+			<tr>
+            <td height="20" valign="top"></td>
+          </tr>
+			<tr>
+				<td height="141" width="209"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+			</tr>
+          
+          
+          
+        </table></td>
+      <td width="20" height="20"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+      <td width="741"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+    </tr>
+    <tr>
+      <td height="273"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+      <td rowspan="2" valign="top"><table width="100%" border="0" cellpadding="0" cellspacing="0">
+        <!--DWLayoutTable-->
+        <tr>
+          <td width="741" height="36" valign="top" class="menuTitles"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Abstracts</span></td>
+          </tr>
+        <tr>
+          <td height="19" valign="top"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+        </tr>
+        <tr>
+          <td height="334" valign="top">
+<TABLE cellSpacing=10 width="740" border="0" id="table1">
+
+    </tr>
+	 
+	 
+
+<TR> <TD class="textoNormal" height="21"><DIV align="right" class="textoNormal">
+	<span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></DIV></TD><TD class="textoNormal"> <DIV align=justify><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >REPRESENTING 
+		LANGUAGES IN UML A UML Profile for Language Engineering</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"><DIV align="right">
+		<span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Francisco Gort´azar, Abraham Duarte and Micael Gallego</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"> <DIV align="right">
+		<span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >In this paper a UML profile for textual concrete syntax 
+			specification is described. The profile provides the necessary 
+			elements to associate the concrete syntax of a language L to an 
+			abstract syntax model of L. Such augmented abstract syntax model is 
+			called the language model of L. This language model avoids keeping 
+			the abstract and concrete syntaxes synchronized. We take advantage 
+			of the similarities between object oriented modeling and BNF-based 
+			language specification, and use a profile to specify the 
+			dissimilarities.</span></DIV></TD></TR>  <TR><TD height=23 colSpan=2 vAlign=top class="Textojustificadoazulescuro"><HR></TD></TR>
+
+
+<TR> <TD class="textoNormal" height="21"><DIV align="right"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></DIV></TD><TD class="textoNormal" vAlign="center"> <DIV align=justify>
+	<span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >AUTOMATED UNIT TESTING FOR AGENT SYSTEMS</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"><DIV align="right">
+		<span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Zhiyong Zhang, John Thangarajah and Lin Padgham</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"> <DIV align="right">
+		<span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Although agent technology is gaining world wide popularity, a 
+			hindrance to its uptake is the lack of proper testing mechanisms for 
+			agent based systems. While many traditional software testing methods 
+			can be generalized to agent systems, there are many aspects that are 
+			different and which require an understanding of the underlying agent 
+			paradigm. In this paper we present certain aspects of a testing 
+			framework that we have developed for agent based systems. The 
+			testing framework is a model based approach using the design models 
+			of the Prometheus agent development methodology. In this paper we 
+			focus on unit testing and identify the appropriate units, present 
+			mechanisms for generating suitable test cases and for determining 
+			the order in which the units are to be tested, present a brief 
+			overview of the unit testing process and an example. Although we use 
+			the design artefacts from Prometheus the approach is suitable for 
+			any plan and event based agent system.</span></DIV></TD></TR>  <TR><TD height=23 colSpan=2 vAlign=top class="Textojustificadoazulescuro"><HR></TD></TR>
+
+<TR> <TD class="textoNormal" height="21"><DIV align="right"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></DIV></TD><TD class="textoNormal" vAlign="center"> <DIV align=justify>
+	<span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >WEAK MEASUREMENT THEORY AND MODIFIED COGNITIVE COMPLEXITY MEASURE</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"><DIV align="right">
+		<span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Sanjay Misra and Hürevren K&#305;l&#305;ç</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"> <DIV align="right">
+		<span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Measurement is one of the problems in the area of software 
+			engineering. Since traditional measurement theory has a major 
+			problem in defining empirical observations on software entities in 
+			terms of their measured quantities, Morasca has tried to solve this 
+			problem by proposing Weak Measurement theory. In this paper, we 
+			tried to evaluate the applicability of weak measurement theory by 
+			applying it on a newly proposed Modified Cognitive Complexity 
+			Measure (MCCM). We also investigated the applicability of Weak 
+			Extensive Structure for deciding on the type of scale for MCCM. It 
+			is observed that the MCCM is on weak ratio scale.</span></DIV></TD></TR>  <TR><TD height=23 colSpan=2 vAlign=top class="Textojustificadoazulescuro"><HR></TD></TR>
+
+<TR> <TD class="textoNormal" height="21"><DIV align="right"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></DIV></TD><TD class="textoNormal" vAlign="center"> <DIV align=justify>
+	<span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >SUPPORTING DESIGN PATTERNS IN GRAPH REWRITING-BASED MODEL TRANSFORMATION</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"><DIV align="right">
+		<span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >László Lengyel, Tihamér Levendovszky, Tamás Mészáros and Hassan 
+			Charaf</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"> <DIV align="right">
+		<span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Model transformations appear in many, different situations in a 
+			model-based development process. A few representative examples are 
+			as follows: refining the design to implementation, aspect weaving, 
+			analysis, and verification. In object-oriented software design, 
+			design patterns describe simple and elegant solutions to specific 
+			problems. Similarly, design pattern should be identified in model 
+			transformations as well to support the frequently appearing 
+			problems. This paper introduces the design pattern support of a 
+			modelling and model transformation framework (Visual Modeling and 
+			Transformation System). Furthermore, we discuss two model-based 
+			development related design patterns.</span></DIV></TD></TR>  <TR><TD height=23 colSpan=2 vAlign=top class="Textojustificadoazulescuro"><HR></TD></TR>
+
+<TR> <TD class="textoNormal" height="21"><DIV align="right"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></DIV></TD><TD class="textoNormal" vAlign="center"> <DIV align=justify>
+	<span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >DEFINING AND USING A METAMODEL FOR DOCUMENT-CENTRIC DEVELOPMENT 
+	METHODOLOGIES</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"><DIV align="right">
+		<span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Manuel Bollain and Juan Garbajosa</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"> <DIV align="right">
+		<span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >The concept of software product is often associated to software 
+			code; process documents are, therefore, considered as by-products. 
+			Also very frequently, customers primarily demand &#8221;results&#8221; and, in a 
+			second place, documentation. Development efforts are then focused on 
+			code production at the expense of documents quality and 
+			corresponding verification activities. As discussed within this 
+			paper, one of the root problems for this is that documentation in 
+			the context of methodologies is often described with not enough 
+			level of detail. This paper presents a metamodel that faces this 
+			problem. It is an extension of ISO/IEC 24744, the metamodel for 
+			methodologies development. Under this extension, documents can 
+			become the drivers of the methodology activities. Documents will be 
+			the artifact in which method engineers should focus for methodology 
+			development, by defining its structure and constraints. Developers 
+			will put their effort in filling sections of the documents as the 
+			way to progress in the process execution. This process execution 
+			will be guided by those documents defined by the method engineers. 
+			This approach can be, as well, the basis for a new approach to a 
+			Document-Centric Software Engineering Environment.</span></DIV></TD></TR>  <TR><TD height=23 colSpan=2 vAlign=top class="Textojustificadoazulescuro"><HR></TD></TR>
+
+<TR> <TD class="textoNormal" height="21"><DIV align="right"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></DIV></TD><TD class="textoNormal" vAlign="center"> <DIV align=justify>
+	<span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >VISUAL SOFTWARE MODELLING WITH EXTENDED RULE-BASED MODEL</span><br>
+  	<span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >A Knowledge-based Programming Solution for General Software Design</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"><DIV align="right">
+		<span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Grzegorz J. Nalepa and Igor Wojnicki</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"> <DIV align="right">
+		<span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Rule-based programming paradigm is omnipresent in number of 
+			engineering domains. However, there are some fundamental semantical 
+			differences between it, and classic procedural, or object-oriented 
+			approaches. Even though, there has been a lot of effort to use rules 
+			to model business logic in classic software no generic solution has 
+			been provided so far. In this paper a new approach for generalized 
+			rule-based programming is given. It is based on a use of advanced 
+			rule representation, which includes an extended attribute-based 
+			language, a non-monotonic inference strategy, with explicit 
+			inference control on the rule level. The paper shows how some 
+			typical programming constructions, as well as classic programs can 
+			be modelled in this approach. The approach can largely improve both 
+			the design and the implementation of complex software.</span></DIV></TD></TR>  <TR><TD height=23 colSpan=2 vAlign=top class="Textojustificadoazulescuro"><HR></TD></TR>
+
+<TR> <TD class="textoNormal" height="21"><DIV align="right"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></DIV></TD><TD class="textoNormal" vAlign="center"> <DIV align=justify>
+	<span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >SOME ISSUES ON RESEARCH ESSENTIALS IN THE FIELD OF SOFTWARE ENGINEERING</span><br>
+  	<span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Simplified Look on Scientific Method for Bachelor Level Research</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"><DIV align="right">
+		<span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Oksana Nikiforova, Marite Kirikova, Renate Strazdina</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"> <DIV align="right">
+		<span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Not every software engineering task will qualify as scientific 
+			research, because the solution of the problem should contribute to 
+			the body of scientific knowledge. This means that, on one hand, the 
+			research work should correspond to the state of the art of 
+			scientific body of knowledge and give a particular, small, 
+			contribution to it, and, on the other hand, the work of the student 
+			shall clearly contribute to at least one general phase of software 
+			development. Taking into consideration that bachelor thesis are an 
+			initial research and the simplest scientific research at the 
+			university, the minimum requirements for the scope of bachelor 
+			thesis, thus, should not exceed one software development phase and 
+			one research phase, still keeping the requirement that the bachelor 
+			student must be able to position clearly his work in both, namely, 
+			scientific and software development life cycles. Therefore the life 
+			cycle of scientific research is analyzed from the perspective of 
+			software engineering life cycle and the main activities of both are 
+			mapped into single schema. 16 types of bachelor thesis in software 
+			engineering proposed in the paper are a helpful tool for bachelor 
+			thesis developers and advisers to meet the above mentioned 
+			requirements.</span></DIV></TD></TR>  <TR><TD height=23 colSpan=2 vAlign=top class="Textojustificadoazulescuro"><HR></TD></TR>
+
+
+<TR> <TD class="textoNormal" height="21"><DIV align="right"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></DIV></TD><TD class="textoNormal" vAlign="center"> <DIV align=justify>
+	<span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >USING A TWO-WAY BALANCED INCOMPLETE BLOCK DESIGN TO COMPARING AN 
+	AGENT-ORIENTED SOFTWARE</span><br>
+  	<span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >ENGINEERING METHODOLOGIES</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"><DIV align="right">
+		<span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Faezeh Parandoosh and Siavosh Kaviani</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"> <DIV align="right">
+		<span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >There has been a surge of interest in agent-oriented software 
+			engineering in recent years. Numerous methodologies for developing 
+			agent-based systems have been proposed in the literature and the 
+			area of agent-oriented methodologies is maturing rapidly. Evaluating 
+			methodologies' strengths, weaknesses and domains of applicability 
+			plays an important role in improving them and in developing the 
+			&quot;next-generation&quot; of methodologies. In this paper, we present a 
+			reliable framework that adopts statistical techniques to compare 
+			agent-oriented methodologies. Based upon this framework we performed 
+			a comparison of four AOSE methodologies MaSE, Prometheus, Tropos and 
+			Gaia.</span></DIV></TD></TR>  <TR><TD height=23 colSpan=2 vAlign=top class="Textojustificadoazulescuro"><HR></TD></TR>
+
+<TR> <TD class="textoNormal" height="21"><DIV align="right"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></DIV></TD><TD class="textoNormal" vAlign="center"> <DIV align=justify>
+	<span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >MDA ORIENTED COMPUTATION INDEPENDENT MODELING OF THE PROBLEM DOMAIN</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"><DIV align="right">
+		<span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Janis Osis, Erika Asnina and Andrejs Grave</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"> <DIV align="right">
+		<span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >The proposed approach called Topological Functioning Modeling for 
+			Model Driven Architecture (TFMfMDA) uses formal mathematical 
+			foundations of Topological Functioning Model (TFM). It introduces 
+			the main feature of MDA &#8211; Separation of Concerns by formal analysis 
+			of a business system, enables mapping to functional requirements and 
+			missing requirements checking in conformity with the problem domain 
+			TFM model. By using a goal-based method, a use case model of the 
+			planned application is defined and use cases are classified. Graph 
+			transformation from the TFM to a conceptual class diagram enables 
+			the definition between domain concepts and their relations to be 
+			established. The paper also suggests a concept of a tool for the 
+			TFMfMDA, which is realized as an Eclipse plug-in.</span></DIV></TD></TR>  <TR><TD height=23 colSpan=2 vAlign=top class="Textojustificadoazulescuro"><HR></TD></TR>
+
+<TR> <TD class="textoNormal" height="21"><DIV align="right"><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></DIV></TD><TD class="textoNormal" vAlign="center"> <DIV align=justify>
+	<span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >AGILE COMMITMENTS: DEALING WITH BUSINESS EXPECTATIONS RISKS IN AGILE 
+	DEVELOPMENT</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"><DIV align="right">
+		<span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Mauricio Concha, Marcello Visconti and Hernán Astudillo</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"> <DIV align="right">
+		<span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Agile methods have been proposed to increase customer satisfaction 
+			and deliver business value early, yet usually don&#8217;t focus on 
+			progress visibility other than software deliverables. However, many 
+			customers demand risk visibility over the main aspects that define 
+			their expectations: functionality (scope), budget, time-to-market, 
+			and product quality. This article proposes an agile commitment 
+			framework based on structured definition and follow-up of 
+			commitments among customers and developers. The framework uses 
+			commitment management to improving risk management by enhancing 
+			visibility of business expectation risks, by providing a negotiation 
+			baseline among customers and developers, and by allowing mitigating 
+			action when appropriate. Finally, we summarize several case studies 
+			run to evaluate the proposed framework in academic and industrial 
+			settings.</span></DIV></TD></TR>  <TR><TD height=23 colSpan=2 vAlign=top class="Textojustificadoazulescuro"><HR></TD></TR>
+
+<TR> <TD class="textoNormal" height="21"><DIV align="right"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></DIV></TD><TD class="textoNormal" vAlign="center"> <DIV align=justify>
+	<span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >A MDE APPROACH FOR LANGUAGE ENGINEERING</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"><DIV align="right">
+		<span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Francisco Gort´azar, Abraham Duarte and Micael Gallego</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"> <DIV align="right">
+		<span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Many development tools of modern Integrated Development Environments 
+			(IDEs) make an intensive use of abstract syntax tree (AST) 
+			representations of the software. This is the case of refactors, code 
+			formatters, or content assistants, among others. Such AST is usually 
+			an instance of an object oriented abstract syntax model. We propose 
+			to center the attention of Language Engineering (LE) on this model. 
+			We propose to use UML as the abstract syntax metamodel because UML 
+			tools provide code generators for different programming languages 
+			for model implementation. As well as an abstract syntax, a concrete 
+			syntax of the language it is also necessary. We are concerned about 
+			textual languages, whose concrete syntax is usually given as a BNF 
+			grammar. Instead, we propose to stereotype the abstract syntax model 
+			by means of a profile, aimed at concrete syntax definition. Applying 
+			Model Driven Engineering (MDE) practices several development 
+			artifacts can be automatically generated.</span></DIV></TD></TR>  <TR><TD height=23 colSpan=2 vAlign=top class="Textojustificadoazulescuro"><HR></TD></TR>
+
+<TR> <TD class="textoNormal" height="21"><DIV align="right"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></DIV></TD><TD class="textoNormal" vAlign="center"> <DIV align=justify>
+	<span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >AN ONTOLOGY-BASED APPROACH TO THE MODELLING OF</span><br>
+  	<span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >COLLABORATIVE ENTERPRISE PROCESSES</span><br>
+  	<span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Dynamic Managing of Functional Requirements</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"><DIV align="right">
+		<span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >M. V. Hurtado, M. Noguera, M. L. Rodríguez, J. L. Garrido and 
+			Lawrence Chung</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"> <DIV align="right">
+		<span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Enterprise models describe and analyze collaborative processes and 
+			provide stakeholders with a common view of requirements. A core 
+			challenge to tackle the management of collaborative business 
+			processes is the continuous translation between business 
+			requirements and the current collaborative process model of the 
+			involved enterprises. This model is constituted by multiple IT 
+			systems, resources, and human labour. This paper presents a novel 
+			approach to modelling business processes from the perspective of 
+			collaborative systems. The proposal consists of a multi-level design 
+			scheme based on ontologies for the description of complex 
+			collaborative systems. The use of this ontology-based framework 
+			enables machine reasoning which can be applied to automated or 
+			semi-automated control and propagation of changes in the functional 
+			requirements specification. Benefits related to integrating 
+			ontology-based models are also presented.</span></DIV></TD></TR>  <TR><TD height=23 colSpan=2 vAlign=top class="Textojustificadoazulescuro"><HR></TD></TR>
+
+<TR> <TD class="textoNormal" height="21"><DIV align="right"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></DIV></TD><TD class="textoNormal" vAlign="center"> <DIV align=justify>
+	<span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >IMPROVED SERVICE RANKING AND SCORING: SEMANTIC ADVANCED MATCHMAKER (SAM)</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"><DIV align="right">
+		<span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Erdem S. Ilhan, Gokay B. Akkus and Ayse B. Bener</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"> <DIV align="right">
+		<span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >In recent years Semantic Web has drawn a lot of attention in order 
+			to solve the problem of automatic discovery and processing of web 
+			services. Although there are different efforts and frameworks for 
+			semantic annotation and discovery of web services, they mostly 
+			classify the discovered web services as set-based. Improvement in 
+			matching process could be gained by the use of ontological 
+			information in a useful form. The goal of this research is to 
+			propose a more accurate discovery method using the ontological 
+			distance information defined and ranked by users. In this paper, we 
+			focus on one of the most challenging tasks in service discovery: 
+			matchmaking process. We use an efficient matchmaking algorithm based 
+			on bi-partite graphs. Our proposed algorithm uses attribute ranking 
+			through weight assignment. Our experiment results show that 
+			bi-partite matchmaking has advantages over other approaches in the 
+			literature for parameter pairing problem. We present value added 
+			approaches in matchmaking such as property-level matching, semantic 
+			distance information and WordNet scoring. The value added approaches 
+			provide better scoring scheme and allows similarity to be captured 
+			resulting in ranking of services according to their relatedness.</span></DIV></TD></TR>  <TR><TD height=23 colSpan=2 vAlign=top class="Textojustificadoazulescuro"><HR></TD></TR>
+
+<TR> <TD class="textoNormal" height="21"><DIV align="right"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></DIV></TD><TD class="textoNormal" vAlign="center"> <DIV align=justify>
+	<span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >EVALUATION OF TEST-DRIVEN DEVELOPMENT</span><br>
+  	<span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >An Industrial Case Study</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"><DIV align="right">
+		<span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Hans Wasmus and Hans-Gerhard Gross</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"> <DIV align="right">
+		<span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Test-driven development is a novel software development practice and 
+			part of the Extreme Programming paradigm. It is based on the 
+			principle that tests should be designed and written for a module 
+			iteratively, while the code of the module is devised. This is the 
+			opposite of what is usual in current software development methods in 
+			which testing is often an afterthought, rather than a primary 
+			driving factor of design. Once applied systematically and 
+			continuously, test-driven development is supposed to incorporate 
+			requirements changes easier, lead to superior technical solutions in 
+			software, result in better and cleaner code, and motivate all 
+			stakeholders. We present a development project carried out in a 
+			company in which we put those claims to a test. We found that, 
+			indeed, some of the claims are valid, but we can also report 
+			difficulties with applying the test-driven development approach.</span></DIV></TD></TR>  <TR><TD height=23 colSpan=2 vAlign=top class="Textojustificadoazulescuro"><HR></TD></TR>
+
+<TR> <TD class="textoNormal" height="21" width="65"><DIV align="right"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></DIV></TD><TD class="textoNormal" vAlign="center"> <DIV align=justify>
+	<span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >USE OF REQUIREMENT STABILITY IN OPTIMIZING ITERATIVE DEVELOPMENT PROCESSES</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"><DIV align="right">
+		<span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Gilberto Matos</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"> <DIV align="right">
+		<span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Unstable requirements are widely understood as being a common cause 
+			of problems in delivering desired software functionality on time and 
+			within budget. Requirement volatility manifests itself through 
+			various symptoms, including scope creep, rejected feature 
+			implementations, and late discovery of non-functional requirements. 
+			Iterative processes use cycles of development and feedback to create 
+			an environment where requirements can be evolved to better address 
+			the user&#8217;s needs. Agile development methods are based on the 
+			assumption that the most valuable feedback comes from customers 
+			reviewing a live demo of the system being developed. The duration of 
+			an iteration generally determines the frequency of such reviews, and 
+			we are interested in understanding its impact on the development 
+			process. We developed a discrete simulation model of iterative 
+			development processes, and use it to evaluate process efficiency. By 
+			simulating the process for different iteration durations and initial 
+			requirement stability levels, we show that efficiency in iterative 
+			development processes depends on how well the iteration duration is 
+			adjusted to the initial requirement stability. We also propose a 
+			method for actively evaluating requirement stability, and using that 
+			information to adjust the review frequency during the execution of a 
+			development project.</span></DIV></TD></TR>  <TR><TD height=23 colSpan=2 vAlign=top class="Textojustificadoazulescuro"><HR></TD></TR>
+
+<TR> <TD class="textoNormal" height="21"><DIV align="right"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></DIV></TD><TD class="textoNormal" vAlign="center"> <DIV align=justify>
+	<span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >AN EMPIRICAL EVALUATION OF EVOLUTIONARY DESIGN APPROACH</span><br>
+  	<span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Design, Results and Discussion of Experiments on Extreme Programming</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"><DIV align="right">
+		<span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >René Noël, Marcello Visconti, Gonzalo Valdés and Hernán Astudillo</span></DIV></TD></TR><TR><TD class="textoNormal" height="21"> <DIV align="right">
+		<span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></DIV></TD><TD class="textoNormal" vAlign="center"><DIV align=justify>
+			<span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Evolutionary Design is Extreme Programming&#8217;s approach to organize 
+			software structure and its relationships, encouraging refactoring, 
+			test driven development and the simplest solution for the 
+			requirements of a single iteration, thus avoiding a big up-front 
+			design activity at the beginning of the project that can cause 
+			carrying on a huge structural complexity throughout the whole 
+			project. In order to contrast this approach with a planned or 
+			traditional design approach, an empirical evaluation of impact on 
+			software design quality and process productivity has been designed 
+			and conducted in an academic environment with toy size problems. 
+			Experimental studies planning details are presented, and two 
+			replications with different experimental designs are described. 
+			Results suggest that there are no differences in quality between 
+			both approaches, and that productivity is better when a planned 
+			design is adopted.</span></DIV></TD></TR>  <TR>
+	<TD height=23 colSpan=2><HR></TD></TR>
+
+
+</TBODY></TABLE>
+			</td>
+        </tr>
+      </table></td>
+    </tr>
+    
+    
+    
+    
+    
+    <tr>
+      <td height="116"></td>
+      <td></td>
+    </tr>
+    
+
+    <tr>
+      <td height="89" colspan="3" valign="top"><table width="100%" border="0" cellpadding="0" cellspacing="0">
+          <!--DWLayoutTable-->
+          <tr> 
+            <td width="970" height="19" valign="top"><!--DWLayoutEmptyCell--><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          </tr>
+          <tr> 
+            <td height="17" valign="middle" class="textoNormal"><div align="center"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >....................................................................................................................................................................................................................................................</span></div></td>
+          </tr>
+          <tr> 
+            <td height="52" valign="top" class="smallText"><div align="center"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >The ENASE web site is developed and maintained by:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.insticc.org" class="smallText" target="_blank"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >INSTICC</span></span> <br>
+                <span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Copyright &copy; 2006</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.insticc.org" class="smallText" target="_blank"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >INSTICC</span></span><br>
+                <br>
+                <em><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Page updated on 
+                <!-- #BeginDate format:Fr1 -->2/04/09</span>

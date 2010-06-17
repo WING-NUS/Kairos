@@ -1,0 +1,649 @@
+﻿<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/1/annotation/annotated_repository/http+^^www.cs.virginia.edu^asplos09^posters.htm_2009-08-05__14-34-10.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/1/annotation/annotated_repository/http+^^www.cs.virginia.edu^asplos09^posters.htm_2009-08-05__14-34-10.yaml created on Thu Aug 13 13:55:21 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+  <!-- #BeginEditable "doctitle" -->
+  <title>Architectural Support for Programming Languages and Operating Systems-XIII (ASPLOS '09)</title>
+  <meta name="description" content="ASPLOS-XIV">
+  <meta name="description" content="ASPLOS '09">
+  <meta name="description" content="ASPLOS 2009">
+  <meta name="keywords" content="ASPLOS, ASPLOS XIV, ASPLOS '09">
+  <!-- #EndEditable -->
+  <script type="text/javascript" language="JavaScript">
+            top.location.target="_top"
+            if(window.location.target != "_top")
+            {
+              top.location.href=window.location.href
+            }
+  </script>
+<style>
+body,td,div,.p,a{font-family:helvetica,arial,sans-serif}
+.q a:visited,.q a:link,.q a:active,.q {text-decoration: none; color: #000022;}
+.u a:visited,.u a:link,.u a:active,.u {text-decoration: none; color: #660000;}
+.tl1 {border-style: solid; border-width: 1; border-color: #000044; color: #000000; background-color: #ccccff; font-weight: bold;}
+.tl2 {border-style: solid; border-width: 1; border-color: #000044; color: #000055; background-color: #ddddff; font-weight: bold;}
+.tl3 {border-style: solid; border-width: 1; border-color: #000000; color: #000000; background-color: #ffffff; font-weight: bold;}
+.tl4 {border-style: solid; border-width: 1; border-color: #000000; color: #ffffff; background-color: #000044; font-weight: bold;}
+.tl5 {border-style: solid; border-width: 1; border-color: #000000; color: #000000; background-color: #ffffff; }
+.tl6 {border-style: solid; border-width: 1; border-color: #000000; color: #000000; background-color: #eeeeff; font-weight: bold; }
+.smenu {border-style: solid; border-width: 1; border-color: #000000; color: #000000; background-color: #ffffff; font-weight: bold;}
+
+.style1 {
+	color: #DDDDFF;
+}
+
+.style5 {
+	border-width: 0;
+}
+.style6 {
+	border-color: #000044;
+	border-width: 0;
+	color: #000000;
+		font-weight: bold;
+}
+
+.style7 {
+	text-decoration: none;
+	font-family: Arial;
+}
+
+</style>
+
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)" background=""><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<table cellspacing="0" cellpadding="0" class="style6" background="acmlite.gif">
+  <tr> <td class="style5">
+	<img onmousedown="imd(this)" border="0" src="ASPLOS_Banner.gif" width="960" height="151"> </td>
+</tr>
+</table>
+<table>
+<tr>
+<td valign="top">
+  <table>
+  <tr>
+     <td valign="middle" style="white-space: nowrap;" >
+    <span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td></tr><tr> <td valign="middle" class="smenu" style="white-space: nowrap;" bgcolor=#ddddff >
+       <span class="style1"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+	  </span>
+      	<span onclick="return false" style="text-decoration:underline; color:blue" class="style7" href="index.htm"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Home Page	
+       &nbsp;</span></span><span class="style1"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;</span>
+    </span>
+    </td></tr><tr> <td valign="middle" class="smenu" style="white-space: nowrap;" bgcolor=#ddddff >
+       <span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;</span>
+		<span onclick="return false" style="text-decoration:underline; color:blue" href="ASPLOS09_CFP.pdf" style="text-decoration: none"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;Call for 
+		Papers</span></span></td></tr><tr> <td valign="middle" class="smenu" style="white-space: nowrap;" bgcolor=#ddddff >
+       <span class="style1"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+	</span>
+		<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.regmaster.com/conf/asplos2009.html" style="text-decoration: none"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span><span class="style1">
+       <span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+    </span>
+    </td></tr><tr> <td valign="middle" class="smenu" style="white-space: nowrap;" bgcolor=#ddddff >
+       <span class="style1"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+	</span>
+		<span onclick="return false" style="text-decoration:underline; color:blue" href="hotel.htm" style="text-decoration: none"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Hotel Reservation</span></span><span class="style1">
+       <span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+    </span>
+    </td></tr>
+	<tr>
+		<td valign="middle" class="smenu"  style="white-space: nowrap;" bgcolor=#ddddff>
+       <span class="style1"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+       </span>
+		<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.umd.edu/~jfoster/asplos2009.html" style="text-decoration: none"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Local Information</span></span>
+	   <span class="style1"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+    </span>
+    </td>
+    </tr>
+	<tr> <td valign="middle" class="smenu"  style="white-space: nowrap;" bgcolor=#ddddff>
+       <span class="style1"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+       </span>
+		<span onclick="return false" style="text-decoration:underline; color:blue" href="program.htm" style="text-decoration: none"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span>	
+       <span class="style1"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+    </span>
+    </td></tr>
+	<tr>
+		<td valign="middle" class="smenu"  style="white-space: nowrap;" bgcolor=#ddddff>
+       <span class="style1"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span> </span>
+		<!--span class="style4"-->
+		<span onclick="return false" style="text-decoration:underline; color:blue" style="text-decoration: none" href="posters.htm"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Posters</span></span>
+		<!--/span--><span class="style1"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+    </span>
+    </td>
+	</tr>
+	<tr>
+		<td valign="middle" class="smenu"  style="white-space: nowrap;" bgcolor=#ddddff>
+       <span class="style1"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span> </span>
+		<!--span class="style4"-->
+		<span onclick="return false" style="text-decoration:underline; color:blue" style="text-decoration: none" href="workshops_tutorials.htm"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span>
+       <!--/span--><span class="style1"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+    </span>
+    </td>
+	</tr>
+	<tr> 
+		<td valign="middle" class="smenu"  style="white-space: nowrap;" bgcolor=#ddddff height="25">
+       <span class="style1"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+       </span><!--span class="style4"-->
+		<span onclick="return false" style="text-decoration:underline; color:blue" style="text-decoration: none" href="workshops_tutorials.htm"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span>
+       <!--/span-->
+       <span class="style1"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+    </span>
+    </td></tr><tr> <td valign="middle" class="smenu"  style="white-space: nowrap;" bgcolor=#ddddff>
+       <span class="style1"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+    </span>   
+         <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.cmu.edu/~seth/wild-and-crazy09/" style="text-decoration: none"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Wild/Crazy Ideas</span></span>
+       <span class="style1"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+    </span>
+    </td></tr>
+	<tr> <td valign="middle" class="smenu"  style="white-space: nowrap;" bgcolor=#ddddff>
+       <span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+       	<span onclick="return false" style="text-decoration:underline; color:blue" href="committee.htm" style="text-decoration: none"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></span>
+       <span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+    </td></tr>
+    	<tr> 
+		<td valign="middle" class="smenu"  style="white-space: nowrap;" bgcolor=#ddddff>
+        <span class="style1"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span></span><span onclick="return false" style="text-decoration:underline; color:blue" href="travel.htm" style="text-decoration: none"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Travel Grants</span></span> 
+        <span class="style1"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+        </span>
+        </td>
+        </tr>
+    <tr>
+		<td valign="middle" class="smenu"  style="white-space: nowrap;" bgcolor=#ddddff>
+        <span class="style1"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+        </span> 
+        <span onclick="return false" style="text-decoration:underline; color:blue" href="submission.htm" style="text-decoration: none; font-family:helvetica,arial,sans-serif">
+		<span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Submission</span></span> 
+        <span class="style1"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+        </span>
+        </td>
+	</tr>
+    <tr>
+		<td valign="middle" class="smenu"  style="white-space: nowrap;" bgcolor=#ddddff>
+        <span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;</span>
+		<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cs.utexas.edu/users/mckinley/plosa-craw-2009/" style="text-decoration: none">
+		<span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >PLOSA 2009</span></span></td>
+	</tr>
+	</table>
+ </td>
+<td width=1 bgcolor=#000033>
+</td>
+<td style="width: 736px">
+
+<p align="center"><font size="5"><b><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Fourteenth</span></b></font><b><big><big> 
+<span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >International Conference on</span></big></big></b><br>
+<span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><b><big><big><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Architectural Support for Programming Languages and Operating 
+Systems</span><br>
+<span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;(ASPLOS &#39;09)</span></big></big></b></p>
+<table width="100%" align="center" class="tl2" id="table1">
+	<tr>
+		<td align="center" style="font-family: helvetica,arial,sans-serif">
+		<span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Posters</span></td>
+	</tr>
+</table>
+<p><b><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >COMPASS: Community Driven Parallelization advisor for sequential software 
+systems</span><br>
+</b><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Nipun Arora, Ravindra Babu Ganpathi, John Demme, Simha Sethumadhavan, Gail 
+Kaiser (Columbia University)</span><br>
+<br>
+<b><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Archer: a shared cyberinfrastructure for computer architecture research and 
+education</span><br>
+</b><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Girish Venkatasubramanian, David Wolinsky, Renato J. Figueiredo, P. Oscar 
+Boykin, Jose A. B. Fortes, Tao Li, Jie-Kwon Peir, Lizy K. John, David R. Kaeli, 
+David J. Lilja, Sally A. McKee, Gokhan Memik, Alain Roy, Ben Burnett, Gary S. 
+Tyson (University of Florida, University of Texas at Austin, Northeastern, 
+University of Minnesotta, Cornell, Northwestern, University of Wisconsin, 
+Florida State University)</span><br>
+<br>
+<b><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >PowerPlay: Coordinated Power Management and Scheduling for Unpredictably 
+Heterogeneous CMPs</span><br>
+</b><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Jonathan A. Winter, David H. Albonesi (Cornell University)</span><br>
+<br>
+<b><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Using Dead Blocks as a Virtual Victim Cache</span><br>
+</b><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Samira Khan, Daniel Jimenez, Doug Burger, Babak Falsafi (University of Texas 
+at San antonio, Microsoft Research, CMU)</span><br>
+<br>
+<b><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Parameterized PAD (Power-Area-Delay) Model for Datapath Components</span><br>
+</b><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Ju-Young Jung, Kanad Ghose (State University of New York at Binghamton)</span><br>
+<br>
+<b><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Streaming data parallelism through sequential code</span><br>
+</b><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Eric Hielscher, Dennis Shasha (New York University)</span><br>
+<br>
+<b><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Developing a Framework for Mobile Grid Computing</span><br>
+</b><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >William S. Edgar, Michael Black (American University)</span><br>
+<br>
+<b><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Scenario Based Optimization</span><br>
+</b><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Jason Mars (University of Virginia)</span><br>
+<br>
+<b><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Rodinia: A Benchmark Suite for Heterogeneous Computing</span><br>
+</b><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Shuai Che, Michael Boyer, Jiayuan Meng, David Tarjan, Sang-Ha Lee, Jeremy 
+Sheaffer, Kevin Skadron (University of Virginia)</span><br>
+<br>
+<b><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Evaluation of different virtual machine scheduling policies on hypervisors</span><br>
+</b><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Ali Kamali, Vahid Kazempour, Alexandra Fedorova (Simon Fraser University)</span><br>
+<br>
+<b><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Cascade: A Comprehensive Approach for Parallelizing Soft Realtime Systems</span><br>
+</b><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Micah Best (Simon Fraser University)</span><br>
+<br>
+<b><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >A New Generic CPU Architecture Using Multi-core Pipelining by Forced 
+Interrupts</span><br>
+</b><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Duoduo Liao, Simon Y. Berkovich, and Murray H. Loew (George Washington 
+University)</span><br>
+<br>
+<b><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Developing Shared Cache-Aware OS Scheduling Algorithm for Multicore Systems</span><br>
+</b><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Sergey Blagodurov, Alexandra Fedorova (Simon Fraser University)</span><br>
+<br>
+<b><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Lock-Aware Transactional Memory</span><br>
+</b><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Justin E. Gottschlich, Daniel A. Connors, Dwight Y. Winkler, Jeremy G. Siek, 
+Manish Vachharajani (University of Colorado at Boulder, Colorado State 
+University, Nodeka, LLC)</span><br>
+<br>
+<b><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Ambient Temperature Does Matter for Thermal Management</span><br>
+</b><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Jinhang Choi,Sung Woo Chung ( Korea University)</span><br>
+<br>
+<b><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >CAMEL: Customizable Algorithm for Managing Energy in Long-Term Workloads</span><br>
+</b><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Hormoz Zarnani, Karthik Lakshmanan (CMU)</span><br>
+<br>
+<b><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Operating System on a Network-on-Chip</span><br>
+</b><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Jungsook Yang, Nader Bagherzadeh (University of California, Irvine)</span><br>
+<br>
+<b><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Optimizing for Size : Exploring the Limits of Code Density</span><br>
+</b><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Vincent M. Weaver, Sally A. McKee (Cornell University, Chalmers University, 
+Sweden)</span><br>
+<br>
+<b><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >VMKit: a Substrate for Virtual Machines</span><br>
+</b><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Nicolas Geoffray, Gael Thomas, Charles Clement, Bertil Follio, Gilles Muller 
+(Universite Pierre et Marie Curie and Ecole des Mines de Nantes)</span><br>
+<br>
+<b><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Maelstrom: Real Time Data Center Temperature Modeling</span><br>
+</b><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Steven Pelley, Yifan YangGong, David Meisner, Thomas F. Wenisch, James W. 
+VanGilde (University of Michigan and APC by Schneider Electric)</span><br>
+<br>
+<b><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Helgrind+: A Dynamic Race Detector</span><br>
+</b><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Ali Jannesari (University of Karlsruhe, Germany)</span><br>
+<br>
+<b><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >End-to-End security: Information flow in the AdHoc Dynamic Environment</span><br>
+</b><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Alexander Yermolovich, Eric Hennigan, Michael Franz (University of 
+California Irvine)</span><br>
+<br>
+<b><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Managing Off-Chip Bandwidth: The Next Big Wall</span><br>
+</b><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Bushra Ahsan, Mohamed Zahran (City College at City University of New York)</span><br>
+<br>
+<b><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >WinKVM : Virtual Machine Module for Windows</span><br>
+</b><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Kazushi Takahashi Koichi Sasada (The University of Tokyo)</span> </p>
+<p><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+<p><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+
+<table border="0" style="width: 100%;">
+<tr>
+<td valign="top" width="99%">
+<!-- #BeginEditable "Body" --><!-- #EndEditable -->
+
+<!-- DATES END HERE -->
+<br>
+<hr>
+<center>
+<span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >ASPLOS-XIV is sponsored by:</span><br>
+<table> <tr valign=middle> <td valign="middle">
+<img onmousedown="imd(this)" SRC=acmlogo.gif ALT="ACM"><img onmousedown="imd(this)" SRC=sig.gif ALT="SIGARCH, SIGPLAN and SIGOPS">
+</td></tr></table>
+<br>
+<br>
+<small>
+<span onclick="return false" style="text-decoration:underline; color:blue" style="font-family: helvetica,arial,sans-serif" href="http://www.cs.virginia.edu/asplos09"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >ASPLOS-XIV Home Page</span></span><br
+ style="font-family: helvetica,arial,sans-serif;">
+                 <span style="font-family: helvetica,arial,sans-serif;">
+                 <span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Comments? Suggestions?</span> </span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:mji@cse.psu.edu"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >mji@cse.psu.edu</span>

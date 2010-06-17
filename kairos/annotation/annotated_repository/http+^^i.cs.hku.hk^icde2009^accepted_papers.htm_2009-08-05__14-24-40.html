@@ -1,0 +1,952 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml"><!-- InstanceBegin template="/Templates/icde2009.dwt" codeOutsideHTMLIsLocked="false" -->
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^i.cs.hku.hk^icde2009^accepted_papers.htm_2009-08-05__14-24-40.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^i.cs.hku.hk^icde2009^accepted_papers.htm_2009-08-05__14-24-40.yaml created on Wed Aug 05 17:31:14 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<meta http-equiv="content-type" content="text/html; charset=iso-8859-1" />
+<meta http-equiv="Content-Language" content="iso-8859-1" />
+<!-- InstanceBeginEditable name="doctitle" -->
+
+<title>25th International Conference on Data Engineering</title>
+
+<!-- InstanceEndEditable -->
+<link href="style.css" rel="stylesheet" type="text/css" />
+<!-- InstanceBeginEditable name="head" --><!-- InstanceEndEditable -->
+<style type="text/css">
+<!--
+.Heading {
+	color: #009900;
+	font-weight: bold;
+}
+-->
+</style>
+<script language="Javascript">
+<!--
+//change the text below to reflect your own,
+var current="<b style='color=red'>Today!<b/>";
+var after = "Started";
+var montharray=new Array("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")
+
+function countdown(yr,m,d){
+var today=new Date()
+var todayy=today.getYear()
+if (todayy < 1000)
+todayy+=1900
+var todaym=today.getMonth()
+var todayd=today.getDate()
+var todaystring=montharray[todaym]+" "+todayd+", "+todayy
+var futurestring=montharray[m-1]+" "+d+", "+yr
+var difference=(Math.round((Date.parse(futurestring)-Date.parse(todaystring))/(24*60*60*1000))*1)
+if (difference==0)
+document.write(current)
+else if (difference>0)
+	document.write(difference+" days to ICDE 2009");
+else
+	document.write(after);
+}
+//-->
+</script>
+
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<div id="wrapper">
+  <div id="header"><img onmousedown="imd(this)" src="img/icde2009.jpg" alt="ICDE2009 - 25th International Conference on Data Engineering, Shanghai, China, March 29-April 4, 2009" width="740" height="120" border="0" " />
+  <map name="Map" id="Map">
+    <area shape="rect" coords="520,20,695,95" href="http://www.ieee.org" alt="Sponsored by IEEE Computer Society" />
+    </map>
+        <img onmousedown="imd(this)" src="img/shanghai2.jpg" width="740" height="203" alt=""/></div>
+<div id="sidenav">
+        <div id="sidenav_inside">
+            <ul id="NavList">
+                <li><script>countdown(2009,3,29)</script></li>
+                <li class="Heading"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.htm" id="NavListC"><strong><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >ICDE2009</span></strong></span></li>
+                <li class="Heading"><strong><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >General Info</span></strong></li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="news.htm"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >News</span></span></li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="dates.htm"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="past.htm"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Past Events</span></span></li>
+                <li><span class="Heading"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Organization</span></span></li>
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="program_committee.htm"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></span></li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="organization_committee.htm"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Organization Committee</span></span></li>
+                <li><strong class="Heading"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></strong></li>
+			    <li><span onclick="return false" style="text-decoration:underline; color:blue" href="program_overview.htm"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Program Overview</span></span></li>
+			    <li><span onclick="return false" style="text-decoration:underline; color:blue" href="detailed_program.htm"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Detailed Program</span></span></li>
+			    <li><span onclick="return false" style="text-decoration:underline; color:blue" href="keynotes.htm"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Keynotes</span></span></li>
+		      <li><span onclick="return false" style="text-decoration:underline; color:blue" href="accepted_papers.htm"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers</span></span></li>
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.htm"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="seminars.htm"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Seminars</span></span></li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="panels.htm"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Panels</span></span></li>
+                <li><strong class="Heading"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Manuscripts</span></strong></li>
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="aik.htm"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Author's Instruction Kit</span></span></li>
+                <li><strong class="Heading"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Participants</span></strong></li>
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="registration.htm"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="accommodation.htm"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation</span></span></li>  
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="hints.htm"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Demos &amp; Posters hints</span></span></li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="pictures.htm"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Pictures</span></span></li>
+                <li class="Heading"><strong><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Travel Information</span></strong></li>
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="shanghai.htm"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >About Shanghai</span></span></li>
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="tours.htm"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Tours</span></span></li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="air.htm"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Air connections</span></span></li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="immigration.htm"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Immigration</span></span></li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="ground.htm"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Ground Transportation</span></span></li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="scenery.htm"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Pictures of Shanghai</span></span></li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="hotel.htm"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Conference Hotel</span></span></li>
+                <li><strong class="Heading"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Miscellaneous</span></strong></li>
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="sponsors.htm"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></span></li>
+                <li class="Heading"><strong><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Call for Contributions</span></strong></li>
+              <li><span onclick="return false" style="text-decoration:underline; color:blue" href="callforpapers.htm"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span></li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="callforipapers.htm"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Call for Industrial Papers</span></span></li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="callfordemos.htm"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Call for Demos</span></span></li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="callforworkshops.htm"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Call for Workshops</span></span></li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="callforseminars.htm"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Call for Seminars</span></span></li>
+                <li><span onclick="return false" style="text-decoration:underline; color:blue" href="callforpanels.htm"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Call for Panels</span></span></li>
+            </ul>
+    </div>
+  </div>
+    <div id="maincontent" style="left: -23px; right: 23px; top: 0px">
+        <div class="content"><!-- InstanceBeginEditable name="Content" -->        
+
+          <h1><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Accepted
+
+        papers</span></h1>
+        
+        <p><strong> <span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Research Papers</span></strong></p>
+        
+        
+
+        <p><strong><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Long Papers</span></strong> </p>
+        <p><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Sequence Pattern Query Processing over Out-of-Order Event Streams</span><br />
+        <span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Mo Liu, Worcester Polytechnic Institute; Ming Li, Worcester Polytechnic Institute; Denis Golovnya, Worcester Polytechnic Institute; Elke Rundensteiner, Worcester Polytechnic Institute; Kajal Claypool, Lincoln Labs, Massachusetts Institute of Technology</span></p>
+        <p> <span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Unified Declarative Platform for Secure Networked Information Systems</span> <br />
+        <span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Wenchao Zhou, University of Pennsylvania; Yun Mao, University of Pennsylvania; Boon Thau Loo, University of Pennsylvania; Martin Abadi, Microsoft Research</span></p>
+        <p><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >PSALM: Cardinality Estimation in the Presence of Fine-grained Access Controls</span><br />
+        <span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Huaxin Zhang, University of Waterloo; Ihab Ilyas, University of Waterloo; Kenneth Salem, University of Waterloo</span></p>
+        <p><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >ApproxRank: Estimating rank for a subgraph</span> <br />
+        <span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Yao Wu, University of Maryland; Louiqa Raschid, University of Maryland</span></p>
+        <p><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >A Latent Topic Model for Complete Entity Resolution</span> <br />
+        <span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Liangcai Shu, SUNY at Binghamton; Bo Long, SUNY at Binghamton; Weiyi Meng, SUNY at Binghamton</span></p>
+        <p><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Modeling and Integrating Background Knowledge in Data Anonymization</span><br />
+        <span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Tiancheng Li, Purdue University; Ninghui Li, Purdue University; Jian Zhang, Purdue University</span></p>
+        <p><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >A Framework for Clustering Massive-Domain Data Streams</span> <br />
+        <span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Charu Aggarwal, IBM</span></p>
+        <p><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >A Data Structure for Sponsored Search</span> <br />
+        <span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Arnd Koenig, Microsoft Research; Kenneth Church, Microsoft Research; Martin Markov, Microsoft Corp.</span></p>
+        <p><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >On Efficient Query Processing of Stream Counts on the Cell Processor</span> <br />
+        <span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Dina Thomas, Stanford University; Rajesh Bordawekar, IBM Watson Research Center; Charu Aggarwal, IBM; Philip Yu</span></p>
+        <p><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Top-k Set Similarity Joins</span> <br />
+        <span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Chuan Xiao, University of New South Wales; Wei Wang, UNSW; Xuemin Lin, University of New South Wales - Australia; Haichuan Shang, UNSW</span></p>
+        <p><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Deductive Framework for Programming Sensor Networks</span> <br />
+        <span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Himanshu Gupta, Stony Brook University; Xianjin Zhu, Stony Brook University; Xiang Xu</span></p>
+	<p> <span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Spatial Range Querying for Gaussian-Based Imprecise Query Objects</span> <br />
+        <span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Yoshiharu Ishikawa, Nagoya University; Yuichi Iijima, Nagoya University; Jeffrey Yu, Chinese University of Hong Kong</span></p>
+        <p><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Keyword Search over Dynamic Categorized Information</span> <br />
+        <span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Manish Bhide, IBM India Research Lab; Venkatesan Chakaravarthy, IBM Research; Krithi Ramamritham, IIT Bombay; Prasan Roy, Aster Data System</span></p>
+        <p><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Topologically-sorted Skylines for Partially-ordered Domains</span> <br />
+        <span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Dimitris Sacharidis, NTUA; Stavros Papadopoulos, HKUST; Dimitris Papadias, HKUST</span></p>
+        <p> <span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Improving Transaction-time DBMS Performance and Functionality</span> <br />
+        <span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >David Lomet, Microsoft Research; FeiFei Li, Florida State University</span></p>
+        <p><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Access Methods for Markovian Streams</span> <br />
+        <span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Julie Letchner, University of Washington; Christopher Re, University of Washington; Magdalena Balazinska, University of Washington; Matthai Philipose, Intel Research Seattle</span></p>
+        <p><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Effective XML Keyword Search with Relevance Oriented Ranking</span> <br />
+        <span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Zhifeng Bao, NUS; Tok Wang Ling, NUS; Bo Chen; Jiaheng Lu</span></p>
+        <p><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >XOntoRank: Ontology-Aware Search of Electronic Medical Records</span> <br />
+        <span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Fernando Farfan, Florida International University; Vagelis Hristidis, Florida International University; Anand Ranganathan, IBM T.J. Watson Research; Michael Weiner, Center for Aging Research, Indiana University</span></p>
+        <p><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Computing distance histograms efficiently in scientific databases</span> <br />
+        <span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Yicheng Tu, University of South Florida; Shaoping Chen, Wuhan University of Technology; Sagar Pandit, University of South Florida</span></p>
+        <p><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Confidence-Aware Join Algorithms</span> <br />
+        <span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Parag Agrawal, Stanford University; Jennifer Widom, Stanford University</span></p>
+        <p><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Histograms and Wavelets on Probabilistic Data</span> <br />
+        <span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Graham Cormode, AT&amp;T Labs--Research; Minos Garofalakis, Yahoo! Research</span></p>
+        <p><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Distribution of Full-Fledged XQuery</span> <br />
+        <span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Ying Zhang, CWI; Nan Tang, CWI; Peter Boncz</span></p>
+        <p><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Resolution-Aware Query Answering for Business Intelligence</span> <br />
+        <span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Yannis Sismanis, IBM; Ling Wang, IBM Silicon Valley; Ariel Fuxman, Microsoft Research; Peter Haas, IBM Almaden Research Center; Berthold Reinwald, IBM Almaden Research Center</span></p>
+        <p> <span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Fa: A System for Automating Failure Diagnosis</span> <br />
+        <span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Songyun Duan, Duke University; Shivnath Babu, Duke University</span></p>
+        <p><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Online Interval Skyline Queries on Time Series</span> <br />
+        <span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Bin Jiang, Simon Fraser University; Jian Pei, Simon Fraser University - Canada</span></p>
+        <p><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Processing of Warping Time Series Join of Motion Capture Data</span> <br />
+        <span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Yueguo Chen, NUS; Gang Chen, Zhejiang University, China; Ke Chen; Beng Chin Ooi, National University of Singapore</span></p>
+        <p><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Reverse Furthest Neighbors in Spatial Databases</span> <br />
+        <span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Bin Yao, Computer Science Department, Florida State Unversity; FeiFei Li, Florida State University; Piyush Kumar, Computer Science Department, Florida State Unversity</span></p>
+        <p><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Instant Advertising in Mobile Peer-to-Peer Networks</span> <br />
+        <span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Zaiben Chen, University of Queenslabd; Heng Shen, University of Queensland; Quanqing Xu, Peking University; Xiaofang Zhou, U. of Queensland - Brisbane</span></p>
+        <p><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Routing Questions to the Right Users in Online Communities</span> <br />
+        <span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Yanhong Zhou, Peking University; Gao Cong, Microsoft China; Bin Cui, Peking University; Christian Jensen, Aalborg University; Junjie Yao, PKU</span></p>
+        <p><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >STAIRS: Towards Efficient Full-Text Filtering and Dissemination in a DHT Environment</span><br />
+        <span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >WEIXIONG RAO, CUHK; Ada Fu, Chinese U. of Hong Kong; Lei Chen, HKUST</span></p>
+        <p><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >STAR: Steiner-Tree Approximation in Relationship Graphs</span> <br />
+        <span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Gjergji Kasneci, Max-Planck Institute ; Maya Ramanath; Mauro Sozio, Max-Planck Institute; Fabian Suchanek, Max-Planck Institute; Gerhard Weikum, MPI</span> </p>
+        <p> <span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Finding Time-lagged 3D Clusters</span> <br />
+        <span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Xin Xu, National University Hospital of Singapore; Ying Lu, UIUC; Kien-Lee Tan, National University of Singapore; Anthony Tung, National U. of Singapore</span></p>
+        <p><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >AJAX Crawl: Making AJAX Applications Searchable</span> <br />
+        <span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Cristian Duda, ETH Zurich; Donald Kossmann, ETH Zurich; Gianni Frey, ETH Zurich; Reto Matter, ETH Zurich; Chong Zhou</span></p>
+        <p><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Keyword Search in Spatial Databases: Towards Searching by Document</span><br />
+        <span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >DONGXIANG ZHANG, NUS; Yeow Meng Chee, Nanyang Technological University; Anirban Mondal; Anthony Tung, National U. of Singapore; Masaru Kitsuregawa, University of Tokyo</span></p>
+        <p><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Supporting Database Applications as a Service</span><br />
+        <span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Mei Hui, National University of Singapore; Yuan Zhou, NUS; Guoliang Li, Tsinghua University; Dawei Jiang, National Univ. of Singapore</span></p>
+        <p><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Querying Communities in Relational Databases</span> <br />
+        <span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Lu Qin, CUHK; Jeffrey Yu, Chinese University of Hong Kong; Lijun Chang, CUHK; Yufei Tao, CUHK</span></p>
+        <p><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >SP^2Bench: A SPARQL Performance Benchmark</span> <br />
+        <span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Michael Schmidt, Freiburg University; Thomas Hornung, Freiburg University; Georg Lausen, Freiburg University; Christoph Pinkel, MTC Infomedia OHG</span></p>
+        <p><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Perm: Processing provenance and data on the same data model through query rewriting</span> <br />
+        <span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Boris Glavic, Universitat Zurich; Gustavo Alonso, ETH Zurich</span></p>
+        <p><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Top-k Exploration of Query Candidates for Efficient Keyword Search on Graph-Shaped (RDF) Data</span><br />
+        <span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Thanh Tran, AIFB; Sebastian Rudolph; Philipp Cimiano; Haofen Wang</span></p>
+        <p><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Continuous Subgraph Pattern Search over Graph Streams</span> <br />
+        <span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Changliang Wang, HKUST; Lei Chen, HKUST</span></p>
+        <p><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Distributed Structural Relaxation of XPath Queries</span> <br />
+        <span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Georgia Koloniari, University of ioannina; Evaggelia Pitoura, University of Ioannina</span></p>
+        <p><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Sketching Sampled Data Streams</span> <br />
+        <span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Florin Rusu, University of Florida; Alin Dobra, university of Florida</span></p>
+        <p><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Recommending Join Queries Via Query Log Analysis</span> <br />
+        <span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Xiaoyan Yang, NUS; Cecilia Procopiuc, AT&amp;T Labs-Research; Divesh Srivastava, AT&amp;T Research</span></p>
+        <p><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Probabilistic Inference over RFID Streams in Mobile Environments</span> <br />
+        <span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Thanh Tran, UMass Amherst; Charles Sutton, UC Berkeley; Richard Cocci, UMass Amherst; Yanming Nie, UMass Amherst; Yanlei Diao, Umass; Prashant Shenoy, UMass Amherst</span></p>
+        <p><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Deriving Private Information from Association Rule Mining Results</span> <br />
+        <span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Zutao Zhu, Syracuse University; Guan Wang, Syracuse University; Wenliang (Kevin) Du, Syracuse University</span></p>
+        <p><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Best Effort Top-K Query Processing Under Budgetary Constraints</span> <br />
+        <span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Michal Shmueli-Scheuer, UC Irvine; Chen Li, UC Irvine, USA; Yosi Mass, IBM Haifa Research Lab; Haggai Roitman, Israel Institute of Technology; Ralf Schenkel, Max-Planck-Institut Informatik; Gerhard Weikum, MPI</span></p>
+        <p><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Sketch-based Summarization of Ordered XML Streams</span> <br />
+        <span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Veronica Mayorga, UCSC; Neoklis Polyzotis, UCSC</span></p>
+        <p><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Predicting Multiple Metrics for Queries: Better Decisions Enabled by Machine Learning</span> <br />
+        <span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Archana Ganapathi, UC Berkeley; Harumi Kuno, Hewlett Packard Laboratories, Palo Alto; Umeshwar Dayal, Hewlett Packard Laboratories, Palo Alto; Janet Wiener, Hewlett Packard Laboratories, Palo Alto; Armando Fox, UC Berkeley; Michael Jordan, UC Berkeley; David Patterson, UC Berkeley</span></p>
+        <p><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Self-Tuning, Bandwidth-Aware Monitoring for Dynamic Data Streams</span> <br />
+        <span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >NAVENDU JAIN, Univ. of Texas, Austin; Praveen Yalagandula, HP Labs; Mike Dahlin, Univ. of Texas at Austin; Yin Zhang, Univ. of Texas at Austin</span></p>
+        <p><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Aggregate Query Answering under Uncertain Schema Mappings</span> <br />
+        <span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Avigdor Gal, Technion; Maria Vanina Martinez, University of Maryland; Gerardo Simari, University of Maryland; VA Subrahmanian, University of Maryland</span></p>
+        <p><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Space-Constrained Gram-Based Indexing for Efficient Approximate String Search</span> <br />
+        <span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Alexander Behm, UC Irvine; Shengyue Ji, UC Irvine; Chen Li, UC Irvine, USA; Jiaheng Lu, UC Irvine</span></p>
+        <p><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >SPROUT: Lazy vs. Eager Query Plans for Tuple-Independent Probabilistic Databases</span><br />
+        <span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Jiewen Huang, Oxford University; Dan Olteanu, Oxford University; Christopher Koch, Cornell U.</span> </p>
+        <p><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Exploring a Few Good Tuples From Text Databases</span> <br />
+        <span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Alpa Jain, Columbia University; Divesh Srivastava, AT&amp;T Research</span></p>
+        <p><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Large-Scale Deduplication with Constraints using Dedupalog</span><br />
+        <span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Arvind Arasu, Microsoft Research; Christopher Re, University of Washington; Dan Suciu, U. of Washington</span></p>
+        <p><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Power Hints for Query Optimization</span> <br />
+        <span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Nico Bruno, Microsoft Research; Surajit Chaudhuri, Microsoft Research; Ravishankar Ramamurthy, Microsoft Research</span></p>
+        <p><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Semantics of Ranking Queries for Probabilistic Data and Expected Ranks</span> <br />
+        <span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Graham Cormode, AT&amp;T Labs--Research; FeiFei Li, Florida State University; Ke Yi, HongKong UST</span></p>
+        <p><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >BinRank: Scaling Dynamic Authority-Based Search Using Materialized SubGraphs</span> <br />
+        <span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Heasoo Hwang, UC San Diego; Andrey Balmin, IBM Almaden; Berthold Reinwald; Erik Nijkamp</span> </p>
+        <p><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Context-Aware Object Connection Discovery in Large Graphs</span> <br />
+        <span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >James Cheng, HKUST; Yiping Ke, Chinese University Of Hong Kong; Wilfred Ng, HKUST; Jeffrey Yu, Chinese University of Hong Kong</span></p>
+        <p><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >iVA-File: Efficiently Indexing Sparse Wide Tables in Community Systems</span> <br />
+        <span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Boduo Li, Harbin Institute of Technology; Mei Hui, National University of Singapore; Jianzhong Li, Harbin Institute of Technology; Hong Gao, Harbin Institute of Technology</span></p>
+        <p><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Probabilistic Skyline Operator over Sliding Windows</span> <br />
+        <span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Wenjie Zhang, UNSW; Xuemin Lin, University of New South Wales - Australia; Ying Zhang, UNSW; Wei Wang, UNSW; Jeffrey Yu, Chinese University of Hong Kong</span></p>
+        <p><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >A Spreadsheet Algebra for a Direct Data Manipulation Query Interface</span> <br />
+        <span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Bin Liu, EECS, University of Michigan; H Jagadish, University of Michigan</span> </p>
+        <p><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Light-weight, Runtime Verification of Query Sources</span> <br />
+        <span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Tingjian Ge, Brown University; Stan Zdonik, Brown U.</span> </p>
+        <p><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >A Robust Technique to Ensure Serializable Executions with Snapshot Isolation DBMS</span><br />
+        <span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Mohammad Alomari, The University of Sydney; Alan Fekete, The University of Sydney; Uwe Rohm, University of Sydney</span> </p>
+        <p><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Flexible XML Querying Using Skyline Semantics</span> <br />
+        <span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Sara Cohen, Hebrew University of Jerusalem; Maayan Shiloach, Hebrew University of Jerusalem</span> </p>
+        <p><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Another Outlier Bites the Dust: Computing Meaningful Aggregates in Sensor Networks</span> <br />
+        <span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Antonios Deligiannakis, Technical University of Crete; Yannis Kotidis, Athens University; Vasilis Vassalos, AUEB, Greece; Vassilis Stoumpos, University of Athens; Alex Delis, University of Athens, Greece</span> </p>
+        <p><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Non-Exposure Location Anonymity</span> <br />
+        <span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Haibo Hu, HKBU; Jianliang Xu, Hong Kong Baptist University</span></p>
+        <p><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Towards Efficient Processing of General-Purpose Joins in Sensor Networks</span> <br />
+        <span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Mirco Stern, Universitat Karlsruhe (TH); Erik Buchmann, Universitat Karlsruhe (TH); Klemens Bohm, Universitat Karlsruhe (TH)</span></p>
+        <p><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Double Index Nested-loop Reactive Join for Result Rate Optimization</span>  <br />
+        <span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Mihaela Bornea, AUEB; Vasilis Vassalos, AUEB, Greece; Yannis Kotidis, Athens University; Antonios Deligiannakis, Technical University of Crete</span> </p>
+        <p><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Parallel Skyline Computation on Multicore Architectures</span> <br />
+        <span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Sungwoo Park, POSTECH; Taekyung Kim; Jonghyun Park; Jinha Kim; Hyeonseung Im</span> </p>
+        <p><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Distance-based Representative Skyline</span> <br />
+        <span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Yufei Tao, Chinese Univ. of Hong Kong; Ding Ling; Xuemin Lin, University of New South Wales - Australia; Jian Pei, Simon Fraser University - Canada</span> </p>
+        <p><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Shared Winner Determination in Sponsored Search Auctions</span> <br />
+        <span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >David Martin, Cornell University; Joseph Halpern, Cornell University</span> </p>
+        <p><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Supporting Generic Cost Models for Wide-Area Stream Processing</span><br />
+        <span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Olga Papaemmanouil, Brandeis University; Ugur Cetintemel, Brown University; John Jannotti, Brown University</span></p>
+        <p><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Join Reordering by Join Simulation</span> <br />
+        <span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Chaitanya Mishra, University of Toronto; Nick Koudas, U. of Toronto</span> </p>
+        <p><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Contextual Ranking of Keywords Using Click Data</span> <br />
+        <span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Utku Irmak, Yahoo! Inc; Vadim Brzeski, Yahoo! Inc; Reiner Kraft, Yahoo! Inc</span> </p>
+        <p><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Weighted Proximity Best-Joins for Information Retrieval</span> <br />
+        <span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Risi Thonangi, Duke University; Hao He, Google Inc., Mountain View, California, USA; AnHai Doan, University of Wisconsin; Haixun Wang, IBM USA; Jun Yang, Duke University</span> </p>
+        <p><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Ranking with Uncertain Scores</span> <br />
+        <span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Mohamed Soliman, University of Waterloo; Ihab Ilyas, University of Waterloo</span> </p>
+        <p><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Auditing a Database Under Retention Restrictions</span> <br />
+        <span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Wentian Lu, UMass; Gerome Miklau, University of Massachusetts</span> </p>
+        <p><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Join Optimization of Information Extraction Output: Quality Matters!</span> <br />
+        <span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Alpa Jain, Columbia University; Panagiotis Ipeirotis, New York University; AnHai Doan, University of Wisconsin; Luis Gravano, Columbia University</span> </p>
+        <p><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Recursive Computation of Regions and Connectivity in Networks</span> <br />
+        <span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Mengmeng Liu, University of Pennsylvania; Nicholas Taylor, University of Pennsylvania; Wenchao Zhou, University of Pennsylvania; Zachary Ives, University of Pennsylvania; Boon Thau Loo, University of Pennsylvania</span> </p>
+        <p><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Mining of Closed Repetitive Gapped Subsequences from a Sequence Database</span> <br />
+        <span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Bolin Ding, University of Illinois at Urbana-Champaign; David Lo, National University of Singapore; Jiawei Han, University of Illinois Urbana-Champaign; Siau-Cheng Khoo</span> </p>
+        <p>          <span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Minimizing Communication Cost in Distributed Multi-query Processing</span> <br />
+        <span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Jian Li, University of Maryland; Amol Deshpande, University of Maryland; Samir Khuller, University of Maryland</span> </p>
+        <p><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Differencing Provenance in Scientific Workflows</span> <br />
+        <span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Zhuowei Bao, University of Pennsylvania; Sarah Cohen-Boulakia, Universit? Paris-Sud; Susan Davidson, University of Pennsylvania; Anat Eyal, University of Pennsylvania; Sanjeev Khanna, University of Pennsylvania</span> </p>
+        <p><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Online Anomaly Prediction for Robust Cluster Systems</span> <br />
+        <span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >Xiaohui Gu, NCSU; Haixun Wang, IBM USA</span> </p>
+        <p><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Distance Oracles for Spatial Networks</span> <br />
+        <span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >Jagan Sankaranarayanan, University of Maryland; Hanan Samet, University of Maryland</span> </p>
+        <p><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Adaptive Scheduling of Web Transactions</span> <br />
+        <span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >Shenoda Guirguis, University of Pittsburgh; Mohamed Sharaf, University of Toronto; Panos Chrysanthis, University of Pittsburgh; Alexandros Labrinidis, University of Pittsburgh; Kirk Pruhs, University of Pittsburgh</span> </p>
+        <p><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >Forward Decay: A Practical Time Decay Model for Streaming Systems</span> <br />
+        <span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Graham Cormode, AT&amp;T Labs--Research; Vladislav Shkapenyuk, AT&amp;T Labs - Research; Divesh Srivastava, AT&amp;T Research; Bojian Xu, Iowa State</span> </p>
+        <p><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Leveraging COUNT Information in Sampling Hidden Databases</span> <br />
+        <span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Arjun Dasgupta, University of Texas Arlington; Nan Zhang, University of Texas Arlington; Gautam Das, University of Texas Arlington</span> </p>
+        <p><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Similarity Group-by</span> <br />
+        <span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Yasin Silva, Purdue University; Walid Aref, Purdue University; Mohamed Ali, Microsoft</span> </p>
+        <p><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >BP-Wrapper: A System Framework Making Any Replacement Algorithms (Almost) Lock Contention Free</span><br />
+        <span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Free Xiaoning Ding, The Ohio State University; Song Jiang, Wayne State
+	University; Xiaodong Zhang, The Ohio State University</span> </p>
+        <p><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >GraphSig: A Scalable Approach to Mining Significant Subgraphs in Large Graph Databases</span> <br />
+        <span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Sayan Ranu, University of California, SB; Ambuj Singh, UC Santa Barbara</span> </p>
+        <p><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >On Efficient Recommendations for Online Exchange Markets</span> <br />
+        <span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >Zeinab Abbassi, University of British Columbia; Laks Lakshmanan, U. of British Columbia</span> </p>
+        <p><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >An Architecture for Regulatory Compliant Database Management</span><br />
+        <span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Soumyadeb Mitra, UIUC;  Marianne Winslett, University of Illinois; Rick Snodgrass, University of Arizona; Shashank Yaduvanshi, IIT Delhi; Sumedh Ambokar</span></p>
+        <p><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Using Anonymized Data for Classification</span> <br />
+        <span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >Ali Inan, University of Texas at Dallas; Murat Kantarcioglu, UT Dallas; Elisa Bertino, Purdue University</span> </p>
+        <p><strong><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Short papers</span></strong></p>
+        <p><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >Transaction Support for Log-Based Middleware Server Recovery</span> <br />
+        <span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Rui Wang, Microsoft; Betty Salzberg; David Lomet, Microsoft Research</span> </p>
+        <p><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >Privacy Preserving Publishing on Multiple Quasi-Identifiers</span> <br />
+        <span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Jian Pei, Simon Fraser University - Canada; Yufei Tao, Chinese Univ. of Hong Kong; Jiexing Li, The Chinese University of Hong Kong; Xiaokui Xiao, The Chinese University of Hong Kong</span> </p>
+        <p><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >FF-Anonymity: When Quasi-Identifiers Are Missing</span> <br />
+        <span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >Ke Wang, Simon Fraser University; Yabo Xu, Simon Fraser University; Ada Fu, Chinese U. of Hong Kong; Raymond Chi-Wing Wong, Hong Kong University of Science and Technology</span> </p>
+        <p><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Outsourcing of Private Spatial Data for Search Services</span> <br />
+        <span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >Man Lung Yiu, Aalborg University; Gabriel Ghinita, National University of Singapore; Christian Jensen, Aalborg University; Panos Kalnis, National University of Singapore</span> </p>
+        <p><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Processing Group Nearest Group Query</span> <br />
+        <span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >Ke Deng, University of Queensland; Hu Xu, HUST; Shazia Sadiq; Yansheng Lu; Gabriel Fung; Heng Shen, University of Queensland</span> </p>
+        <p><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Separating Authentication from Query Execution in Outsourced Databases</span> <br />
+        <span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >Stavros Papadopoulos, HKUST; Dimitris Papadias, HKUST; Weiwei Cheng, NUS; Kien-Lee Tan, National University of Singapore</span> </p>
+        <p><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >X-CSR: Dataflow Optimization for Distributed XML Processing Pipelines</span> <br />
+        <span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Zinn, UC Davis; Shawn Bowers, UC Davis; Timothy McPhillips, UC Davis Genome Center; Bertram Ludaescher, UC Davis</span> </p>
+        <p><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >On High Dimensional Projected Clustering of Uncertain Data Streams</span> <br />
+        <span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >Charu Aggarwal, IBM</span></p>
+        <p> <span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >Expressive Location-based Continuous Query Evaluation With Binary Decision Diagrams</span> <br />
+        <span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >Zhengdao Xu, University of Toronto; Arno Jacobsen, University of Toronto</span> </p>
+        <p><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >Self Organizing Semantic Topologies in P2P Data Integration Systems</span> <br />
+        <span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >Ami Eyal, Technion; Avigdor Gal, Technion</span> </p>
+        <p><span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >Reachability Indexes for Relational Keyword Search</span> <br />
+        <span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >Alexander Markowetz, HKUST; Yin Yang, HKUST; Dimitris Papadias, HKUST</span> </p>
+        <p><span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >XQuery Join Graph Isolation</span> <br />
+        <span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >Torsten Grust, Universitat Tuebingen; Manuel Mayr, Technische Universitat Muenchen; Jan Rittinger, Technische Universitat Muenchen</span> </p>
+        <p><span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >Distinct Counting with a Self-learning Bitmap</span> <br />
+        <span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >Aiyou CHEN, Bell Labs Alcatel-Lucent; Jin Cao, Bell Labs Alcatel-Lucent</span> </p>
+        <p><span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >Decision Trees for Uncertain Data</span> <br />
+        <span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >Smith Tsang, The University of Hong Kong; Ben Kao, The University of Hong Kong; Kevin Y. Yip, Yale University; Wai-Shing Ho, The University of Hong Kong; Sau Dan Lee, The University of Hong Kong</span> </p>
+        <p><span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >Holistic Query Transformations for Dynamic Web Applications</span> <br />
+        <span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >Amit Manjhi, Google, Inc.; Charles Garrod, Carnegie Mellon University; Bruce Maggs, Carnegie Mellon University; Todd Mowry, Carnegie Mellon University; Anthony Tomasic, Carnegie Mellon University</span> </p>
+        <p><span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >The World in a Nutshell: Concise Range Queries</span> <br />
+        <span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >Ke Yi, HongKong UST; Xiang Lian, HKUST; FeiFei Li, Florida State University; Lei Chen, HKUST</span> </p>
+        <p><span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >Progressive Top-k Keyword Search in Relational Database</span> <br />
+        <span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >Guoliang Li, Tsinghua University; Xiaofang Zhou, U. of Queensland - Brisbane; Jianhua Feng; Jianyong Wang, Tsinghua University</span> </p>
+        <p><span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >An Incremental Threshold Method for Continuous Text Search Queries</span> <br />
+        <span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >Kyriakos Mouratidis, Singapore Management Uni.; HweeHwa Pang, Singapore Management Uni.</span> </p>
+        <p><span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >A Subspace Symbolization Approach to Content-based Video Search</span> <br />
+        <span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >Xiangmin Zhou, CSIRO; Xiaofang Zhou, U. of Queensland - Brisbane; Athman Bouguettaya, CSIRO</span> </p>
+        <p><span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >Evaluating TOP-K Queries Over Business Processes</span> <br />
+        <span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Deutch, Tel Aviv University; Tova Milo, Tel Aviv University</span> </p>
+        <p><span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >Scalable Keyword Search on Large Data Streams</span> <br />
+        <span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >Lu Qin, CUHK; Jeffrey Yu, Chinese University of Hong Kong; Lijun Chang, CUHK; Yufei Tao, Chinese Univ. of Hong Kong</span></p>
+        <p><span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >Visible Reverse k-Nearest Neighbor Queries</span> <br />
+        <span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >Yunjun Gao, Singapore Management University; Baihua Zheng, Singapore Management Univ.; Gencai Chen, Zhejiang University; Wang-Chien Lee, Penn State Univ., USA; Ken Lee; Qing Li</span> </p>
+        <p><span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >Scheduling Updates in a Real-time Stream Warehouse</span> <br />
+        <span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >Lukasz Golab, AT&amp;T Labs - Research; Theodore Johnson, AT&amp;T Labs - Research; Vladislav Shkapenyuk, AT&amp;T Labs - Research</span> </p>
+        <p><span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >AURA: Enabling Attribute-based Spatial Search in RFID Rich Environments</span> <br />
+        <span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >Tejas Bapat, Arizona State University; Kasim Candan, Arizona State University; Venkata Cherukuri, Arizona State University; Hari Sundaram, Arizona State University</span> </p>
+        <p><span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >Web Monitoring 2.0: Crossing Streams to Satisfy Complex Data Needs</span> <br />
+        <span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >Louiqa Raschid, University of Maryland; Avigdor Gal, Technion; Haggai Roitman, IBM Haifa Research Labs and Technion</span> </p>
+        <p><span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >Exploiting Domain Knowledge to Improve Biological Significance of Biclusters with Key Missing Genes</span> <br />
+        <span class="coloringspan" id="282" onmousedown="md(this)" onmouseup="mu(this)" >Jin Chen, Carnegie Institution for Science; Liping Ji; Wynne Hsu, Nat. University of Singapore; Kien-Lee Tan, National University of Singapore; Seung Rhee,</span>  </p>
+        <p><span class="coloringspan" id="283" onmousedown="md(this)" onmouseup="mu(this)" >Supporting Efficient Evaluation of Data Provenance Queries</span> <br />
+        <span class="coloringspan" id="284" onmousedown="md(this)" onmouseup="mu(this)" >Anastasios Kementsietsidis, IBM T.J. Watson Research Center; Min Wang</span> </p>
+        <p><span class="coloringspan" id="285" onmousedown="md(this)" onmouseup="mu(this)" >Using Semantics for Speech Annotation of Images</span> <br />
+        <span class="coloringspan" id="286" onmousedown="md(this)" onmouseup="mu(this)" >Chaitanya Desai, UC -Irvine; Dmitri Kalashnikov, UCI; Sharad Mehrotra, Univ. of California Irvine</span> </p>
+        <p><span class="coloringspan" id="287" onmousedown="md(this)" onmouseup="mu(this)" >Discovering Conditional Functional Dependencies</span> <br />
+        <span class="coloringspan" id="288" onmousedown="md(this)" onmouseup="mu(this)" >Wenfei Fan, University of Edinburgh/Bell Labs; Floris Geerts, University of Edinburgh; Ming Xiong, Bell Labs</span> </p>
+        <p><span class="coloringspan" id="289" onmousedown="md(this)" onmouseup="mu(this)" >Integrating and Ranking Uncertain Scientific Data</span>  <br />
+        <span class="coloringspan" id="290" onmousedown="md(this)" onmouseup="mu(this)" >Todd Detwiler, University of Washington; Wolfgang Gatterbauer, University of Washington; Brent Louie, University of Washington; Dan Suciu, U. of Washington; Peter Tarczy-Hornoch, University of Washington</span> </p>
+        <p><span class="coloringspan" id="291" onmousedown="md(this)" onmouseup="mu(this)" >Adaptive Multi-Join Query Processing in PDBMS</span> <br />
+        <span class="coloringspan" id="292" onmousedown="md(this)" onmouseup="mu(this)" >Sai Wu, NUS; Quang Hieu Vu, NUS; Jianzhong Li, Harbin Institute of Technology; Kien-Lee Tan, National University of Singapore</span> </p>
+        <p><span class="coloringspan" id="293" onmousedown="md(this)" onmouseup="mu(this)" >Finding equivalent rewritings with exact views</span> <br />
+        <span class="coloringspan" id="294" onmousedown="md(this)" onmouseup="mu(this)" >Michael Compton, CSIRO</span> </p>
+        <p><span class="coloringspan" id="295" onmousedown="md(this)" onmouseup="mu(this)" >Uncertain Location based Range Aggregates in a multi-dimensional space</span> <br />
+        <span class="coloringspan" id="296" onmousedown="md(this)" onmouseup="mu(this)" >Ying Zhang, UNSW; Xuemin Lin, University of New South Wales - Australia; Yufei Tao, City Univ. of Hong Kong; Wenjie Zhang, UNSW</span> </p>
+        <p><span class="coloringspan" id="297" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Evaluation of Multiple Preference Queries</span> <br />
+        <span class="coloringspan" id="298" onmousedown="md(this)" onmouseup="mu(this)" >Leong Hou U; Nikos Mamoulis, University of Hong Kong; Kyriakos Mouratidis, Singapore Management Uni.</span> </p>
+        <p><span class="coloringspan" id="299" onmousedown="md(this)" onmouseup="mu(this)" >iBroker: An Intelligent Broker for Ontology Based Publish/Subscribe Systems</span> <br />
+        <span class="coloringspan" id="300" onmousedown="md(this)" onmouseup="mu(this)" >Myung-Jae Park, KAIST; Chin-Wan Chung, KAIST</span> </p>
+        <p><span class="coloringspan" id="301" onmousedown="md(this)" onmouseup="mu(this)" >Extracting Web Query Interfaces Based on Form Structures and Semantic Similarity</span> <br />
+        <span class="coloringspan" id="302" onmousedown="md(this)" onmouseup="mu(this)" >Jun Hong, Queen's University Belfast; Zhongtian He, Queen's University Belfast; David Bell, Queen's University Belfast</span> </p>
+        <p><span class="coloringspan" id="303" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Indices using Graph Partitioning in RDF Triple Stores</span> <br />
+        <span class="coloringspan" id="304" onmousedown="md(this)" onmouseup="mu(this)" >Ying Yan, SAP Research Center, China; Chen Wang, IBM CRL; Aoying Zhou, East China Normal university - China; Weining Qian, East China Normal University, China; Li Ma; Yue Pan, IBM CRL</span> </p>
+        <p><span class="coloringspan" id="305" onmousedown="md(this)" onmouseup="mu(this)" >Privacy-Preserving Singular Value Decomposition</span> <br />
+        <span class="coloringspan" id="306" onmousedown="md(this)" onmouseup="mu(this)" >Shuguo Han, Nanyang Technological U; Wee Keong Ng; Philip Yu</span> </p>
+        <p><span class="coloringspan" id="307" onmousedown="md(this)" onmouseup="mu(this)" >OPAQUE: Protecting Path Privacy in Directions Search</span> <br />
+        <span class="coloringspan" id="308" onmousedown="md(this)" onmouseup="mu(this)" >Chi Keung Lee, PSU; Wang-Chien Lee, Penn State Univ., USA; Hong Va Leong, HK Polytechnic University; Baihua Zheng, Singapore Management Univ.</span> </p>
+        <p><span class="coloringspan" id="309" onmousedown="md(this)" onmouseup="mu(this)" >Metric Functional Dependencies</span> <br />
+        <span class="coloringspan" id="310" onmousedown="md(this)" onmouseup="mu(this)" >Nick Koudas, U. of Toronto; Avishek Saha, University of Utah; Divesh Srivastava, AT&amp;T Research; Suresh Venkatasubramanian, University of Utah</span> </p>
+        <p><span class="coloringspan" id="311" onmousedown="md(this)" onmouseup="mu(this)" >On General Proximity Privacy</span> <br />
+        <span class="coloringspan" id="312" onmousedown="md(this)" onmouseup="mu(this)" >Ting Wang, Georgia Tech; Shicong Meng, Georgia Tech; Bhuvan Bamba, Georgia Tech.; Ling Liu, Georgia Tech</span> </p>
+        <p><span class="coloringspan" id="313" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Private Record Linkage</span> <br />
+        <span class="coloringspan" id="314" onmousedown="md(this)" onmouseup="mu(this)" >Mohamed Yakout, Purdue University; Mikhail Atallah, Purdue University; Ahmed Elmagarmid, Purdue University</span> </p>
+        <p><span class="coloringspan" id="315" onmousedown="md(this)" onmouseup="mu(this)" >BioNav: Effective Navigation on Query Results of Biomedical Databases</span> <br />
+        <span class="coloringspan" id="316" onmousedown="md(this)" onmouseup="mu(this)" >Abhijith Kashyap, SUNY Buffalo; Vagelis Hristidis, Florida International University; Michalis Petropoulos, SUNY Buffalo; Sotiria Tavoulari, Yale University</span> </p>
+        <p><span class="coloringspan" id="317" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Table Anonymization for Aggregate Query Answering</span> <br />
+        <span class="coloringspan" id="318" onmousedown="md(this)" onmouseup="mu(this)" >Cecilia Procopiuc, AT&amp;T Labs-Research; Divesh Srivastava, AT&amp;T Research</span> </p>
+        <p><span class="coloringspan" id="319" onmousedown="md(this)" onmouseup="mu(this)" >Max Regional Aggregate over Sensor Networks</span> <br />
+        <span class="coloringspan" id="320" onmousedown="md(this)" onmouseup="mu(this)" >Yongzhen Zhuang, HKUST; Lei Chen, HKUST</span> </p>
+        <p><span class="coloringspan" id="321" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Recommendation Diversification Using Explanations</span> <br />
+        <span class="coloringspan" id="322" onmousedown="md(this)" onmouseup="mu(this)" >Cong Yu, Yahoo; Laks Lakshmanan, U. of British Columbia; Sihem Amer-Yahia, Yahoo! Research</span> </p>
+        <p><span class="coloringspan" id="323" onmousedown="md(this)" onmouseup="mu(this)" >Tree Indexing on Flash Disks</span> <br />
+        <span class="coloringspan" id="324" onmousedown="md(this)" onmouseup="mu(this)" >Yinan Li, Hong Kong UST; Bingsheng He, Hong Kong UST; Qiong Luo, HongKong UST; Ke Yi, HongKong UST</span> </p>
+        <p><span class="coloringspan" id="325" onmousedown="md(this)" onmouseup="mu(this)" >Data Leakage Detection</span> <br />
+        <span class="coloringspan" id="326" onmousedown="md(this)" onmouseup="mu(this)" >Panagiotis Papadimitriou, Stanford University; Hector Garcia-Molina, Stanford University</span> </p>
+        <p><span class="coloringspan" id="327" onmousedown="md(this)" onmouseup="mu(this)" >Scalability for Virtual Worlds</span> <br />
+        <span class="coloringspan" id="328" onmousedown="md(this)" onmouseup="mu(this)" >Nitin Gupta, Cornell University; Alan Demers, Cornell; Johannes Gehrke, Cornell; Walker White, Cornell University; Philipp Unterbrunner, ETH Zurich</span> </p>
+        <p><span class="coloringspan" id="329" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Query Evaluation over Temporally Correlated Probabilistic Streams</span> <br />
+        <span class="coloringspan" id="330" onmousedown="md(this)" onmouseup="mu(this)" >Bhargav Kanagal, University of Maryland; Amol Deshpande, University of Maryland</span> </p>
+        <p><span class="coloringspan" id="331" onmousedown="md(this)" onmouseup="mu(this)" >Temporal Outlier Detection in Road Networks</span> <br />
+        <span class="coloringspan" id="332" onmousedown="md(this)" onmouseup="mu(this)" >Xiaolei Li, University of Illinois; Zhenhui Li, University of Illinois; Jiawei Han, University of Illinois Urbana-Champaign; Jae-Gil Lee, University of Illinois</span> </p>
+        <p><span class="coloringspan" id="333" onmousedown="md(this)" onmouseup="mu(this)" >CoTS: A Scalable Framework for Parallelizing Frequency Counting over Data Streams</span> <br />
+        <span class="coloringspan" id="334" onmousedown="md(this)" onmouseup="mu(this)" >Sudipto Das, UCSB; Shyam Antony, UCSB; Divyakant Agrawal, U. of California - Santa Barbara; Amr Abbadi, UC Santa Barbara</span> </p>
+        <p><span class="coloringspan" id="335" onmousedown="md(this)" onmouseup="mu(this)" >Concept Clustering for Evolving Data</span> <br />
+        <span class="coloringspan" id="336" onmousedown="md(this)" onmouseup="mu(this)" >Shixi Chen, Fudan University; Haixun Wang, IBM USA; Shuigeng Zhou, Fudan University</span> </p>
+        <p><span class="coloringspan" id="337" onmousedown="md(this)" onmouseup="mu(this)" >Dynamic approaches to in-network aggregation</span> <br />
+      <span class="coloringspan" id="338" onmousedown="md(this)" onmouseup="mu(this)" >Oliver Kennedy, Cornell University; Christopher Koch, Cornell U.; Alan Demers, Cornell</span> </p>
+        <p> <span class="coloringspan" id="339" onmousedown="md(this)" onmouseup="mu(this)" >Chameleon: Context Awareness inside DBMSs</span> <br />
+        <span class="coloringspan" id="340" onmousedown="md(this)" onmouseup="mu(this)" >Hicham Elmongui, Purdue University; Walid Aref, Purdue University; Mohamed Mokbel, University of Minnesota</span></p>
+        <p><strong><span class="coloringspan" id="341" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Industrial Papers</span></strong></p>
+        <p><strong><span class="coloringspan" id="342" onmousedown="md(this)" onmouseup="mu(this)" >Long Papers</span></strong> </p>
+        <p><span class="coloringspan" id="343" onmousedown="md(this)" onmouseup="mu(this)" >Updates in the AquaLogic Data Services Platform</span><br />
+        <span class="coloringspan" id="344" onmousedown="md(this)" onmouseup="mu(this)" >Michael Blow, BEA; Vinayak Borkar, Yahoo; Michael Carey, BEA; Christopher Hillery, BEA; Alexander Kotopoulis, BEA; Dmitry Lychagin, BEA; Radu Preotiuc-Pietro, BEA; Panagiotis Reveliotis, BEA; Joshua Spiegel, BEA; Till Westmann</span></p>
+        <p><span class="coloringspan" id="345" onmousedown="md(this)" onmouseup="mu(this)" >A Decade of XML Data Management : An Industrial Experience Report from Oracle</span> <br />
+        <span class="coloringspan" id="346" onmousedown="md(this)" onmouseup="mu(this)" >Zhen Hua Liu, Oracle; Ravi Murthy, Oracle</span></p>
+        <p><span class="coloringspan" id="347" onmousedown="md(this)" onmouseup="mu(this)" >Design and Evaluation of the iMed Intelligent Medical Search Engine</span> <br />
+        <span class="coloringspan" id="348" onmousedown="md(this)" onmouseup="mu(this)" >Gang Luo, Univ. of Wisconsin, Madison</span></p>
+        <p><span class="coloringspan" id="349" onmousedown="md(this)" onmouseup="mu(this)" >Finding Actionable Knowledge via Automated Comparison</span> <br />
+          <span class="coloringspan" id="350" onmousedown="md(this)" onmouseup="mu(this)" >Lei 
+        Zhang, Univ. Illinois at Chicago; Bing Liu, Univ. Illinois at Chicago; Jeffrey Benkler, Motorola; Chi Zhou, Motorola</span></p>
+        <p><span class="coloringspan" id="351" onmousedown="md(this)" onmouseup="mu(this)" >Web Query Recommendation via Sequential Query Prediction</span> <br />
+        <span class="coloringspan" id="352" onmousedown="md(this)" onmouseup="mu(this)" >Qi He, NTU Singapore; Daxin Jiang, Microsoft; Zhen Liao, Nankai University; Kuiyu Chang, NTU Singapore; Steven Hoi, NTU Singapore; Ee-Peng Lim, NTU Singapore; Hang Li, Microsoft</span></p>
+        <p><span class="coloringspan" id="353" onmousedown="md(this)" onmouseup="mu(this)" >Business Intelligence from Voice of Customer</span> <br />
+        <span class="coloringspan" id="354" onmousedown="md(this)" onmouseup="mu(this)" >L. Venkata Subramaniam, IBM; Tanveer Faruquie, IBM; Shajith Ikbal, IBM; Shantanu Godbole, IBM; Mukesh Mohania, IBM</span></p>
+        <p><span class="coloringspan" id="355" onmousedown="md(this)" onmouseup="mu(this)" >Oracle Streams: a High Performance Implementation for Near Real Time Asynchronous Replication</span> <br />
+        <span class="coloringspan" id="356" onmousedown="md(this)" onmouseup="mu(this)" >Lik Wong, Oracle; Nimar Arora, Oracle; Thuvan Hoang, Oracle; Lei Gao, Oracle; Jingwei Wu, Oracle</span></p>
+        <p><span class="coloringspan" id="357" onmousedown="md(this)" onmouseup="mu(this)" >A Static Analysis Framework for Database Applications</span> <br />
+        <span class="coloringspan" id="358" onmousedown="md(this)" onmouseup="mu(this)" >Arjun Dasgupta,  University of Texas Arlington; Vivek Narasayya, Microsoft; Manoj Syamala, Microsoft</span></p>
+        <p><span class="coloringspan" id="359" onmousedown="md(this)" onmouseup="mu(this)" >Query Rewrites with Views for XML in DB2</span><br />
+        <span class="coloringspan" id="360" onmousedown="md(this)" onmouseup="mu(this)" >Parke Godfrey, York University; Jarek Gryz, York University; Andrzej Hoppe, York University; Wenbin Ma, IBM; Calisto Zuzarte, IBM</span></p>
+        <p><strong><span class="coloringspan" id="361" onmousedown="md(this)" onmouseup="mu(this)" >Short papers</span></strong></p>
+        <p><span class="coloringspan" id="362" onmousedown="md(this)" onmouseup="mu(this)" >Scale-up Strategies for Processing High-Rate Data Streams in System 
+        S</span> <br />
+        <span class="coloringspan" id="363" onmousedown="md(this)" onmouseup="mu(this)" >Henrique Andrade, IBM; Bugra Gedik, IBM; Kun-Lung Wu, IBM; Philip Yu, UIC</span></p>
+        <p><span class="coloringspan" id="364" onmousedown="md(this)" onmouseup="mu(this)" >An Incremental Knowledge Acquisition Method for Improving Duplicate Invoices Detection</span><br />
+        <span class="coloringspan" id="365" onmousedown="md(this)" onmouseup="mu(this)" >Van Ho, Univ. of New South Wales; Paul Compton, Univ. of New South Wales; Boualem Benatallah, Univ. of New South Wales; Julien Vayssiere, SAP; Lucio Menzel, SAP; Hartmut Vogler, SAP</span></p>
+        <p><span class="coloringspan" id="366" onmousedown="md(this)" onmouseup="mu(this)" >rFEED: A Mixed Workload Scheduler for Enterprise Data Warehouses</span> <br />
+        <span class="coloringspan" id="367" onmousedown="md(this)" onmouseup="mu(this)" >Abhay Mehta, HP; Chetan Gupta, HP; Song Wang, HP; Umeshwar Dayal, HP</span></p>
+        <p><strong><span class="coloringspan" id="368" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Demos</span> </strong></p>
+        <p><span class="coloringspan" id="369" onmousedown="md(this)" onmouseup="mu(this)" >ACStream: Enforcing Access Control Over Data Streams</span>	 <br />
+        <span class="coloringspan" id="370" onmousedown="md(this)" onmouseup="mu(this)" >CAO Jianneng, SoC, NUS</span> <br />
+        <span class="coloringspan" id="371" onmousedown="md(this)" onmouseup="mu(this)" >Barbara Carminati, University of Insubria, Varese, Italy</span> <br />
+        <span class="coloringspan" id="372" onmousedown="md(this)" onmouseup="mu(this)" >Elena Ferrari, University of Insubria, Varese, Italy</span> <br />
+        <span class="coloringspan" id="373" onmousedown="md(this)" onmouseup="mu(this)" >Kien-Lee Tan, National University of Singapore</span> </p>
+        <p><span class="coloringspan" id="374" onmousedown="md(this)" onmouseup="mu(this)" >An Internet-Scale Service for Publishing and Locating XML Documents</span>	 <br />
+        <span class="coloringspan" id="375" onmousedown="md(this)" onmouseup="mu(this)" >Praveen Rao, University of Missouri-KC</span> <br />
+        <span class="coloringspan" id="376" onmousedown="md(this)" onmouseup="mu(this)" >Bongki Moon, University of Arizona</span> <br />
+        </p>
+        <p> <span class="coloringspan" id="377" onmousedown="md(this)" onmouseup="mu(this)" >Automated Diagnosis of System Failures with Fa</span>	 <br />
+        <span class="coloringspan" id="378" onmousedown="md(this)" onmouseup="mu(this)" >Songyun Duan, Duke University</span> <br />
+        <span class="coloringspan" id="379" onmousedown="md(this)" onmouseup="mu(this)" >Shivnath Babu, Duke University</span> <br />
+        <br />
+        <span class="coloringspan" id="380" onmousedown="md(this)" onmouseup="mu(this)" >DynaCet: Building Dynamic Faceted Search Systems over Databases</span>	 <br />
+        <span class="coloringspan" id="381" onmousedown="md(this)" onmouseup="mu(this)" >Senjuti Basu Roy, UTA Haidong Wang,</span> <br />
+        <span class="coloringspan" id="382" onmousedown="md(this)" onmouseup="mu(this)" >Gautam Das, University of Texas at Arlington</span> <br />
+        <span class="coloringspan" id="383" onmousedown="md(this)" onmouseup="mu(this)" >Ullas Nambiar, IBM India Research Lab</span><br />
+        <span class="coloringspan" id="384" onmousedown="md(this)" onmouseup="mu(this)" >Mukesh Mohania, IBM India Research Lab</span> <br />
+        </p>
+        <p> <span class="coloringspan" id="385" onmousedown="md(this)" onmouseup="mu(this)" >Efficient and Robust Database Support for Data-Intensive Applications in Dynamic Environments</span> <br />
+        <span class="coloringspan" id="386" onmousedown="md(this)" onmouseup="mu(this)" >Jon Olav Hauglid, NTNU</span> <br />
+        <span class="coloringspan" id="387" onmousedown="md(this)" onmouseup="mu(this)" >Kjetil Norvag, NTNU</span> <br />
+        <span class="coloringspan" id="388" onmousedown="md(this)" onmouseup="mu(this)" >Norvald H. Ryeng, NTNU</span> <br />
+        </p>
+        <p> <span class="coloringspan" id="389" onmousedown="md(this)" onmouseup="mu(this)" >Environmental Monitoring 2.0</span>	 <br />
+        <span class="coloringspan" id="390" onmousedown="md(this)" onmouseup="mu(this)" >Sebastian Michel, EPFL</span> <br />
+        <span class="coloringspan" id="391" onmousedown="md(this)" onmouseup="mu(this)" >Ali Salehi, Microsoft Research</span> <br />
+        <span class="coloringspan" id="392" onmousedown="md(this)" onmouseup="mu(this)" >Liqian Luo, Microsoft Research</span><br />
+        <span class="coloringspan" id="393" onmousedown="md(this)" onmouseup="mu(this)" >Nicholas Dawes, Swiss Federal Institute for Snow and Avalanche Research (SLF)</span> <br />
+        <span class="coloringspan" id="394" onmousedown="md(this)" onmouseup="mu(this)" >Karl Aberer, EPFL</span> <br />
+        <span class="coloringspan" id="395" onmousedown="md(this)" onmouseup="mu(this)" >Guillermo Barrenetxea, EPFL</span> <br />
+        <span class="coloringspan" id="396" onmousedown="md(this)" onmouseup="mu(this)" >Mathias Bavay, Swiss Federal Institute for Snow and Avalanche Research (SLF)</span> <br />
+        <span class="coloringspan" id="397" onmousedown="md(this)" onmouseup="mu(this)" >Aman Kansal, Microsoft Research</span> <br />
+        <span class="coloringspan" id="398" onmousedown="md(this)" onmouseup="mu(this)" >Ashwin Kumar, EPFL</span> <br />
+        <span class="coloringspan" id="399" onmousedown="md(this)" onmouseup="mu(this)" >Suman Nath, Microsoft Research</span> <br />
+        <span class="coloringspan" id="400" onmousedown="md(this)" onmouseup="mu(this)" >Marc Parlange, EPFL</span> <br />
+        <span class="coloringspan" id="401" onmousedown="md(this)" onmouseup="mu(this)" >Stewart Tansley, Microsoft Research</span> <br />
+        <span class="coloringspan" id="402" onmousedown="md(this)" onmouseup="mu(this)" >Catharine Van Ingen, Microsoft Research</span> <br />
+        <span class="coloringspan" id="403" onmousedown="md(this)" onmouseup="mu(this)" >Feng Zhao, Microsoft Research</span> <br />
+        <span class="coloringspan" id="404" onmousedown="md(this)" onmouseup="mu(this)" >Yongluan Zhou, EPFL</span> </p>
+        <p> <span class="coloringspan" id="405" onmousedown="md(this)" onmouseup="mu(this)" >Flexible Recommendations for Course Planning</span>	 <br />
+        <span class="coloringspan" id="406" onmousedown="md(this)" onmouseup="mu(this)" >Georgia Koutrika, Stanford University</span> <br />
+        <span class="coloringspan" id="407" onmousedown="md(this)" onmouseup="mu(this)" >Benjamin Bercovitz, Stanford University</span> <br />
+        <span class="coloringspan" id="408" onmousedown="md(this)" onmouseup="mu(this)" >Robert Ikeda, Stanford University</span> <br />
+        <span class="coloringspan" id="409" onmousedown="md(this)" onmouseup="mu(this)" >Filip Kaliszan, Stanford University</span> <br />
+        <span class="coloringspan" id="410" onmousedown="md(this)" onmouseup="mu(this)" >Henry Liou, Stanford University</span> <br />
+        <span class="coloringspan" id="411" onmousedown="md(this)" onmouseup="mu(this)" >Hector Garcia-Molina, Stanford University</span></p>
+        <p><span class="coloringspan" id="412" onmousedown="md(this)" onmouseup="mu(this)" >FRISK: Keyword Query Cleaning and Processing in Action</span><br />
+        <span class="coloringspan" id="413" onmousedown="md(this)" onmouseup="mu(this)" >Ken Pu, UOIT</span> <br />
+        <span class="coloringspan" id="414" onmousedown="md(this)" onmouseup="mu(this)" >Xiaohui Yu, York University</span></p>
+        <p><span class="coloringspan" id="415" onmousedown="md(this)" onmouseup="mu(this)" >Galaxy: Encouraging Data Sharing Among Sources with Schema Variants</span>	 <br />
+        <span class="coloringspan" id="416" onmousedown="md(this)" onmouseup="mu(this)" >Peter Mork, MITRE</span> <br />
+        <span class="coloringspan" id="417" onmousedown="md(this)" onmouseup="mu(this)" >Len Seligman, MITRE</span> <br />
+        <span class="coloringspan" id="418" onmousedown="md(this)" onmouseup="mu(this)" >Arnon Rosenthal, MITRE</span>  <br />
+        <span class="coloringspan" id="419" onmousedown="md(this)" onmouseup="mu(this)" >Michael Morse, MITRE</span> <br />
+        <span class="coloringspan" id="420" onmousedown="md(this)" onmouseup="mu(this)" >Chris Wolf, MITRE</span> <br />
+        <span class="coloringspan" id="421" onmousedown="md(this)" onmouseup="mu(this)" >Jeff Hoyt, MITRE</span> <br />
+        <span class="coloringspan" id="422" onmousedown="md(this)" onmouseup="mu(this)" >Ken Smith, MITRE</span> </p>
+        <p> <span class="coloringspan" id="423" onmousedown="md(this)" onmouseup="mu(this)" >GuruMine: a Pattern Mining System for Discovering Leaders and Tribes</span>	 <br />
+        <span class="coloringspan" id="424" onmousedown="md(this)" onmouseup="mu(this)" >Amit Goyal, UBC</span> <br />
+        <span class="coloringspan" id="425" onmousedown="md(this)" onmouseup="mu(this)" >Francesco Bonchi, Yahoo!Research</span> <br />
+        <span class="coloringspan" id="426" onmousedown="md(this)" onmouseup="mu(this)" >Laks Lakshmanan, U. of British Columbia</span> <br />
+        <span class="coloringspan" id="427" onmousedown="md(this)" onmouseup="mu(this)" >Byung-Won On, U. British Columbia</span> </p>
+        <p><span class="coloringspan" id="428" onmousedown="md(this)" onmouseup="mu(this)" >Hippocratic PostgreSQL</span><br />
+        <span class="coloringspan" id="429" onmousedown="md(this)" onmouseup="mu(this)" >Jalaja Padma, Purdue University</span> <br />
+        <span class="coloringspan" id="430" onmousedown="md(this)" onmouseup="mu(this)" >Yasin Silva, Purdue University</span> <br />
+        <span class="coloringspan" id="431" onmousedown="md(this)" onmouseup="mu(this)" >Muhammad Arshad, Purdue University</span> <br />
+        <span class="coloringspan" id="432" onmousedown="md(this)" onmouseup="mu(this)" >Walid Aref, Purdue University</span></p>
+        <p><span class="coloringspan" id="433" onmousedown="md(this)" onmouseup="mu(this)" >I3DC: Interactive Three-dimensional Cubes</span>	 <br />
+        <span class="coloringspan" id="434" onmousedown="md(this)" onmouseup="mu(this)" >Ke Yang, HKUST</span> <br />
+        <span class="coloringspan" id="435" onmousedown="md(this)" onmouseup="mu(this)" >Yinan Li, HKUST</span> <br />
+        <span class="coloringspan" id="436" onmousedown="md(this)" onmouseup="mu(this)" >Qiong Luo, HKUST</span> <br />
+        <span class="coloringspan" id="437" onmousedown="md(this)" onmouseup="mu(this)" >Pedro Sander, HKUST</span> <br />
+        <span class="coloringspan" id="438" onmousedown="md(this)" onmouseup="mu(this)" >Jiaoying Shi, Zhejiang University</span> </p>
+        <p><span class="coloringspan" id="439" onmousedown="md(this)" onmouseup="mu(this)" >KSpot: Effectively Monitoring the K Most Important Events in a Wireless Sensor Network</span> <br />
+        <span class="coloringspan" id="440" onmousedown="md(this)" onmouseup="mu(this)" >Panayiotis Andreou, University of Cyprus</span> <br />
+        <span class="coloringspan" id="441" onmousedown="md(this)" onmouseup="mu(this)" >Demetrios Zeinalipour-Yazti, Open University of Cyprus</span> <br />
+        <span class="coloringspan" id="442" onmousedown="md(this)" onmouseup="mu(this)" >Martha Vassiliadou, University of Cyprus</span> <br />
+        <span class="coloringspan" id="443" onmousedown="md(this)" onmouseup="mu(this)" >Panos Chrysanthis, University of Pittsburgh</span> <br />
+        <span class="coloringspan" id="444" onmousedown="md(this)" onmouseup="mu(this)" >George Samaras, University of Cyprus</span> </p>
+        <p><span class="coloringspan" id="445" onmousedown="md(this)" onmouseup="mu(this)" >MatchUp: Autocompletion for Mashups</span>	 <br />
+        <span class="coloringspan" id="446" onmousedown="md(this)" onmouseup="mu(this)" >Ohad Greenshpan, Tel-Aviv University</span> <br />
+        <span class="coloringspan" id="447" onmousedown="md(this)" onmouseup="mu(this)" >Tova Milo, Tel Aviv University</span> <br />
+        <span class="coloringspan" id="448" onmousedown="md(this)" onmouseup="mu(this)" >Alkis Polyzotis, UC Santa Cruz</span> <br />
+        <span class="coloringspan" id="449" onmousedown="md(this)" onmouseup="mu(this)" >Serge Abiteboul, INRIA</span></p>
+        <p><span class="coloringspan" id="450" onmousedown="md(this)" onmouseup="mu(this)" >Online Near-Duplicate Video Clip Detection and Retrieval: An Accurate and Fast System</span> <br />
+        <span class="coloringspan" id="451" onmousedown="md(this)" onmouseup="mu(this)" >Zi Huang, University of Queenslabd</span> <br />
+        <span class="coloringspan" id="452" onmousedown="md(this)" onmouseup="mu(this)" >Liping Wang, University of Queenslabd</span> <br />
+        <span class="coloringspan" id="453" onmousedown="md(this)" onmouseup="mu(this)" >Heng Shen, University of Queensland</span> <br />
+        <span class="coloringspan" id="454" onmousedown="md(this)" onmouseup="mu(this)" >Jie Shao, University of Queenslabd</span> <br />
+        <span class="coloringspan" id="455" onmousedown="md(this)" onmouseup="mu(this)" >Xiaofang  Zhou,  University of Queensland</span> </p>
+        <p><span class="coloringspan" id="456" onmousedown="md(this)" onmouseup="mu(this)" >Peer coordination through distributed triggers</span><br />
+        <span class="coloringspan" id="457" onmousedown="md(this)" onmouseup="mu(this)" >Verena Kantere, EPFL</span> <br />
+        <span class="coloringspan" id="458" onmousedown="md(this)" onmouseup="mu(this)" >Elli Androulaki, Columbia University</span> <br />
+        <span class="coloringspan" id="459" onmousedown="md(this)" onmouseup="mu(this)" >Iluju Kiringa, University of Ottawa</span> <br />
+        <span class="coloringspan" id="460" onmousedown="md(this)" onmouseup="mu(this)" >Timos Sellis, nstitute for the Management of Information Systems</span> <br />
+        <span class="coloringspan" id="461" onmousedown="md(this)" onmouseup="mu(this)" >John  Mylopoulos,  U. of Toronto</span></p>
+        <p><span class="coloringspan" id="462" onmousedown="md(this)" onmouseup="mu(this)" >PLUS: A Message-Efficient Prototype for Location-Based Applications</span>	 <br />
+        <span class="coloringspan" id="463" onmousedown="md(this)" onmouseup="mu(this)" >Yuling Hsueh, Uni. of Southern California</span> <br />
+        <span class="coloringspan" id="464" onmousedown="md(this)" onmouseup="mu(this)" >Roger  Zimmermann, National Uni. of Singapore</span> <br />
+        <span class="coloringspan" id="465" onmousedown="md(this)" onmouseup="mu(this)" >Wei-Shinn  Ku, Auburn University</span> <br />
+        <span class="coloringspan" id="466" onmousedown="md(this)" onmouseup="mu(this)" >Haojun  Wang, Uni. of Southern California</span> <br />
+        <span class="coloringspan" id="467" onmousedown="md(this)" onmouseup="mu(this)" >Chung-Dau  Wang, Uni. of Southern California</span> </p>
+        <p><span class="coloringspan" id="468" onmousedown="md(this)" onmouseup="mu(this)" >QuickStart: an Upfront Client-based Design Advisor for Parallel Data Warehouses</span>	 <br />
+        <span class="coloringspan" id="469" onmousedown="md(this)" onmouseup="mu(this)" >Malu Castellanos, Hewlett-Packard</span> <br />
+        <span class="coloringspan" id="470" onmousedown="md(this)" onmouseup="mu(this)" >Ivo Jimenez, Hewlett-Packard</span> <br />
+        <span class="coloringspan" id="471" onmousedown="md(this)" onmouseup="mu(this)" >Neal Coddington, Hewlett-Packard</span> <br />
+        <span class="coloringspan" id="472" onmousedown="md(this)" onmouseup="mu(this)" >Hans Zeller, Hewlett-Packard</span> <br />
+        <span class="coloringspan" id="473" onmousedown="md(this)" onmouseup="mu(this)" >Steven Whang, Stanford University</span> <br />
+        <span class="coloringspan" id="474" onmousedown="md(this)" onmouseup="mu(this)" >Umeshwar Dayal, Hewlett Packard</span></p>
+        <p><span class="coloringspan" id="475" onmousedown="md(this)" onmouseup="mu(this)" >SbQA: A Self-Adaptable Query Allocation Process</span>	 <br />
+        <span class="coloringspan" id="476" onmousedown="md(this)" onmouseup="mu(this)" >Jorge-Arnulfo Quian&eacute;-Ruiz, INRIA and LINA univ. de nantes</span> <br />
+        <span class="coloringspan" id="477" onmousedown="md(this)" onmouseup="mu(this)" >Philippe Lamarre, LINA - Universit&eacute; de Nantes</span> <br />
+        <span class="coloringspan" id="478" onmousedown="md(this)" onmouseup="mu(this)" >Patrick Valduriez, INRIA and LINA univ. de nantes</span></p>
+        <p><span class="coloringspan" id="479" onmousedown="md(this)" onmouseup="mu(this)" >Shaman: A Self-Healing Database System</span> <br />
+          <span class="coloringspan" id="480" onmousedown="md(this)" onmouseup="mu(this)" >Songyun Duan, Duke University</span> <br />
+          <span class="coloringspan" id="481" onmousedown="md(this)" onmouseup="mu(this)" >Peter Franklin, Duke University</span> <br />
+          <span class="coloringspan" id="482" onmousedown="md(this)" onmouseup="mu(this)" >Jack Li, Duke University</span> <br />
+          <span class="coloringspan" id="483" onmousedown="md(this)" onmouseup="mu(this)" >Dongdong Zhao, Duke University</span><br />
+          <span class="coloringspan" id="484" onmousedown="md(this)" onmouseup="mu(this)" >Shivnath Babu, Duke University</span></p>
+        <p><span class="coloringspan" id="485" onmousedown="md(this)" onmouseup="mu(this)" >SmallBlue: Social Network Analysis for Expertise Search and Collective Intelligence</span> <br />
+          <span class="coloringspan" id="486" onmousedown="md(this)" onmouseup="mu(this)" >Ching-Yung Lin, IBM</span> <br />
+          <span class="coloringspan" id="487" onmousedown="md(this)" onmouseup="mu(this)" >Nan Cao, IBM Research</span> <br />
+          <span class="coloringspan" id="488" onmousedown="md(this)" onmouseup="mu(this)" >Shi Xia Liu, IBM Research</span> <br />
+          <span class="coloringspan" id="489" onmousedown="md(this)" onmouseup="mu(this)" >Spiros Papadimitriou, IBM T.J. Watson, USA</span> <br />
+          <span class="coloringspan" id="490" onmousedown="md(this)" onmouseup="mu(this)" >Jimeng Sun, IBM TJ Watson</span> <br />
+          <span class="coloringspan" id="491" onmousedown="md(this)" onmouseup="mu(this)" >Xifeng Yan, IBM T. J. Watson Research Center</span> </p>
+        <p><span class="coloringspan" id="492" onmousedown="md(this)" onmouseup="mu(this)" >The PRISM Workwench: Database Schema Evolution Without Tears</span>	 <br />
+        <span class="coloringspan" id="493" onmousedown="md(this)" onmouseup="mu(this)" >Carlo Curino, Politecnio di Milano</span> <br />
+        <span class="coloringspan" id="494" onmousedown="md(this)" onmouseup="mu(this)" >Hyun Moon, UCLA</span> <br />
+        <span class="coloringspan" id="495" onmousedown="md(this)" onmouseup="mu(this)" >MyungWon  Ham, UCLA</span> <br />
+        <span class="coloringspan" id="496" onmousedown="md(this)" onmouseup="mu(this)" >Carlo Zaniolo, UCLA</span></p>
+        <p><span class="coloringspan" id="497" onmousedown="md(this)" onmouseup="mu(this)" >WEST: Modern Technologies for Web People Search</span> <br />
+        <span class="coloringspan" id="498" onmousedown="md(this)" onmouseup="mu(this)" >Dmitri Kalashnikov, UCI</span> <br />
+        <span class="coloringspan" id="499" onmousedown="md(this)" onmouseup="mu(this)" >Zhaoqi Chen, Microsoft Corp.</span> <br />
+        <span class="coloringspan" id="500" onmousedown="md(this)" onmouseup="mu(this)" >Rabia Nuray-Turan, UCI</span> <br />
+        <span class="coloringspan" id="501" onmousedown="md(this)" onmouseup="mu(this)" >Sharad Mehrotra, UCI</span> <br />
+        <span class="coloringspan" id="502" onmousedown="md(this)" onmouseup="mu(this)" >Zheng Zhang, UCI</span></p>
+        <p><span class="coloringspan" id="503" onmousedown="md(this)" onmouseup="mu(this)" >WISE: a Workflow Information Search Engine</span>	 <br />
+        <span class="coloringspan" id="504" onmousedown="md(this)" onmouseup="mu(this)" >Qihong Shao, Arizona State University</span> <br />
+        <span class="coloringspan" id="505" onmousedown="md(this)" onmouseup="mu(this)" >Peng Sun, ASU</span> <br />
+        <span class="coloringspan" id="506" onmousedown="md(this)" onmouseup="mu(this)" >Yi Chen, Arizona State University</span> </p>
+        <p> <span class="coloringspan" id="507" onmousedown="md(this)" onmouseup="mu(this)" >XBLEND: Visual XML Query Formulation Meets Query Processing</span>	 <br />
+        <span class="coloringspan" id="508" onmousedown="md(this)" onmouseup="mu(this)" >Zhou Yong, Nanyang Technological Univ</span> <br />
+        <span class="coloringspan" id="509" onmousedown="md(this)" onmouseup="mu(this)" >Sourav S Bhowmick, Nanyang Technological Univ</span> <br />
+        <span class="coloringspan" id="510" onmousedown="md(this)" onmouseup="mu(this)" >Erwin Leonardi, Nanyang Technological Univ</span> <br />
+        <span class="coloringspan" id="511" onmousedown="md(this)" onmouseup="mu(this)" >Klarinda Widjanarko, Nanyang Technological Univ</span></p>
+        <p><span class="coloringspan" id="512" onmousedown="md(this)" onmouseup="mu(this)" >V*-kNN: an Efficient Algorithm for Moving k Nearest Neighbor Queries</span>	 <br />
+        <span class="coloringspan" id="513" onmousedown="md(this)" onmouseup="mu(this)" >Sarana Nutanong, The University of Melbourne</span> <br />
+        <span class="coloringspan" id="514" onmousedown="md(this)" onmouseup="mu(this)" >Rui Zhang, University of Melbourne</span> <br />
+        <span class="coloringspan" id="515" onmousedown="md(this)" onmouseup="mu(this)" >Egemen Tanin, the University of Melbourne</span> <br />
+        <span class="coloringspan" id="516" onmousedown="md(this)" onmouseup="mu(this)" >Lars Kulik, the University of Melbourne</span></p>
+<!-- InstanceEndEditable --></div>
+    </div>
+    <div style="clear: both;height:1px;overflow:hidden;margin-top:-1px;"></div>
+</div>
+<div id="footer">
+    <div id="copyright"><span class="coloringspan" id="517" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>

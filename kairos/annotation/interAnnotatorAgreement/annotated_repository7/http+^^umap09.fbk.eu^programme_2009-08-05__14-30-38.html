@@ -1,0 +1,907 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session1/10/annotation/annotated_repository/http+^^umap09.fbk.eu^programme_2009-08-05__14-30-38.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session1/10/annotation/annotated_repository/http+^^umap09.fbk.eu^programme_2009-08-05__14-30-38.yaml created on Thu Aug 13 13:51:30 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+ <title>UMAP2009 | User Modeling, Adaptation and Personalization</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="shortcut icon" href="/sites/umap09.fbk.eu/favicon.ico" type="image/x-icon" />
+<style type="text/css" media="all">@import "/modules/node/node.css";</style>
+<style type="text/css" media="all">@import "/modules/system/defaults.css";</style>
+<style type="text/css" media="all">@import "/modules/system/system.css";</style>
+<style type="text/css" media="all">@import "/modules/user/user.css";</style>
+<style type="text/css" media="all">@import "/sites/all/modules/cck/content.css";</style>
+<style type="text/css" media="all">@import "/sites/all/modules/cck/fieldgroup.css";</style>
+<style type="text/css" media="all">@import "/sites/all/themes/fbk_conference/style.css";</style>
+<style type="text/css" media="all">@import "/sites/all/themes/fbk_conference/common.css";</style>
+<style type="text/css" media="all">@import "/sites/umap09.fbk.eu/style.css";</style>
+</head><body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+ <div id="header">  <span onclick="return false" style="text-decoration:underline; color:blue" href="/" title="Home"><img onmousedown="imd(this)" src="/sites/umap09.fbk.eu/files/header.png" alt="Home" /></span></div>
+ <div class="navlinks"> </div>
+ <table id="content">
+  <tr>
+   <td id="sidebar-left"><div class="block block-menu" id="block-menu-117">
+ <h2 class="title"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Overview</span></h2>
+ <div class="content">
+<ul class="menu">
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/reasons-not-to-attend"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Reasons Not to Attend</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/umap-topics"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >UMAP Topics</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/dates"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/past_conf"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Past Conferences and Proceedings</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/whats-new"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >What&#039;s New?</span></span></li>
+
+</ul>
+</div>
+</div>
+<div class="block block-menu" id="block-menu-104">
+ <h2 class="title"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Attending</span></h2>
+ <div class="content">
+<ul class="menu">
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/Registration+"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span> </span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/rooms" title="Conference rooms and facilities"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Conference Center</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://umap09.fbk.eu/accomodation+"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/travel_info"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Travel Information</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/free_time"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Free Time</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/wifi"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >WiFi access</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/hints"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Hints for Attendees</span></span></li>
+
+</ul>
+</div>
+</div>
+<div class="block block-menu" id="block-menu-123">
+ <h2 class="title"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></h2>
+ <div class="content">
+<ul class="menu">
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/programme" class="active"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/planner"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Schedule Planner</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/instructions"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Instructions for presenters</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/mp3"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Abstracts as MP3 Files</span></span></li>
+<li class="collapsed"><span onclick="return false" style="text-decoration:underline; color:blue" href="/invited-talks"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Invited Speakers</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/industrypanel"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Industry Panel</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/workshops"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/tutorials"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/demos"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Demos</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/DC1"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Doctoral Consortium</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/events"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Social Events</span></span></li>
+
+</ul>
+</div>
+</div>
+<div class="block block-menu" id="block-menu-105">
+ <h2 class="title"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Call for Submissions</span></h2>
+ <div class="content">
+<ul class="menu">
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/reasons-to-submit"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Reasons to Submit</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/submission"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Submission Categories</span></span></li>
+<li class="collapsed"><span onclick="return false" style="text-decoration:underline; color:blue" href="/closed-calls"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Closed Calls</span></span></li>
+
+</ul>
+</div>
+</div>
+<div class="block block-menu" id="block-menu-55">
+ <h2 class="title"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Organisation</span></h2>
+ <div class="content">
+<ul class="menu">
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conference-committee"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Conference Committee</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/program-committee"> <span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/industry-track-pc"> <span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Industry Track Program Committee</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/advertising"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Advertising Material</span></span></li>
+
+</ul>
+</div>
+</div>
+<div class="block block-block" id="block-block-5">
+ <h2 class="title"></h2>
+ <div class="content"><script type="text/javascript">
+var gaJsHost = (("https:" == document.location.protocol) ? "https://ssl." : "http://www.");
+document.write(unescape("%3Cscript src='" + gaJsHost + "google-analytics.com/ga.js' type='text/javascript'%3E%3C/script%3E"));
+</script><script type="text/javascript">
+var pageTracker = _gat._getTracker("UA-6008258-1");
+pageTracker._trackPageview();
+</script></div>
+</div>
+</td>
+   <td id="main">
+
+<!-- begin content -->
+<div class="node">
+ <div class="content">
+<h1><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >  Final Program</span> </h1>
+<div style="text-align: center">
+<div align="left">
+</div>
+<table border="0" width="718" height="39">
+<tbody>
+<tr>
+<td>
+<div align="left">
+			<span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >You can click on the name of a session (e.g., &quot;Session 1&quot;) to go to a page with more information about that session, including abstracts of the presentations.</span>
+			</div>
+<div align="left">
+			</div>
+</td>
+<td><span onclick="return false" style="text-decoration:underline; color:blue" href="/sites/umap09.fbk.eu/files/UMAP_Program.pdf" target="_blank"><br />
+			</span></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div style="text-align: center">
+</div>
+<div align="left">
+</div>
+<table border="0" width="718" height="50">
+<tbody>
+<tr>
+<td colspan="2" align="left">
+<h5><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >  Monday, 22 June</span> </h5>
+</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >9:00 - 18:00</span>
+			</td>
+<td align="left"><span onclick="return false" style="text-decoration:underline; color:blue" href="/workshops" target="_blank"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span> <span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >and</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/tutorials"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial</span></span> <span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >                                                               </span> </td>
+</tr>
+</tbody>
+</table>
+<table border="0" width="720" height="437">
+<tbody>
+<tr>
+<td colspan="2" align="left">
+<h5><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >  Tuesday, 23 June</span> </h5>
+</td>
+</tr>
+<tr>
+<td width="100"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >9:00-9:30</span> 
+			</td>
+<td><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Welcome</span> 
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >9:30-10:30</span></td>
+<td>
+			<span onclick="return false" style="text-decoration:underline; color:blue" href="/vinciarelli"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Keynote: Alessandro Vinciarelli</span></span>
+			</td>
+</tr>
+<tr>
+<td>
+<h6><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >10:30-11:00</span></h6>
+</td>
+<td>
+<h6><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >  Coffee Break</span> </h6>
+</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >11:00-13:00</span> </td>
+<td>
+			<span onclick="return false" style="text-decoration:underline; color:blue" href="/node/155"><b><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Session1</span></b></span><b> <span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >  </span> </b><i><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Silvia Gabrielli</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Modeling User Affect from Causes and Effects</span></b><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Cristina Conati, Heather Maclaren</span> </i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Evaluating web based instructional models using data mining</span></b><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Enrique Garcìa Salcines, Cristobal Romero Morales, Sebastiìn Ventura Soto</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Sensors Model Student Self Concept in the Classroom</span></b><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >David G. Cooper, Ivon Arroyo, Beverly Park Woolf, Winslow Burleson, Kasia Muldner, Robert Christopherson</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Use and Trust of Simple Independent Open Learner Models to Support Learning Within and Across Courses</span></b><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Susan Bull, Peter Gardner, Norasnita Ahmad, Je rey Ting, Ben Clarke</span></i>
+			</td>
+</tr>
+<tr>
+<td>
+<h6><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >13:00-14:30</span></h6>
+</td>
+<td>
+<h6><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >  Lunch</span></h6>
+</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >14:30-15:30</span>
+			</td>
+<td>
+			<b><span onclick="return false" style="text-decoration:underline; color:blue" href="/poster"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Posters,</span> </span><span onclick="return false" style="text-decoration:underline; color:blue" href="/demos"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Demos</span>  </span><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >and</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/DC1"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Doctoral Consortium</span></span></b>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >15:30-16:30</span></td>
+<td>
+			<b><span onclick="return false" style="text-decoration:underline; color:blue" href="/session2"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Session 2</span></span> <span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >  </span></b> <i><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Liliana Ardissono </span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Narcissus: interactive activity mirror for small group work</span></b><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Kimberley Upton, Judy Kay</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Social Navigation Support for Information Seeking: If You Build It, Will They Come?</span></b> <i><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Rosta Farzan, Peter Brusilovsky</span></i>
+			</td>
+</tr>
+<tr>
+<td>
+<h6><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >16:30-17:00</span></h6>
+</td>
+<td>
+<h6><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >   Coffee break</span></h6>
+</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span onclick="return false" style="text-decoration:underline; color:blue" href="/s3"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Session 3</span></span><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" > </span></b><i> </i><i><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Chair:</span> </i><i><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Lora Aroyo</span></i>
+			</td>
+</tr>
+<tr>
+<td rowspan="5"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" > 17:00 - 19:00</span>
+			</td>
+<td><b><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Performance Evaluation of a Dynamic Privacy-Enhancing Framework for Personalized Websites.</span></b><i> <span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Yang Wang, Alfred Kobsa</span></i>
+			</td>
+</tr>
+<tr>
+<td><b><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Creating User Profiles From a Command-Line Interface: A Statistical Approach.</span></b><i> <span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Jose Antonio Iglesias, Agapito Ledezma, Araceli Sanchis</span></i>
+			</td>
+</tr>
+<tr>
+<td><b><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Context-Aware Preference Model based on a Study of Difference between Real and Supposed Situation Data.</span> </b><i><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Chihiro Ono, Yasuhiro Takishima, Yoichi Motomura, Hideki Asoh</span></i>
+			</td>
+</tr>
+<tr>
+<td><b><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Modelling Personality of Participants during Group Interactions.</span></b> <i><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Bruno Lepri, Nadia Mana, Alessandro Cappelletti, Fabio Pianesi, Massimo Zancanaro</span></i>
+			</td>
+</tr>
+</tbody>
+</table>
+<table border="0" width="505" height="23">
+<tbody>
+<tr>
+		</tr>
+<tr>
+<td align="left"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >19:30</span> </td>
+<td align="left">
+			<span onclick="return false" style="text-decoration:underline; color:blue" href="/events" target="_blank"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Welcome Reception</span></span>
+			</td>
+</tr>
+</tbody>
+</table>
+<table border="0" width="720" height="474">
+<tbody>
+<tr>
+<td colspan="2">
+<h5><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >  Wednesday, 24 June</span> </h5>
+</td>
+</tr>
+<tr>
+<td width="100"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >9:00-10:00</span> </td>
+<td>
+<p>
+			<span onclick="return false" style="text-decoration:underline; color:blue" href="/dumais"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Keynote: Susan Dumais</span></span>
+			</p>
+</td>
+</tr>
+<tr>
+<td>
+<h6><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >10:00-10:30</span></h6>
+</td>
+<td>
+<h6><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >  Coffee Break</span> </h6>
+</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >10:30-13:00</span>
+			</td>
+<td>
+<p>
+			<span onclick="return false" style="text-decoration:underline; color:blue" href="/s4"><b><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Session 4</span></b></span><b><span onclick="return false" style="text-decoration:underline; color:blue" href="/s4"> </span><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >  </span> </b><i><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Cristina Conati </span></i>
+			</p>
+</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Predicting Customer Models Using Behavior-based Features in Shops</span></b><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >. J</span><i><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >unichiro Mori, Yutaka Matsuo, Hitoshi Koshiba, Kenro Aihara, Hideaki Takeda</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Investigating the Utility of Eye-tracking Information on Affect and Reasoning for User Modeling</span></b><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Kasia Muldner, Robert Christopherson, Robert Atkinson, Winslow Burleson</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Describing User Interactions in Adaptive Interactive Systems.</span></b> <i><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Matthias Bezold</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >PerspectiveSpace: Opinion modeling with dimensionality reduction.</span></b> <i><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Jason Alonso, Catherine Havasi, Henry Lieberman</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Recognition of User Intentions for Interface Agents with Variable Order Markov Models.</span></b> <i><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Marcelo Gabriel Armentano, Analìa A. Amandi</span></i>
+			</td>
+</tr>
+<tr>
+<td>
+<h6><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >13:00-14.30</span> </h6>
+</td>
+<td>
+<h6><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >  Lunch</span></h6>
+</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >14:30-15:30</span>
+			</td>
+<td>
+<p>
+			<b><span onclick="return false" style="text-decoration:underline; color:blue" href="/poster"><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Posters</span></span><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/demos"><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Demos</span></span><span onclick="return false" style="text-decoration:underline; color:blue" href="/demos"> </span></b><b><span onclick="return false" style="text-decoration:underline; color:blue" href="/demos"> </span><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >and</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/DC1" target="_blank"><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Doctoral Consortium</span></span></b>
+			</p>
+</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >15:30-17:00</span></td>
+<td>
+<p>
+			<span onclick="return false" style="text-decoration:underline; color:blue" href="/industrysession"><b><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Industry session</span></b> </span> <i><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Peter Brusilovksy</span></i>
+			</p>
+</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Google? Shared! Adding Social Search Technologies to Mainstream Search Engines</span></b><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Barry Smyth, Maurice Coyle, Peter Briggs</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Collaborative Filtering is Not Enough? Experiments with a Mixed-Model Recommender for Leisure Activities</span></b><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Nicolas Ducheneaut, Kurt Partridge, Qingfeng Huang, Bob Price, Michael Roberts, Ed H. Chi, Victoria Bellotti, Bo Begole</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Enhancing Mobile Recommender Systems with Activity Inference.</span></b> <i><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Kurt Partridge, Bob Price</span> </i></td>
+</tr>
+<tr>
+<td>
+<h6><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" > 17:00-17:30</span></h6>
+</td>
+<td>
+<h6><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >  Coffee break</span> </h6>
+</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >17:30-19:00</span>
+			</td>
+<td>
+<p>
+			<span onclick="return false" style="text-decoration:underline; color:blue" href="/s5"><b><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Session 5</span></b></span><b><span onclick="return false" style="text-decoration:underline; color:blue" href="/s5"> <span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" > </span></span> <span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >    </span></b><b> </b><i><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Julita Vassileva</span> </i><b><i><br />
+			</i></b>
+			</p>
+</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Tell Me Where You've Lived, And I'll Tell You What You Like: Adapting Interfaces to Cultural Preferences</span></b><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Katharina Reinecke, Abraham Bernstein</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Non-Intrusive Personalisation of the Museum Experience</span></b><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Fabian Bohnert, Ingrid Zukerman</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Assessing the Impact of Measurement Noise on User Modeling in Spatial Domains</span></b><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Schmidt, Ingrid Zukerman, David Albrecht</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" > 20:30</span> </td>
+<td><b><span onclick="return false" style="text-decoration:underline; color:blue" href="/events" target="_blank"><b><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Social Dinner</span></b></span></b></td>
+</tr>
+</tbody>
+</table>
+<table border="0" width="720" height="473">
+<tbody>
+<tr>
+<td colspan="2">
+<h5><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" > Thursday, 25 June</span> </h5>
+</td>
+</tr>
+<tr>
+<td width="100"><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >9:00-10:00</span> 
+			</td>
+<td>
+<p>
+			<span onclick="return false" style="text-decoration:underline; color:blue" href="/wade"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Keynote: Vincent Wade</span></span>
+			</p>
+</td>
+</tr>
+<tr>
+<td>
+<h6><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >10:00-10:30</span></h6>
+</td>
+<td>
+<h6><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >  Coffee Break</span> </h6>
+</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >10:30-13:00</span>
+			</td>
+<td>
+<p>
+			<span onclick="return false" style="text-decoration:underline; color:blue" href="/s6"><b><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Session 6</span></b></span><b> <span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >    </span> </b><i><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Judith Masthoff</span></i>
+			</p>
+</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >SoNARS: a Social Networks-based Algorithm for Social Recommender Systems</span></b><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >.</span><i> <span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Francesca Carmagnola, Fabiana Vernero, Pierluigi Grillo</span></i></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Grocery Product Recommendations from Natural Language Inputs</span></b><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Petteri Nurmi, Andreas Forsblom, Patrik Floreen</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >I like it... I like it not: Evaluating User Ratings Noise in Recommender Systems</span></b><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Xavier Amatriain, Josep M. Pujol, Nuria Oliver</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Evaluating Interface Variants on Personality Acquisition for Recommender Systems.</span></b> <i><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Greg Dunn, Jurgen Wiersema, Jaap Ham, Lora Aroyo</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Context-dependent Personalised Feedback Prioritisation in Exploratory</span></b> <b><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Learning for Mathematical Generalisation.</span></b> <i><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Mihaela Cocea, George Magoulas</span></i>
+			</td>
+</tr>
+<tr>
+<td>
+<h6><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >13:00-14.30</span> </h6>
+</td>
+<td>
+<h6><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >  Lunch</span></h6>
+</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" > 14:30 - 16:00</span>
+			</td>
+<td><span onclick="return false" style="text-decoration:underline; color:blue" href="/industrypanel"><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" > </span><b><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Industry Panel</span></b><br />
+			</span><i><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Alejandro Jaimes</span></i>
+			</td>
+</tr>
+<tr>
+<td>
+<h6><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >16:0-16:30 </span> </h6>
+</td>
+<td>
+<h6><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >   Coffee break</span></h6>
+</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >16:30-18:30</span></td>
+<td>
+<p>
+			<span onclick="return false" style="text-decoration:underline; color:blue" href="/s7"><b><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >Session 7 </span></b></span><b><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >    </span> </b><i><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Chair: Vania Dimitrova</span><br />
+			</i>
+			</p>
+</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Supporting Personalized User Concept Spaces and Recommendations for a Publication Sharing System</span></b><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Antonina Dattolo, Felice Ferrara, Carlo Tasso</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Evaluating the Adaptation of a Learning System before the Prototype is Ready: A Paper-based Lab Study</span></b><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <i><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Tobias Ley, Barbara Kump, Antonia Maas, Neil Maiden, Dietrich Albert</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >Capturing the user’s reading context for tailoring summaries.</span></b> <i><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Cecile Paris, Stephen Wan</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >History dependent Recommender Systems based on Partial Matching.</span></b> <i><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >Armelle Brun, Geo ray Bonnin, Anne Boyer</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >Capturing User Intent for Analytical Process.</span></b> <i><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Eugene Santos Jr., Hien Nguyen, John Wilkinson, Fei Yu, Deqing Li, Keum Kim, Jacob Russell, Olson Adam</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" > </span></td>
+<td><b><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >What Have The Neighbours Ever Done for Us? A Collaborative Filtering Perspective.</span> </b><i><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Rachael Rafter, Michael O'Mahony, Neil Hurley, Barry Smyth</span></i>
+			</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >18:30-19:00</span></td>
+<td><b><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Closing session and introduction of UMAP 2010</span> </b></td>
+</tr>
+</tbody>
+</table>
+<table border="0" width="718" height="24">
+<tbody>
+<tr>
+<td>
+<h5><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" > Friday, 26 June</span> </h5>
+</td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >                        </span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/workshops" target="_blank"><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >Workshops </span></span></td>
+</tr>
+</tbody>
+</table>
+ </div>
+<div class="links"><ul class="links inline"><li class="first last node_submitted"></li>
+</ul></div>
+</div>
+
+<!-- end content -->
+ <div id="footer"><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Website released by Fondazione Bruno Kessler, 2008</span>

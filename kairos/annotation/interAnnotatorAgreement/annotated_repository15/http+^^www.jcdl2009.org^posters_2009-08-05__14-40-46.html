@@ -1,0 +1,660 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/7/annotation/annotated_repository/http+^^www.jcdl2009.org^posters_2009-08-05__14-40-46.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/7/annotation/annotated_repository/http+^^www.jcdl2009.org^posters_2009-08-05__14-40-46.yaml created on Thu Aug 13 13:56:39 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>Posters | JCDL 2009</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="shortcut icon" href="/themes/zen/zen_jcdl/favicon.ico" type="image/x-icon" />
+  <link type="text/css" rel="stylesheet" media="all" href="/modules/modules/node/node.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/modules/modules/system/defaults.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/modules/modules/system/system.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/modules/modules/system/system-menus.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/modules/modules/user/user.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/sites/all/modules/fckeditor/fckeditor.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen_jcdl/html-elements.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen/tabs.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen_jcdl/zen.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen/messages.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen/block-editing.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen/wireframes.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen_jcdl/layout-garland.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen_jcdl/icons.css?s" />
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen_jcdl/zen-jcdl.css?s" />
+<link type="text/css" rel="stylesheet" media="print" href="/themes/zen/zen_jcdl/print.css?s" />
+<!--[if IE]>
+<link type="text/css" rel="stylesheet" media="all" href="/themes/zen/zen/ie.css?s" />
+<![endif]-->
+  <!--[if IE]>
+              <link rel="stylesheet" href="/themes/zen/zen_jcdl/ie.css" type="text/css">
+      <![endif]-->
+  </head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)" class="not-front not-logged-in page-node node-type-page one-sidebar sidebar-left page-posters section-posters"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+  <div id="page">
+    <div id="header">
+
+      <div id="skip-nav"><span onclick="return false" style="text-decoration:underline; color:blue" href="#content"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Skip to Main Content</span></span></div>
+
+      <div id="logo-title">
+
+        <form action="/posters"  accept-charset="UTF-8" method="post" id="search-theme-form">
+<div><div id="search" class="container-inline">
+  <div class="form-item" id="edit-search-theme-form-1-wrapper">
+ <label for="edit-search-theme-form-1"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Search this site:</span> </label>
+ <input type="text" maxlength="128" name="search_theme_form" id="edit-search-theme-form-1" size="15" value="" title="Enter the terms you wish to search for." class="form-text" />
+</div>
+<input type="submit" name="op" id="edit-submit" value="Search"  class="form-submit" />
+<input type="hidden" name="form_build_id" id="form-011cee42fdcf3c5edac5771591c5c101" value="form-011cee42fdcf3c5edac5771591c5c101"  />
+<input type="hidden" name="form_id" id="edit-search-theme-form" value="search_theme_form"  />
+</div>
+
+</div></form>
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="/" title="Home" rel="home">
+            <img onmousedown="imd(this)" src="/themes/zen/zen_jcdl/images/logo-jcdl.png" alt="Home" id="logo" />
+          </span>
+        
+        <div id="name-and-slogan">
+
+        
+        
+        </div> <!-- /name-and-slogan -->
+
+      </div> <!-- /logo-title -->
+              <div id="header-region">
+                            </div> <!-- /header-region -->
+      
+
+    </div> <!-- /header -->
+
+    <div id="container" class="clear-block">
+
+              <div id="sidebar-left" class="column sidebar">
+          <div id="block-menu-menu-jcdlmenu" class="block block-menu region-odd odd region-count-1 count-1"><div class="block-inner">
+
+      <h2 class="title"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >PARTICIPANTS</span></h2>
+  
+  <div class="content">
+    <ul class="menu"><li class="leaf first"><span onclick="return false" style="text-decoration:underline; color:blue" href="/registration" title="Registration"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/travelinfo" title="Travel Information"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Travel Information</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/accommodations" title="Accommodations"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Accommodations</span></span></li>
+<li class="leaf last"><span onclick="return false" style="text-decoration:underline; color:blue" href="/attractions" title="Area Attractions"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Area Attractions</span></span></li>
+</ul>  </div>
+
+  
+</div></div> <!-- /block-inner, /block -->
+<div id="block-menu-menu-agendamenu" class="block block-menu region-even even region-count-2 count-2"><div class="block-inner">
+
+      <h2 class="title"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >AGENDA</span></h2>
+  
+  <div class="content">
+    <ul class="menu"><li class="leaf first"><span onclick="return false" style="text-decoration:underline; color:blue" href="/keynote" title="Keynotes"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Keynotes</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/tutorials" title="Tutorials"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/workshops" title="Workshops"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></li>
+<li class="expanded"><span onclick="return false" style="text-decoration:underline; color:blue" href="/taxonomy/term/4" title="Schedule"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Schedule</span></span><ul class="menu"><li class="leaf first"><span onclick="return false" style="text-decoration:underline; color:blue" href="/schedule" title="At A Glance"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >At A Glance</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/sunday" title="Sunday, June 14"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Sunday, June 14</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/monday" title="Monday, June 15"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Monday, June 15</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/tuesday" title="Tuesday, June 16"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday, June 16</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/wednesday" title="Wednesday, June 17"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, June 17</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/thursday" title="Thursday, June 18"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, June 18</span></span></li>
+<li class="leaf last"><span onclick="return false" style="text-decoration:underline; color:blue" href="/friday" title="Friday, June 19"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Friday, June 19</span></span></li>
+</ul></li>
+<li class="expanded last active-trail"><span onclick="return false" style="text-decoration:underline; color:blue" href="/sessions" title="Sessions"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Sessions</span></span><ul class="menu"><li class="leaf first"><span onclick="return false" style="text-decoration:underline; color:blue" href="/fullpapers" title="Full Papers"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Full Papers</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/shortpapers" title="Short Papers"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Short Papers</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/demos" title="Demos"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Demos</span></span></li>
+<li class="leaf last active-trail"><span onclick="return false" style="text-decoration:underline; color:blue" href="/posters" title="Posters" class="active"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Posters</span></span></li>
+</ul></li>
+</ul>  </div>
+
+  
+</div></div> <!-- /block-inner, /block -->
+<div id="block-menu-menu-contributors" class="block block-menu region-odd odd region-count-3 count-3"><div class="block-inner">
+
+      <h2 class="title"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >FOR CONTRIBUTORS</span></h2>
+  
+  <div class="content">
+    <ul class="menu"><li class="leaf first"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.jcdl2009.org/sites/default/files/JCDL09-CFP.pdf" title="Brief Call for Papers (pdf)"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Brief Call for Papers (pdf)</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/cfp" title="Call for Papers"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Extended Call for Papers</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/23" title="Information about how contributions should be formatted"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Formatting Instructions</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/24" title="Information for applicants to the doctoral consortium"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Doctoral Consortium</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/node/29" title="Instructions on how to submit materials to JCDL 2009 for all venues"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Submission Instructions</span></span></li>
+<li class="leaf last"><span onclick="return false" style="text-decoration:underline; color:blue" href="/secondlife" title="Second Life Posters"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Second Life Posters</span></span></li>
+</ul>  </div>
+
+  
+</div></div> <!-- /block-inner, /block -->
+<div id="block-menu-menu-aboutmenu" class="block block-menu region-even even region-count-4 count-4"><div class="block-inner">
+
+      <h2 class="title"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >ABOUT</span></h2>
+  
+  <div class="content">
+    <ul class="menu"><li class="leaf first"><span onclick="return false" style="text-decoration:underline; color:blue" href="/organizingcommittee" title="Organizing Committee"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Organizing Committee</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/sponsors2" title="Sponsors 2"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></span></li>
+<li class="leaf last"><span onclick="return false" style="text-decoration:underline; color:blue" href="/programcommittee" title="Program Committee"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></span></li>
+</ul>  </div>
+
+  
+</div></div> <!-- /block-inner, /block -->
+        </div> <!-- /sidebar-left -->
+      
+      <div id="main" class="column"><div id="squeeze" class="clear-block">
+                        <div id="content">
+                      <h1 class="title"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Posters</span></h1>
+                                                  <div id="node-11" class="node node-type-page"><div class="node-inner">
+
+  
+  
+  
+      <div class="meta">
+      
+              <div class="terms terms-inline"> <span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >in</span> <ul class="links inline"><li class="taxonomy_term_5 first last"><span onclick="return false" style="text-decoration:underline; color:blue" href="/taxonomy/term/5" rel="tag" title=""><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >session</span></span></li>
+</ul></div>
+          </div>
+  
+  <div class="content">
+    <p><b><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Adaptive Personalized eLearning on top of existing LCMS</span></b><br />
+<span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Naimdjon		Takhirov	Norwegian University of Science and Technology; 	Ingeborg	T	Solvberg	Norwegian University of Science and Technology</span><br />
+<span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span><br />
+<b><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Addressing Researchers' Needs through the Data Curation Profile</span></b>	 <span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Jake		Carlson	Purdue University; 	Deborah		Leiter	Purdue University</span><br />
+<span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Analysis of Transaction Logs for Insights into Use of Life Oral Histories</span></b><br />
+<span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Michael	G.	Christel	Carnegie Mellon University; 	Bryan	S.	Maher	Carnegie Mellon University; 	Huan		Li	BeiHang University</span><br />
+<span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Analyzing OPAC Use with Screen Views and Eye Tracking</span></b><br />
+<span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Emi		Ishita	Surugadai University; 	Shinji		Mine	Nagoya University; 	Masanori		Koizumi	Keio University; 	Yosuke		Miyata	Keio University; 	Chihiro		Kunimoto	Keio University; 	Junko		Shiozaki	Keio University; 	Keiko		Kurata	Keio University; 	Shuichi		Ueda	Keio University</span><br />
+<span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Analyzing User's Book-loan Behaviors in Peking University Library from Social Network Perspective</span></b><br />
+<span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Fei		Yan	Peking University; 	Ming		Zhang	Peking University; 	Tao		Sun	Peking University; 	Yang		Lu	Peking University; 	Naiyue		Zhang	School of Software and Microelectronics; 	Long		Xiao	Peking University</span><br />
+<span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Building a MARC-to-OLAC Crosswalk</span></b><br />
+<span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Christopher		Hirt	SIL International and Graduate Institute of Applied Linguistics; 	Gary		Simons	SIL International and Graduate Institute of Applied Linguistics; 	Joan		Spanne	SIL International</span><br />
+<span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Building a Thailand Researcher Network Based on a Bibliographic Database</span></b><br />
+<span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Choochart Haruechaiyasak National Electronics and Computer Technology Center (NECTEC);Alisa Kongthon National Electronics and Computer Technology Center (NECTEC); Santipong Thaiprayoon National Electronics and Computer Technology Center (NECTEC)</span><br />
+<span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Collaborative Digital Library: Enhancing Digital Collections to Improve Learning in Educational Programs</span></b><br />
+<span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Ali		Sajedi Badashian	Islamic Azad University - Lahijan Branch; 	Asghar		Dehghani Firouzabadi	Yazd University; 	Iman		Khalkhali	Sharif University of Technology, International Campus, Kish Island; 	Hamidreza		Afzali	Islamic Azad University - Lahijan Branch; 	Morteza		Ashurzad Delcheh	Islamic Azad University - Lahijan Branch; 	Mohammad		Shoja Shafiei	Islamic Azad University - Lahijan Branch; 	Mahdi		Alipour	Islamic Azad University - Lahijan Branch</span><br />
+<span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Correlation of Music Charts and Search Engine Rankings</span></b><br />
+<span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Martin		Klein	Old Dominion University; 	Olena		Hunsicker	Old Dominion University; 	Michael	L.	Nelson	Old Dominion University</span><br />
+<span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Designing Exploratory Search Tasks for User Studies of Information Seeking Support Systems</span></b><br />
+<span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Bill		Kules	The Catholic University of America; 	Robert		Capra	University of North Carolina</span><br />
+<span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Developing a Review Rubric for Learning Resources in Digital Libraries</span>	</b><br />
+<span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Heather		Leary	Utah State University; 	Sarah		Giersch	Columbia University; 	Andrew		Walker	Utah State University; 	Mimi		Recker	Utah State University</span><br />
+<span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Digitizing the Flea Market</span>	</b><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Snowden		Becker	The University of Texas</span><br />
+<span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Empirical Analysis on Chinese Academic Plagiarism</span></b><br />
+<span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Yang		Shen	School of Information management, Wuhan University; 	Huijuan		Fu	School of Information Management, Wuhan University; 	Zitao		Liu	 international Schoolsoftware,Wuhan University; 	Pengpeng		Liu	International School of Software,Wuhan University; 	Qingchuan		Fu	State Key Laboratory of Software Engineering,International School of Software,Wuhan University</span><br />
+<span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >EMU: The Emory User Behavior Data Management Systemfor Automatic Library Search Evaluation</span></b><br />
+<span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Qi		Guo	Emory University; 	Ryan	P	Kelly	Emory University; 	Selden Deemer		Deemer	Emory University; 	Arthur		Murphy	Emory University; 	Joan	A	Smith	Emory University; 	Eugene		Agichtein	Emory University</span><br />
+<span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Evaluation of OAI-ORE via Large-Scale Information Topology Visualization</span></b><br />
+<span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Robert		Sanderson 	University of Liverpool; 	Clare		Llewellyn	JSTOR; 	Richard		Jones	Hewlett-Packard Laboratories</span><br />
+<span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Expanding the Search for Digital Preservation Solutions</span></b><br />
+<span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Daniel	Gelaw	Alemneh	University of North Texas</span><br />
+<span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Exploitation of the Wikipedia Category System for Enhancing the Value of LCSH</span></b><br />
+<span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Yoji		Kiyota	University of Tokyo; 	Hiroshi		Nakagawa	University of Tokyo; 	Satoshi		Sakai	Tokyo Denki University; 	Tatsuya		Mori	Tokyo Denki University; 	Hidetaka		Masuda	Tokyo Denki University</span><br />
+<span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Finding Centuries-Old Hyperlinks with a Novel Semi-Supervised Learning Technique</span></b><br />
+<span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Xiaoyue		Wang	University of California Riverside; 	Eamonn		Keogh	University of California Riverside</span><br />
+<span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Forging the Future</span>	</b><br />
+<span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Marilyn		Lutz	University of Maine; 	Jon		Ippolito	University of Maine; 	Richard		Rinehart	University of California, Berkeley; 	Sharon		Fitzgerald	University of Maine</span><br />
+<span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<strong><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >From Harvesting to Cultivating: Transformation of a Web Collecting System into A Robust Curation Environment.</span></strong><br />
+<span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Christopher Lee, University of North Carolina-Chapel Hill; Richard Marciano, Sustainable Archives and Library Technologies Laboratory; Chien-yi Hou and Chirag Shah</span><br />
+<span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >GRE: Hybrid Recommendations for NSDL Collections</span></b><br />
+<span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Todd	C	Will,	New Jersey Institute of Technology; 	Anand		Srinivasan	New Jersey Institute of Technology; 	Michael		Bieber	New Jersey Institute of Technology; 	Il		Im	New Jersey Institute of Technology; 	Vincent		Oria	New Jersey Institute of Technology; 	Yi-Fang (Brook)		Wu	New Jersey Institute of Technology</span><br />
+<span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Implementation and Evaluation of Palm Leaf Manuscript Metadata Schema (PLMM)</span></b><br />
+<span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Nisachol		Chamnongsri	Khon Kaen University; 	Lampang		Manmart	Khon Kaen University; 	Vilas		Wuwongse	Asian Institute of Technology</span><br />
+<span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Inferring Intra-organizational Collaboration from Cosine Similarity Distributions in Text Documents</span></b>	<span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Maria		Esteva	University of Texas at Austin; 	Hai		Bi	Welldynamics.Inc</span><br />
+<span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >An Interoperability Service Framework for High-resolution Image Applications</span></b><br />
+<span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Ryan		Chute	Los Alamos National Laboratory 	Stephan		Dresher	Los Alamos National Laboratory; 	Luda		Balakireva	Los Alamos National Laboratory; 	Herbert		Van de Sompel	Los Alamos National Laboratory</span><br />
+<span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span><br />
+<b><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Inter-Search Engine Lexical Signature Performance</span></b><br />
+<span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Martin		Klein	Old Dominion University; 	Michael	L.	Nelson	Old Dominion University</span><br />
+<span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Journal Ranking Based on Social Information</span></b><br />
+<span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Jinlong		Wang	Qingdao Technological University; 	Ke		Gao	Qingdao Technological University; 	Yongli		Ren	Zhengzhou University; 	Gang		Li	Deakin University</span><br />
+<span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Kindle Usage Among LIS Students:An Exploratory Study</span></b><br />
+<span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Debbie	L	Rabina	Pratt Institute;  	Maria	Cristina	Pattuelli	Pratt Institute</span><br />
+<span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >The Landscape of Information Science: 1996-2008</span></b><br />
+<span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Fidelia		Ibekwe-SanJuan	ELICO - University of Lyon 3; 	Eric		SanJuan	LIA - University of Avignon</span><br />
+<span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Locating Text in Scanned Books</span></b><br />
+<span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Chang		Hu	University of Maryland; 	Anne		Rose	University of Maryland; 	Benjamin	B.	Bederson	University of Maryland</span><br />
+<span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Mashing Up Life Science Literature Resources</span></b><br />
+<span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Richard		Easty	Lancaster University;  	Nikolay		Nikolov	University of Cambridge</span><br />
+<span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Metababble: A Clash of Metadata Cultures</span></b><br />
+<span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Monica		Rivero	Fondren Library, Rice University; 	Geneva		Henry	Fondren Library, Rice University</span><br />
+<span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >MetRe: Supporting the Metadata Revision Process</span></b><br />
+<span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Emma Tonkin</span><br />
+<span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >A Mixed Digital / Physical Snapshot of Early Internet / Web Usage in New Zealand</span></b>	<span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Sally	Jo	Cunningham	University of Waikato; 	Jillene		Bydder	University of Waikato</span><br />
+<span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Personal Name-Matching through Name Transformation</span></b><br />
+<span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Jun		Gong	Beihang University;  	Lidan		Wang	University of Maryland; 	Douglas	W	Oard	University of Maryland;  MetRe	Emma		Tonkin	University of Bath</span><br />
+<span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span><br />
+<b><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >A Personalized Learning Environment</span></b><br />
+<span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Sebastian		de la Chica	University of Colorado; 	Faisal		Ahmad	University of Colorado; 	Qianyi		Gu	University of Colorado; 	Ifi		Okoye	University of Colorado; 	Keith		Maull	University of Colorado; 	Tamara		Sumner	University of Colorado; 	Kirsten	R	Butcher	University of Colorado</span><br />
+<span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Remote Usability Testing:  A Practice</span></b>	<span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Sheng-Cheng		Huang	The University of Texas at Austin; 	Randolph	G.	Bias	The University of Texas at Austin; 	Tanya	L.	Payne	Vignette Corporation; 	Jay	B.	Rogers	Atlassian</span><br />
+<span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Representing Publication and Distribution Practices for Scholarly Materials</span></b><br />
+<span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Phillip	M.	Edwards	University of North Carolina at Chapel Hill</span><br />
+<span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Scientific Digital Libraries, Interoperability, and Ontologies</span></b><br />
+<span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >J.	Steven	Hughes	Jet Propulsion Laboratory; 	Daniel	J.	Crichton	Jet Propulsion Laboratory; 	Chris	A.	Mattmann	Jet Propulsion Laboratory</span><br />
+<span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Selective Harvesting of Regional Digital Libraries and National Metadata Aggregators</span></b><br />
+<span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Marcin		Werla	Poznan Supercomputing and Networking Center; 	Marcin		Mielnicki	Poznan Supercomputing and Networking Center; 	Cezary		Mazurek	Poznan Supercomputing and Networking Center</span><br />
+<span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<strong><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Semantically Enriched Alerting Systems for Digital Libraries</span></strong><br />
+<span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >George Buchanan, Swansea University and Annika Hinze</span><br />
+<span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >A Semi-Automatic System for Managing Multiple Digital Preservation Risks of Digital Libraries in China</span></b><br />
+<span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Chao		Li	Tsinghua University; 	Chunxiao		Xing	Tsinghua University; 	Li		Dong	Tsinghua University; 	Michael	Bailou	Huang	Stony Brook University</span><br />
+<span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Species Identification: Fish Images with CBIR and Annotations</span></b><br />
+<span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Uma		Murthy	Virginia Tech 	Edward	A.	Fox	Virginia Tech; 	Yinlin		Chen	Virginia Tech; 	Eric		Hallerman	Virginia Tech; 	Ricardo	da Silva	Torres	University of Campinas; 	Evandro	J.	Ramos	University of Campinas; 	Tiago	R. C.	Falcao	University of Campinas</span><br />
+<span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Summarizing User-Generated Reviews in Digital Libraries: A Visual Clustering Approach</span></b><br />
+<span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Wingyan		Chung	Santa Clara University</span><br />
+<span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Tailoring Greenstone for Seniors</span></b><br />
+<span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Sally	Jo	Cunningham	University of Waikato; 	Erin	K	Bennett	University of Waikato</span><br />
+<span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Toward Automatic Generation of Image-Text Document Surrogates to Optimize Cognition</span></b><br />
+<span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Eunyee		Koh	Adobe Systems Inc; 	Andruid		Kerne	Texas A&amp;M University; 	Jon		Moeller	Texas A&amp;M University</span><br />
+<span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >A User-Friendly Metadata Quality Control Tool for the Internet Public Library</span></b><br />
+<span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Michael		Khoo	Drexel University; 	Xia		Lin	Drexel University; 	Jung-ran		Park	Drexel University</span><br />
+<span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >User Search Behaviors within a Library Gateway</span></b><br />
+<span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >William	H	Mischo	University of Illinois at Urbana-Champaign; 	Mary	C	Schlembach	University of Illinois at Urbana-Champaign; 	Michael	A	Norman	University of Illinois at Urbana-Champaign</span><br />
+<span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >User Search Characteristics on a Specialized Digital Collection forDomain- and Task-Specific Information</span></b><br />
+<span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Xiaoya		Tang	Emporia State University</span><br />
+<span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Users' Adjustments to Unsuccessful Queries in Biomedical Search</span>	</b><br />
+<span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >G.	Craig	Murray	U.S. National Library of Medicine; 	Jimmy		Lin	University of Maryland; 	W.	John	Wilbur	U.S. National Library of Medicine; 	Zhiyong		Lu	U.S. National Library of Medicine</span><br />
+<span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Using an Institutional Repository for Personal Digital Collections of Retired Faculty Members</span></b><br />
+<span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Sarah		Kim	School of Information, the University of Texas at Austin</span><br />
+<span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >The Variety of Ways in which Instructors Implement a Modular Digital Library Curriculum</span></b><br />
+<span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Barbara	M.	Wildemuth	University of North Carolina at Chapel Hill; 	Jeffrey	P.	Pomerantz	University of North Carolina at Chapel Hill; 	Sanghee		Oh	University of North Carolina at Chapel Hill; 	Seungwon		Yang	Virginia Tech; 	Edward	A.	Fox	Virginia Tech</span><br />
+<span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+<b><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >What Patrons Want: Supporting Interaction for Novice Information Seeking Scholars</span></b><br />
+<span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Fernando		Loizides	Swansea University; 	George	R	Buchanan	Swansea University</span>

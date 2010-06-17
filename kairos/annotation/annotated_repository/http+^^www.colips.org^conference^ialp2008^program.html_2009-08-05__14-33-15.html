@@ -1,0 +1,772 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml"><!-- InstanceBegin template="Templates/ialp08template.dwt" codeOutsideHTMLIsLocked="false" -->
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.colips.org^conference^ialp2008^program.html_2009-08-05__14-33-15.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.colips.org^conference^ialp2008^program.html_2009-08-05__14-33-15.yaml created on Wed Aug 05 17:31:43 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+<title>International Conference on Asian Language Processing 2008</title>
+<style type="text/css">
+<!--
+-->
+</style>
+<link href="Templates/ialp08.css" rel="stylesheet" type="text/css" />
+<style type="text/css" media="print">
+#MenuBlock {
+	DISPLAY: none
+}
+#ContentBlock {
+	margin-left: 1em;
+	margin-right: 1em;
+	width: 55em;
+}
+</style>
+<script type="text/javascript">
+<!--
+function MM_preloadImages() { //v3.0
+  var d=document; if(d.images){ if(!d.MM_p) d.MM_p=new Array();
+    var i,j=d.MM_p.length,a=MM_preloadImages.arguments; for(i=0; i<a.length; i++)
+    if (a[i].indexOf("#")!=0){ d.MM_p[j]=new Image; d.MM_p[j++].src=a[i];}}
+}
+//-->
+</script>
+<style type="text/css">
+<!--
+.style2 {
+	font-size: 18px;
+	color: #FFFFFF;
+}
+.style4 {font-size: 30px; font-weight: bold; color: #FFFFFF; }
+.style5 {font-size: 14px; font-weight: bold; }
+-->
+</style>
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)" bgcolor="#FFFFFF" onload="MM_preloadImages('images/demo_down.png')"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<table width="1000" height="100%" border="0" align="center" cellpadding="0" cellspacing="0" valign="bottom" >
+  <tr>
+    <td height="10" valign="middle"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+  </tr>
+  <tr>
+    <td height="100" valign="middle"><table width="100%" height="100" border="0" align="center" cellpadding="0" cellspacing="0" valign="bottom">
+        <tr>
+          <td valign="middle" bordercolor="0" ><table width="100%" border="0" align="center" cellpadding="10" cellspacing="0">
+              
+              <tr align="center" valign="middle" height="103" >
+                <td width="180"  align="right" nowrap="nowrap" bgcolor="#FFCC99" ><div align="center">
+                    <table width="180" border="0">
+                      <tr>
+                        <td><div align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.colips.org" target="_top"><img onmousedown="imd(this)" src="images/COLIPS.jpg" alt="COLIPS" width="140" height="82" border="0" align="middle" /></span></div></td>
+                      </tr>
+                    </table>
+                  </div></td>
+                <td width="784" nowrap="nowrap" bgcolor="#993399"><table width="900" border="0">
+                    <tr>
+                      <td valign="middle"><p align="left" class="style4"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >International Conference on Asian Language Processing 2008</span></p>
+                      <p align="left" class="style2"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Chiang Mai, Thailand, November 12-14, 2008</span></p></td>
+                    </tr>
+                  </table>                  </td>
+              </tr>
+          </table></td>
+        </tr>
+        <tr>
+          <td height="10" align="center" valign="bottom" bordercolor="0" bgcolor="#99CCFF"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+        </tr>
+      </table></td>
+  </tr>
+  <tr>
+    <td valign="middle"><table width="100%" height="100%" border="0" align="center" cellpadding="0" cellspacing="0">
+        <tr align="center">
+          <td width="180" valign="top" background="images/bg21.jpg" id="MenuBlock" cbackground="../images/bg21.jpg"><div align="center">
+              <table width="180" height="100%" border="0" align="center" cellpadding="1" cellspacing="2" >
+                <tr align="left" >
+                  <td height="30" align="left" nowrap="nowrap" class="menu"><div align="left" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></div></td>
+                </tr>
+                <tr align="left">
+                  <td height="30" align="left" nowrap="nowrap" class="menu"><div align="left" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="callforpapers.html"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span> </div></td>
+                </tr>
+                <tr align="left">
+                  <td height="30" align="left" nowrap="nowrap" class="menu"><div align="left" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="submission.html"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Paper Submission</span></span> </div></td>
+                </tr>
+                <tr align="left">
+                  <td width="180" height="30" align="left" nowrap="nowrap" class="menu"><div align="left" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="program.html"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Conference Program</span> </span></div></td>
+                </tr>
+                <tr align="left">
+                  <td width="180" height="30" align="left" nowrap="nowrap" class="menu"><div align="left" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="people.html"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></span></div></td>
+                </tr>
+                <tr align="left">
+                  <td width="180" height="30" align="left" nowrap="nowrap" class="menu"><div align="left" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="invitedspeakers.html"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Invited Speakers</span> </span></div></td>
+                </tr>
+                <tr align="left">
+                  <td width="180" height="30" align="left" nowrap="nowrap" class="menu"><div align="left" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="registration.html"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></div></td>
+                </tr>
+                <tr align="left">
+                  <td width="180" height="30" align="left" nowrap="nowrap" class="menu"><div align="left" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="accommodation.html"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation</span></span></div></td>
+                </tr>
+                <tr align="left">
+                  <td height="30" align="left" nowrap="nowrap" class="menu"><div align="left" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="visa.html"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Visa  to Thailand</span> </span></div></td>
+                </tr>
+                <tr align="left">
+                  <td height="30" align="left" nowrap="nowrap" class="menu"><div align="left" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="conferencecity.html"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Conference City</span></span>  </div></td>
+                </tr>
+                <tr align="left">
+                  <td height="30" align="left" nowrap="nowrap" class="menu"><div align="left" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="postconferencetour.html"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Post Conference Tour</span></span> </div></td>
+                </tr>
+                <tr align="left">
+                  <td height="30" align="left" nowrap="nowrap" class="menu"><div align="left" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="links.html"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Links</span></span> </div></td>
+                </tr>
+                <tr align="left">
+                  <td height="30" align="left" nowrap="nowrap" class="menu"><div align="left" class="style5"><span onclick="return false" style="text-decoration:underline; color:blue" href="contactus.html"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Contact Us</span></span> </div></td>
+                </tr>
+              </table>
+              <p><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+            </div></td>
+          <td width="82%" valign="top" background="images/ialpbg.png" id="ContentBlock"><div align="center">
+              <table width="900" height="139%" border="0" cellpadding="10" cellspacing="10">
+                <tr>
+                  <td><div align="left"><!-- InstanceBeginEditable name="EditRegion1" -->
+                      <h1><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Conference Program</span></h1>
+                      <h2 align="center"> <span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >First Day &#65288;Wednesday, 12 Nov 2008&#65289;</span> </h2>
+                      <div align="center">
+                        <table width="90%" border="1" cellpadding="10" cellspacing="5" bordercolor="#3333FF">
+                          <tr>
+                            <td width="16%" valign="top" nowrap="nowrap"><strong><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >0800-0840</span></strong> </td>
+                            <td width="84%" valign="top" nowrap="nowrap"><p><strong><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span> </strong> </p></td>
+                          </tr>
+                          <tr>
+                            <td nowrap="nowrap" valign="top"><p><strong><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >0840-0900</span></strong></p></td>
+                            <td nowrap="nowrap" valign="top"><p align="left"><strong><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Welcome and Opening    Remarks &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></strong><strong> </strong></p></td>
+                          </tr>
+                          <tr>
+                            <td nowrap="nowrap" valign="top"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                            <td nowrap="nowrap" valign="top"><p><strong><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Opening    remark</span><br />
+                                </strong><em><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Mongkon    Rayanakorn</span><br />
+                                  <span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Dean of Faculty of Science, Chiang     Mai University; 
+                                  Conference Co-Chair</span> </em></p>
+                              <p><strong><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Opening remark</span><br />
+                                </strong><em><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Kim-Teng Lua</span><br />
+                                  <span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >President, COLIPS; 
+                                  Conference Co-Chair</span> </em></p></td>
+                          </tr>
+                          <tr>
+                            <td nowrap="nowrap" valign="top"><p><strong><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >0900-0945</span></strong></p></td>
+                            <td nowrap="nowrap" valign="top"><p><strong><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Keynote    Speech&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp;</span></strong></p></td>
+                          </tr>
+                          <tr>
+                            <td nowrap="nowrap" valign="top"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                            <td nowrap="nowrap" valign="top"><p style="font-weight: bold"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Extraction of Word Collocations in Singapore  Mandarin Chinese</span></p>
+                                <p align="left"><em><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Prof  Hui Wang</span> <br />
+                                  <span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Department of Chinese Studies, National  University of Singapore</span>
+                                </em></p></td>
+                          </tr>
+                          <tr>
+                            <td nowrap="nowrap" valign="top"><p><strong><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >0950-1050</span></strong></p></td>
+                            <td nowrap="nowrap" valign="top"><p align="left"><strong><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Session 1</span></strong> <span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >(Chair: Prof Quan Zhang)</span> </p></td>
+                          </tr>
+                          <tr>
+                            <td nowrap="nowrap" valign="top"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                            <td valign="top"><p><strong><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Solving Combination of Thai    Auxiliary Verb Based on Finite-state Approach</span></strong><br />
+                                    <em><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Taneth    Ruangrajitpakorn, Peerachet Porkaew, Prachya Boonkwan, Thepchai Supnithi</span> </em><br />
+                                    <em><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Human    Language Technology Laboratory, National Electronics and Computer Technology Center, Thailand</span></em></p>
+                                <p><strong><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Rule Based Analysis of the    Uygur Nouns</span></strong><br />
+                                    <em><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Murat    Orhun, Ahmet Cuneyd Tantu&#287;, Esref Adal&#305;</span></em><br />
+                                    <em><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Computer    Science Department, Istanbul Bilgi University,    Turkey;</span> <br />
+                                      <span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Computer    Engineering Department, Istanbul      Technical University, Turkey</span></em></p>
+                              <p><strong><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Development of    Morphological Analyzer for Bangla</span></strong><br />
+                                    <em><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Amiya    Baran saha, Bibekananda kundu, Sudipta debnath, Barnali pal, Sanjay</span></em><br />
+                                    <em><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >choudhury,    Mridusmita mitra, Pampa bhattacharyya, Abhijit chatterjee, Tulika basu</span></em><br />
+                                    <em><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >CDAC Kolkata, India</span></em></p></td>
+                          </tr>
+                          <tr>
+                            <td nowrap="nowrap" valign="top"><p><strong><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >1050-1110</span></strong></p></td>
+                            <td nowrap="nowrap" valign="top"><p align="center"><strong><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></strong></p></td>
+                          </tr>
+                          <tr>
+                            <td nowrap="nowrap" valign="top"><p><strong><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >1110-1230</span></strong></p></td>
+                            <td nowrap="nowrap" valign="top"><p align="center"><strong><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Session 2</span></strong> <span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >(Chair: Dr Thepchai Supnithi)</span> </p></td>
+                          </tr>
+                          <tr>
+                            <td nowrap="nowrap" valign="top"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                            <td valign="top"><p><strong><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >A Study on the Construction    of Theoretical System of Separable Slots</span></strong><br />
+                                    <em><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Chunling    Li, Jing Wan</span></em><br />
+                                    <em><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >International</span></em><em> <span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Education College, Shenyang Normal     University, China; 
+                                      Center for Study of Language &amp; Information, Wuhan University, China</span></em></p>
+                              <p><strong><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Dependency Parsing for    Vietnamese Language</span></strong><br />
+                                    <em><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Manh-Ke    Tran, Le-Minh Nguyen, Diep Hoang</span></em><br />
+                                    <em><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Tinh    Van Media JSC, Vietnam;    GSIS, JAIST; Indiana University Bloomington,    USet</span></em></p>
+                              <p><strong><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >A Two-Stage Constraint    Based Dependency Parser for Free Word Order Languages</span></strong><br />
+                                    <em><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Akshar    Bharati, Samar Husain, Dipti Misra Sharma,    and Rajeev Sangal</span> </em><br />
+                                    <em><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >LTRC,    International Institute of Information Technology, Hyderabad, India</span></em> </p></td>
+                          </tr>
+                          <tr>
+                            <td nowrap="nowrap" valign="top"><p><strong><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >1230-1400</span></strong></p></td>
+                            <td nowrap="nowrap" valign="top"><p align="center"><strong><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></strong></p></td>
+                          </tr>
+                          <tr>
+                            <td nowrap="nowrap" valign="top"><p><strong><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >1400-1520</span></strong></p></td>
+                            <td nowrap="nowrap" valign="top"><p align="center"><strong><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Session3</span></strong> <span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >(Chair: Dr Han Ren)</span> </p></td>
+                          </tr>
+                          <tr>
+                            <td nowrap="nowrap" valign="top"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                            <td valign="top"><p><strong><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Joining of Sanskrit Words    using Paninian Grammar and Beyond</span></strong><br />
+                                    <em><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Ravi    Krishna moorthy S, Jagannatha Rao A V, Saketharaman K, Venkata swamy Reddy A,    Gopalakrishnan V</span></em><br />
+                                    <em><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Department    of Comp. Science, NIT, Trichy, India; 2 Vedic Scholar, Trichy,&nbsp; India; 
+                                Computer Applications, NIT, Trichy,    India</span></em><strong> </strong></p>
+                                <p><strong><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Tamil Part-of-Speech Tagger    Based on SVMTool</span></strong><br />
+                                    <em><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Dhanalakshmi    V, Anandkumar M, Vijaya M.S, Loganathan R, Soman K.P, Rajendran S</span><br />
+                                      <span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >CEN, Amrita Vishwa Vidyapeetham, Coimbatore, India; Dept. of Linguistics,    Tamil University, Thanjavur, India</span></em></p>
+                              <p><strong><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >On the Frame Construction    of Chinese FrameNet from the Perspective of the Typical Frame Group &ldquo;Activity    Course&rdquo;</span></strong><br />
+                                <em><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Xinglong    Wang, Shiyong Kang</span></em><br />
+                                <em><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >College</span></em><em> <span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >of Liberal Arts, Ludong    University, Yantai, China</span></em><strong> </strong></p>
+                            </td>
+                          </tr>
+                          <tr>
+                            <td nowrap="nowrap" valign="top"><p><strong><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >1520-1540</span></strong></p></td>
+                            <td nowrap="nowrap" valign="top"><p align="center"><strong><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Tea Break</span></strong></p></td>
+                          </tr>
+                          <tr>
+                            <td nowrap="nowrap" valign="top"><p><strong><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >1540-1700</span></strong></p></td>
+                            <td nowrap="nowrap" valign="top"><p align="center"><strong><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Session 4</span></strong> <span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >(Chair: Prof Esref Adali)</span> </p></td>
+                          </tr>
+                          <tr>
+                            <td nowrap="nowrap" valign="top"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                            <td valign="top"><p><strong><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Discourse Structure and    Anaphora Resolution from SDRT Perspective</span></strong><br />
+                                <em><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Donghong    Liu</span> </em><br />
+                                <em><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >School of    Foreign Languages, Central China      Normal University, China</span></em></p>
+                              <p><strong><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Building a Gold Standard    for Thai WordNet</span></strong><br />
+                                <em><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Dhanon    Leenoi, Thepchai Supnithi, Wirote Aroonmanakun</span></em><br />
+                                <em><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Department    of Linguistics, Chulalongkorn University, Bangkok,    Thailand; 
+                                  National    Electronics and Computer Technology Center,    Pathumthani, Thailand</span></em></p>
+                              <p><strong><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Semantic Composition and Formal    Representation of Synonym Set</span></strong><br />
+                                    <em><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Guozheng    Xiao, Dan Hu</span> </em><br />
+                                    <em><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Center for    Study of Language and Information, Wuhan      University, China</span></em></p></td>
+                          </tr>
+                        </table>
+                      </div>
+                      <h2 align="center"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Second Day &#65288;Thursday, 13 Nov 2008 &#65289;</span> </h2>
+                      <div align="center">
+                        <table width="90%" border="1" cellpadding="10" cellspacing="5" bordercolor="#0000FF">
+                          <tr>
+                            <td width="91" valign="top"><p><strong><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >0900-0945</span></strong></p></td>
+                            <td valign="top"><p><strong><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Speech&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span> </strong></p></td>
+                          </tr>
+                          <tr>
+                            <td width="91" valign="top"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                            <td valign="top"><p><strong><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >A Unified Knowledge Engineering with&nbsp; Language&nbsp;    Engineering for Effectively Knowledge Management: CyberBrain as a Case Study</span></strong></p>
+                                <p><em><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Assoc. Prof. Asanee Kawtrakul</span> <br />
+                                  <span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Deputy Executive Director,&nbsp; NECTEC, Thailand&nbsp;</span></em><strong> </strong></p></td>
+                          </tr>
+                          <tr>
+                            <td width="91" valign="top"><p><strong><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >0950-1050</span></strong><strong> </strong></p></td>
+                            <td valign="top"><p align="center"><strong><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Session 5</span></strong> <span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >(Chair: Dr Xinhui Hu)</span> </p></td>
+                          </tr>
+                          <tr>
+                            <td width="91" valign="top"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                            <td valign="top"><p><strong><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Recovering Processing on    Chinese Named Entity by Sentential Semantic and Contextual Knowledge</span></strong><br />
+                                    <em><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Quan    Zhang, Ning Jia, Yi Yuan, Xiangfeng Wei, Jianming Miao</span></em><br />
+                                    <em><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Institute</span></em><em> <span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >of Acoustics, Chinese Academy of Sciences,    Beijing, China</span></em></p>
+                                <p><strong><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >On Semantic Features of    Verbs in the Combination of &ldquo;Degree adverb +Verb&rdquo;</span></strong><br />
+                                    <em><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Hao    Zhao, Pu Li</span></em><br />
+                                    <em><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Xinjiang Engineering College</span></em><em><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >, China;    Xinjiang University, China; Wuhan      University, China</span></em></p>
+                              <p><strong><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >The    Semantic Category System of Chinese New Words: An Approach from</span> </strong><strong><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >the</span> </strong><strong><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >ONTOL-MT-based    Classification System of Knowledge</span></strong><strong> <span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Ontology</span></strong><strong> </strong><br />
+                                    <em><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Xinglong    Wang, Shiyong Kang</span></em><br />
+                                    <em><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >College</span></em><em> <span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >of Liberal Arts, Ludong University,    Yantai, China</span></em> </p></td>
+                          </tr>
+                          <tr>
+                            <td width="91" valign="top"><p><strong><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >1050-1110</span></strong></p></td>
+                            <td valign="top"><p align="center"><strong><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Tea Break</span></strong></p></td>
+                          </tr>
+                          <tr>
+                            <td width="91" valign="top"><p><strong><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >1110-1230</span></strong></p></td>
+                            <td valign="top"><p align="center"><strong><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Session 6</span></strong> <span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >(Chair: Prof</span> <em><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Katsunori    Kotani</span></em><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >)</span> </p></td>
+                          </tr>
+                          <tr>
+                            <td width="91" valign="top"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                            <td valign="top"><p><strong><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Towards Automatic    Catchphrase Detection Based on Numerical Analysis</span></strong><br />
+                                  <em><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Han    Ren, Donghong Ji, Lei Han, Jing Wan</span></em><br />
+                                    <em><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >School</span></em><em> <span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >of Computer Science, Wuhan     University, China;    Center for Study of Language</span></em><em> <span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >&amp; Information, Wuhan University, China</span></em></p>
+                                <p><strong><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Text Information Retrieval    Based on the Domain Concepts</span></strong><br />
+                                    <em><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Jianming    Miao, Quan Zhang</span></em><br />
+                                    <em><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Institute</span></em><em> <span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >of Acoustics, Chinese Academy of Sciences,    Beijing, China</span></em></p>
+                                <p><strong><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >A Research on Automatic    Multi-Ontology Mapping Method Algorithm 
+                                Based on Concept Similarity    Calculation</span></strong><br />
+                                <em><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Yaxiong    Li</span> </em><br />
+                                <em><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Network</span></em><em> <span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Management Center,    Xianning University, Hubei, China</span> </em></p></td>
+                          </tr>
+                          <tr>
+                            <td width="91" valign="top"><p><strong><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >1230-1400</span></strong></p></td>
+                            <td valign="top"><p align="center"><strong><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></strong></p></td>
+                          </tr>
+                          <tr>
+                            <td width="91" valign="top"><p><strong><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >1400-1520</span></strong></p></td>
+                            <td valign="top"><p align="center"><strong><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Session 7</span></strong> <span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >(Chair: Prof Muhtar Fukuda)</span> </p></td>
+                          </tr>
+                          <tr>
+                            <td width="91" valign="top"><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                            <td valign="top"><p><strong><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Document Re-ranking via the    EM Algorithm</span></strong><br />
+                                  <em><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Chong    Teng, Yanxiang He, Donghong Ji, Yue Han</span></em><br />
+                                  <em><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Wuhan</span></em><em> <span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >University, Wuhan,     China</span></em></p>
+                                <p><strong><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Computing Text Similarity    Based on HNC Theory</span></strong><br />
+                                    <em><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Xiangfeng    Wei, Hanfen Zang, Quan Zhang</span></em><br />
+                                    <em><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Institute</span></em><em> <span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >of Acoustics, Chinese Academy of Sciences,    Beijing, China</span></em></p>
+                              <p><strong><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >An Automatic Evaluation of    Writing in Japanese as a Second Language Using a Word-alignment-based    Classifier</span></strong><br />
+                                    <em><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Katsunori    Kotani, Takehiko Yoshimi, Takeshi Kutsumi, Ichiko Sata</span></em><br />
+                                    <em><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Kansai    Gaidai University, Osaka, Japan; Ryukoku University, Shiga, Japan; Sharp    Corporation, Nara, Japan</span></em></p></td>
+                          </tr>
+                          <tr>
+                            <td width="91" valign="top"><p><strong><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >1520-1540</span></strong></p></td>
+                            <td valign="top"><p align="center"><strong><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></strong></p></td>
+                          </tr>
+                          <tr>
+                            <td width="91" valign="top"><p><strong><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >1540-1720</span></strong></p></td>
+                            <td valign="top"><p align="center"><strong><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Session 8</span></strong> <span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >(Chair: Prof Katsunori    Kotani)</span> </p></td>
+                          </tr>
+                          <tr>
+                            <td width="91" valign="top"><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                            <td valign="top"><p><strong><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >English to Tamil    Transliteration using Sequence Labeling Approach</span></strong><br />
+                                    <em><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Vijaya    M.S, Loganathan R, Shivapratap G, Ajith V.P, Soman K.P</span></em><br />
+                                    <em><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >CEN,    Amrita Vishwa Vidyapeetham, Coimbatore,     India</span></em></p>
+                                <p><strong><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Language Divergence in    English to Sanskrit Translation</span></strong><br />
+                                    <em><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Vimal    Mishra, R. B. Mishra</span></em><br />
+                                    <em><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Department    of Computer Engineering, Institute of Technology, Banaras    Hindu University,    (IT-BHU), India.</span></em></p>
+                              <p><strong><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Transliteration from Uighur    to Uzbek for Expansion of Japanese Translation Dictionary</span></strong><br />
+                                    <em><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Yasuhiro    Ogawa, Muhtar Fukuda, Katsuhiko Toyama</span></em><br />
+                                    <em><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Nagoya University</span></em><em><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >, Japan; Nagoya Sangyo University, Japan</span></em></p>
+                              <p><strong><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Handling Certain Issues in    the Evaluation of Machine Translation</span></strong><br />
+                                    <em><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Manisha,    Madhavi Sinha, Rekha Govil</span></em><br />
+                                    <em><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Deptment of    Computer Science, Apaji Institute, Banasthali University,    India; Deptment of    Computer Science, BIT (Ext. Ctr. of BISR), Jaipur (Raj.), India</span></em></p>
+                            </td>
+                          </tr>
+                          <tr>
+                            <td width="91" valign="top"><span style="font-weight: bold"><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >1900-2130</span></span></td>
+                            <td valign="top"><p align="center" style="font-weight: bold"><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Banquet</span> </p></td>
+                          </tr>
+                        </table>
+                      </div>
+                      <h2 align="center"><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Third Day &#65288;Friday, 14 Nov 2008 &#65289;</span> </h2>
+                      <div align="center">
+                        <table width="90%" border="1" cellpadding="10" cellspacing="5" bordercolor="#0000FF">
+                          <tr>
+                            <td width="15%" valign="top"><strong><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >0900-0945</span></strong> </td>
+                            <td width="85%" valign="top"><p><strong><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Speech</span></strong></p></td>
+                          </tr>
+                          <tr>
+                            <td valign="top"><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                            <td valign="top"><p><strong><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Advance Information    Extraction Technology for Information Mangagement</span><br />
+                                </strong><br />
+                                <em><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Dr Jian    Su</span></em><br />
+                                <em><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Research    Scientist, Leader,Information Extraction and Text Mining Group, Institute for    Infocomm Research, Singapore</span></em></p></td>
+                          </tr>
+                          <tr>
+                            <td valign="top"><p><strong><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >0950-1050</span></strong></p></td>
+                            <td valign="top"><p><strong><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Session 9&nbsp;</span> </strong><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >(Chair: Prof Donghong Ji)</span> </p></td>
+                          </tr>
+                          <tr>
+                            <td valign="top"><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                            <td valign="top"><p><strong><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >On the Cognitive    Subcategories in WordNet</span></strong><br />
+                                    <em><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Dan Hu,    Jianqiang Zhang</span> </em><br />
+                                    <em><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Center    for Study of Language &amp; Information, Wuhan University, Wuhan, China;    School of Foreign Languages, Yantai University, Yantai, China</span></em></p>
+                                <p><strong><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Japanese Personal Name and    Location Search for Spoken Utterances by Using Hierarchical Language Model of    Speech Recognition</span></strong><br />
+                                    <em><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Xinhui    Hu, Youzheng Wu, Hideki Kashioka</span></em><br />
+                                    <em><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >National    Institute of Information and Communications    Technology, Japan; ATR Spoken Language Translation Research Laboratories,    Japan</span></em></p>
+                              <p><strong><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Duration Modeling for    Bangla Text to Speech Synthesis System</span></strong><br />
+                                    <em><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Rajib    Roy, Tulika Basu, Arup Saha, Joyanta Basu, Shyamal Kr Das Mandal</span></em><br />
+                                    <em><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >CDAC Kolkata, India</span></em> </p></td>
+                          </tr>
+                          <tr>
+                            <td valign="top"><p><strong><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >1050-1110</span></strong></p></td>
+                            <td valign="top"><p align="center"><strong><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Tea Break</span></strong></p></td>
+                          </tr>
+                          <tr>
+                            <td valign="top"><p><strong><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >1110-1230</span></strong></p></td>
+                            <td valign="top"><p align="left"><strong><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Session 10</span></strong> <span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >(Chair: Dr Dan Hu)</span> </p></td>
+                          </tr>
+                          <tr>
+                            <td valign="top"><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                            <td valign="top"><p><strong><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >An Experimental Phonetic    Study of Corresponding Relation between Information Focus and Sentence Stress</span></strong><br />
+                                    <em><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Jing    Wan, Han Ren</span></em><br />
+                                    <em><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >Center    for Study of Language &amp; Information, Wuhan University,    China; School of Computer    Science, Wuhan University,    Wuhan, China</span></em></p>
+                                <p><strong><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >On the Remote Monitoring    and Controlling Function of Short Message Service</span></strong><br />
+                                    <em><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Jinglian    Gao</span> </em><br />
+                                <em><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Center    for Study of Language and Information, Wuhan      University, China</span></em></p>
+                              <p><strong><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Local Cluster Analysis: a    New Approach for Evaluating Different Document Clustering Algorithms by Huge    Corpora</span></strong><br />
+                                    <em><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Amir    Hossein Jadidinejad, Abolfazl Toroghi Haghighat</span></em><br />
+                                    <em><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Computer Engineering    Department, Islamic Azad University, Qazvin,     Iran</span></em></p></td>
+                          </tr>
+                          <tr>
+                            <td valign="top"><p><strong><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >12:30-13:00</span></strong><strong> </strong></p></td>
+                            <td valign="top"><p align="left"><strong> <span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Closing Ceremony&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span> </strong><strong> </strong></p></td>
+                          </tr>
+                          
+                          <tr>
+                            <td valign="top"><p align="left"><strong><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >13:00-14:00</span></strong></p></td>
+                            <td><p align="center"><strong><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></strong></p></td>
+                          </tr>
+                          <tr>
+                            <td valign="top"><p align="left"><strong><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >14:00-16:00</span></strong></p></td>
+                            <td valign="top"><p align="center"><strong><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >Visit to CS department,    Chiang Mai University</span></strong></p></td>
+                          </tr>
+                          <tr>
+                            <td valign="top"><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+                            <td valign="top"><p align="left"><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Interested delegates may join the visit to Department of Computer    Science, Chiang     Mai University.</span></p></td>
+                          </tr>
+                        </table>
+                      </div>
+                      <!-- InstanceEndEditable --></div></td>
+                </tr>
+              </table>
+            </div></td>
+        </tr>
+      </table></td>
+  </tr>
+  <tr>
+    <td valign="middle" background="images/bg40.jpg" id="FooterBlock"><div align="center" class="style12"><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Copyright</span> 
+    <span class="style12 style16"><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >&copy;</span></span> <span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >2007-2008 Chinese and Oriental Languages Information Processing Society</span>

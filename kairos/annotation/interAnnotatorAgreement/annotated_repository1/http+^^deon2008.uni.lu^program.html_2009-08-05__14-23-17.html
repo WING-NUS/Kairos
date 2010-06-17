@@ -1,0 +1,615 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+      "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session1/3/annotation/annotated_repository/http+^^deon2008.uni.lu^program.html_2009-08-05__14-23-17.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session1/3/annotation/annotated_repository/http+^^deon2008.uni.lu^program.html_2009-08-05__14-23-17.yaml created on Thu Aug 13 13:46:03 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<title>DEON'08</title>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+<link rel="stylesheet" type="text/css" href="deon08.css"/>
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<div id="container1">
+
+
+<div id="header1">
+  <h1><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Ninth International Conference on Deontic Logic in Computer Science (DEON'08)</span></h1>
+  <h3><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Luxembourg, 15&ndash;18 July, 2008</span></h3>
+</div>
+
+
+<div id="navbar1">
+  <span onclick="return false" style="text-decoration:underline; color:blue" href="cfp.html"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span>
+  <span onclick="return false" style="text-decoration:underline; color:blue" href="normas08.html"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >NORMAS workshop</span></span>
+  <span onclick="return false" style="text-decoration:underline; color:blue" href="registration.php"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span>
+  <span onclick="return false" style="text-decoration:underline; color:blue" href="program.html" class="here1"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span>
+  <span onclick="return false" style="text-decoration:underline; color:blue" href="organization.html"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Organization</span></span>
+  <span onclick="return false" style="text-decoration:underline; color:blue" href="location.html"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Venue, Travel and Stay</span></span>
+  <span onclick="return false" style="text-decoration:underline; color:blue" href="publications.html"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Publications, Deon links</span></span>
+</div>
+
+
+<div id="main1">
+<p>
+<h3><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday July 15</span></h3>
+<table border="1">
+<tr>
+<td WIDTH=85><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >daytime</span></td>
+<td> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="normas08.html"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >NORMAS Workshop</span></span> <span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >(and registration DEON+NorMAS)</span></td>
+</tr>
+
+<tr>
+<td> <span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >18:15 - 20:15</span> </td>
+<td> <i> <span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Guided Tour through the City of Luxembourg</span> </i> </td>
+</tr> 
+
+</table>
+
+<p>
+<h3><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday July 16</span></h3>
+<table border="1">
+<tr>
+<td WIDTH=85><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >morning</span> </td>
+<td> <span onclick="return false" style="text-decoration:underline; color:blue" HREF="normas08.html"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >NORMAS Workshop</span></span> <span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >(and registration DEON+NorMAS)</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >12:15 - 13:45</span></td>
+<td><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >13:45 - 14:00</span> </td>
+<td> <span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Opening Remarks</span></td>
+</tr>
+
+<tr>
+<td> <span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >14:00 - 15:00</span> <br>
+     <b> <span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Invited talk</span> </b> 
+    <!--(shared with normas)-->
+</td>
+<td> <b><span onclick="return false" style="text-decoration:underline; color:blue" href="#14151607"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Norms in Branching Space-times</span></span></b> <span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >( Nuel Belnap )</span></td>
+</tr>
+
+<tr>
+<td> <span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >15:00 - 15:30</span> </td>
+<td> <span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></td>
+</tr>
+
+<tr>
+<td> <span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >15:30 - 16:00</span> </td>
+<td> <b><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Changing Legal Systems: Abrogation and Annulment. Part I: Revision of Defeasible Theories</span> </b> <span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >(Governatori, Rotolo)</span></td>
+</tr>
+
+<tr>
+<td> <span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >16:00 - 16:30</span></td>
+<td> <b> <span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Acting, Events and Actions</span></b>  <span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >(Brown)</span></td>
+</tr>
+
+<tr>
+<td> <span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >16:30 - 17:00</span></td>
+<td> <b><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >A Tableaux System for Deontic Action Logic</span></b>  <span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >(Castro, Maibaum)</span></td>
+</tr>
+
+</table>
+<!-- ____________________________________________________________________________________________________________________________________________-->
+<p>
+<h3><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Thursday July 17: (Special Theme - Security)</span></h3>
+<table border="1">
+<tr>
+<td WIDTH=85> <span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >09:30 - 10:30</span>  <br> <b><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Invited talk</span></b></td>
+<td><span onclick="return false" style="text-decoration:underline; color:blue" href="#931031707"><b><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Information Security Economics - and Beyond</span></b></span> <span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >(Ross Anderson)</span></td>
+</tr>
+
+<tr>
+<td><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >10:30 - 11:00</span>  </td>
+<td><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></td>
+</tr>
+
+<tr>
+<td> <span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >11.00 - 11:30</span> </td>
+<td> <b><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Trust and norms in the context of computer security</span> </b> <span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >(Demolombe, Lorini)</span></td>
+</tr>
+
+<tr>
+<td><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >11:30 - 12:00</span> </td>
+<td> <b> <span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Specifying Intrusion Detection and Reaction Policies: An Application of Deontic Logic</span></b> <span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >(Cuppens, Cuppens)</span></td>
+</tr>
+
+<tr>
+<td> <span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >12:00 - 12:30</span></td>
+<td> <b><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Delegation of Control in Administrative Procedures</span> </b> <span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >(Hulstijn, Liu, Tan)</span></td>
+</tr>
+
+<tr>
+<td><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >12:30 - 14:00</span>  </td>
+<td> <span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></td>
+</tr>
+
+<tr>
+<td> <span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >14:00 - 15:00</span> <br>
+     <b><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span></b></td>
+<td> <b><span onclick="return false" style="text-decoration:underline; color:blue" href="#14151707"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Access Control and Logics</span></span> </b> <span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >(Martin Abadi)</span></td>
+</tr>
+
+<tr>
+<td> <span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >15:00 - 15:30</span> </td>
+<td> <span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></td>
+</tr>
+
+
+<tr>
+<td> <span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >15:30 - 16:00</span></td>
+<td> <b> <span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Reasoning about Conditions and Exceptions to Laws in Regulatory Conformance Checking</span></b> <span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >(Dinesh, Joshi, Lee, Sokolsky)</span></td>
+</tr>
+
+
+<tr>
+<td><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >16:00 - 16:30</span> </td>
+<td> <b> <span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >A Logical Analysis of the Interaction between `Obligation-to-do' and `Knowingly Doing'</span></b> <span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >(Broersen)</span></td>
+</tr>
+
+<tr>
+<td><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >19:00 - 00:00</span></td>
+<td> <i> <span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Conference dinner at Bourglinster Castle.</span> </i></td>
+</tr>
+</table>
+<!--____________________________________________________________________________________________________________________________________________-->
+<p>
+<h3><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Friday, July 18</span></h3>
+
+<table border="1">
+<tr>
+<td WIDTH=85><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >09:00 - 10:00</span> <br>
+    <b><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span></b> </td>
+<td> <b><span onclick="return false" style="text-decoration:underline; color:blue" href="#09101807"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Reactive Kripke Models and Contrary to Duty Obligations</span> </span></b> <span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >(Dov Gabbay)</span></td>
+</tr> 
+
+<tr>
+<td> <span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >10:00 - 10:30</span> </td>
+<td> <span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></td>
+</tr> 
+
+<tr>
+<td> <span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >10:30 - 11:00</span></td>
+<td> <b><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Normative consequence: The dilemma of keeping it whilst giving it up</span> </b> <span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >(Stolpe)</span></td>
+</tr>
+
+<tr>
+<td> <span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >11:00 - 11:30</span></td>
+<td> <b><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Conditional Obligation and Incomparability. On the Strong Completeness of Aqvist's Dyadic Deontic Logic G</span> </b> <span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >(Parent)</span></td>
+</tr>
+
+<tr>
+<td> <span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >11:30 - 12:00</span></td>
+<td> <b> <span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Strata of Intervenient Concepts in Normative Systems</span></b> <span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >(Lindahl, Odelstad)</span></td>
+</tr>
+
+<tr>
+<td> <span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >12:00 - 13:30</span> </td>
+<td> <span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></td>
+</tr>
+
+<tr>
+<td><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >13:30 - 14:00</span> </td>
+<td> <b><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >A Deontic Logic for Socially Optimal Norms</span></b> <span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >(Broersen, Mastop, Meyer, Turrini)</span></td>
+</tr> 
+
+<tr>
+<td><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >14:00 - 14:30</span> </td>
+<td> <b><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Praise, Blame, Obligation, and Beyond: Toward a Comprehensive Framework for the Classical Conception of Supererogation and Kin</span></b> <span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >(McNamara)</span></td>
+</tr> 
+
+<tr>
+<td> <span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >14:30 - 15:00</span> </td>
+<td><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></td>
+</tr> 
+
+<tr>
+<td><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >15:00 - 15:30</span> </td>
+<td> <b> <span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Graded Deontic Logics</span></b> <span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >(Dellunde, Godo)</span></td>
+</tr>
+
+<tr>
+<td><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >15:30 - 16:00</span> </td>
+<td> <b><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Pushing Anderson's Envelope: The Modal Logic of Ascription</span></b> <span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >(Grossi)</span></td>
+</tr> 
+
+<tr>
+<td><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >16:00 - 16:15</span> </td>
+<td>  <span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Closing Remarks</span> </td>
+</tr>  
+</table>
+<p>
+<!--____________________________________________________________________________________________________________________________________________________-->
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" name="14151607"></span><b><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Norms in Branching Space-times</span></b> <span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >by Nuel Belnap on 16. Jul. 2008, 14:00 - 15:00</span>
+<div> <span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >The idea of norms presupposes agency, and agency presupposes an indeterministic causal order (so that "ought" does not imply "is"). So much can be modeled in "branching time with agents and choices" (BTAC). The seriously ontological independence of agentive choices, however, requires, as a necessary condition, a causal order permitting space-like separation of those choices in a sense definable in "branching space-times with agents and choices" (BSTAC). Let us idealize an agent, when restricted to a single space-time, as a kind of spatio-temporal "worm" in the familiar way, representing the life of the agent in that space-time. Then a representation of "the agent," since it must include representation of seriously objective choices, must look like a tree with two kinds of branching. In both kinds of branching, there is a single past-pointing worm-like representation of the past-life of the agent up to the branching, and an entire assemblage of distinct worm-like representations of the possible future-life of the agent subsequent to the branching, one for each history in which the
+life of the agent continues. The first kind of branching occurs at choice-points for the agent. According to BSTAC, such branching will involve a last point of agent's-choice-not-yet-made (say, a last point of deliberation), but no first point of agent's-choice-has-been-made in any possible future-life of the agent. In the second kind of branching, the agent is passive, having two or more possible future-lives due to space-like-related choices by other agents, or by metaphorical
+"choices" by some space-like-related element of Nature. In this case, BSTAC says that there will be no last point of the past-life of the agent, but instead a first point for each of the agent's possible future-lives.</span></div>
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" name="931031707"></span><b><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Information Security Economics - and Beyond</span></b> <span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >by Ross Anderson on 17. Jul. 2008, 09:30 - 10:30</span>
+<div> <span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >The economics of information security has recently become a thriving and fast-moving discipline. As distributed systems are assembled from machines belonging to principals with divergent interests, incentives are becoming as important to dependability as technical design. The new field provides valuable insights not just into security topics such as privacy, bugs, spam, and phishing, but into more general areas such as system dependability (the design of peer-to-peer systems and the optimal balance of effort by programmers and testers), and policy (particularly digital rights management). This research program has been starting to spill over into more general security questions (such as law-enforcement strategy), and into the interface between security and the social sciences. Most recently it has started to interact with psychology, both through the psychology-and-economics tradition and in response to phishing. The promise of this research program is a novel framework for analyzing information security problems {one that is both principled and effective.</span>
+</div>
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" name="14151707"></span><b><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Access Control and Logics</span></b> <span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >by Martin Abadi on 17. Jul. 2008, 14:00 - 15:00</span>
+<div> <span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >While access control appears in various guises in many aspects of
+  computer systems, it is attractive to reduce it, as much as
+  possible, to few central concepts and rules. The development and use
+  of general logics for access control is an ongoing effort in this
+  direction. In this talk, we examine several logics for access
+  control and discuss some of their intended applications. Some of the
+  principles that we consider come from modal logic, computational
+  lambda calculus, and other standard formal systems. Others stem from
+  ideas in security, such as delegations of authority and the
+  Principle of Least Privilege.</span>
+</div>
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" name="09101807"></span><b><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Reactive Kripke Models and Contrary to Duty Obligations</span></b> <span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >by Dov Gabbay on 17. Jul. 2008, 09:00 - 10:00</span>
+<div> <span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >This is an intuitive description of our approach to modelling contrary to duty obligations. We shall describe our ideas through the analysis of typical problematic examples taken from Carmo and Jones [6], L. van der Torre [14] and Prakken and Sergot [5].</span>
+</div>
+
+
+<p>
+<img onmousedown="imd(this)" src="pics/bourglinster.jpg" alt="a picture of Bourglinster Castle"/><br/>
+<span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >The conference dinner will take place on Thursday July 17, in Bourglinster Castle.</span>
+</p>
+
+</div>
+
+
+<div id="footer1">
+  <span onclick="return false" style="text-decoration:underline; color:blue" href="index.html" id="home1"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >DEON'08</span>

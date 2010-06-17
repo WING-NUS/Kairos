@@ -1,0 +1,733 @@
+<html>
+
+
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/3/annotation/annotated_repository/http+^^www.hicomb.org^proceedings.html_2009-08-05__14-36-41.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/3/annotation/annotated_repository/http+^^www.hicomb.org^proceedings.html_2009-08-05__14-36-41.yaml created on Thu Aug 13 13:57:07 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<title>HiCOMB Online Proceedings</title>
+<base target="_self">
+<LINK REL="SHORTCUT ICON" HREF="favicon.ico">
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)" background="helix.gif"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<h2><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hicomb.org/HiCOMB2009/index.html"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >HiCOMB 2009</span></span> <span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Online Proceedings</span></h2>
+<h2><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Eighth IEEE International Workshop on High Performance Computational Biology</span></h2>
+<h2><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Rome, Italy, May 25, 2009</span></h2>
+<ul>
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2009-00.pdf"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Introductory Remarks</span></span><br>
+   <span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Michela Taufer, Srinivas Aluru, and David A. Bader</span></font></li>
+ 
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2009-01.pdf"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >De Novo Modeling of GPCR Class A Structures</span></span><br>
+   <span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Charles L. Brooks III</span></font></li>
+ 
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2009-02.pdf"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Parallel Reconstruction of Neighbor-Joining Trees for Large Multiple Sequence Alignments using CUDA</span> </span><br>
+   <span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Yongchao Liu, Bertil Schmidt, and Douglas Maskell</span></font></li>
+ 
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2009-03.pdf"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Accelerating Error Correction in High-Throughput Short-Read DNA Sequencing Data with CUDA</span> </span><br>
+   <span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Haixiang Shi, Bertil Schmidt, Weiguo Liu, and Wolfgang Mueller-Wittig</span></font></li>
+ 
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2009-04.pdf"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Parallel Monte Carlo Study on Caffeine-DNA Interaction in Aqueous Solution</span> </span><br>
+   <span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Michael Kalugin and Alexandr Teplukhin</span></font></li>
+ 
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2009-05.pdf"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Dynamic Parallelization for RNA Structure Comparison</span></span><br>
+   <span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Eric Aubanel, Patricia Evans, and Eric Snow</span></font></li>
+ 
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2009-06.pdf"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >HMMer Acceleration Using Systolic Array Based Reconfigurable Architecture</span> </span><br>
+   <span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Yanteng Sun, Peng Li, Guochang Gu, Yuan Wen, Yuan Liu, and Dong Liu</span></font></li>
+ 
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2009-07.pdf"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >A Resource-Efficient Computing Paradigm for Computational Protein Modeling Applications</span> </span><br>
+   <span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Yaohang Li, Dougalas Wardell, and Vincent Freeh</span></font></li>
+ 
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2009-08.pdf"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Exploring FPGAs for Accelerating the Phylogenetic Likelihood Function</span> </span><br>
+   <span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Nikolaos Alachiotis, Euripides Sotiriades, Apostolos Dollas, and Alexandros Stamatakis</span></font></li>
+ 
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2009-09.pdf"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Long Time-scale Simulations of in vivo Diffusion using GPU Hardware</span></span><br>
+   <span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Elijah Roberts, John Stone, Leonardo Sepulveda, Wen-Mei Hwu, and Zaida Luthey-Schulten</span></font></li>
+ 
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2009-10.pdf"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >An Efficient Implementation Smith Waterman Algorithm on GPU using CUDA, for Massively Parallel Scanning of Sequence Databases</span> </span><br>
+   <span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Lukasz Ligowski and Witold Rudnicki</span></font></li>
+ 
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2009-11.pdf"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >A Novel Framework for Modeling Ion Channels</span></span><br>
+   <span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >May Siksik and Vikram Krishnamurthy</span></font></li>
+ 
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2009-12.pdf"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >High-throughput Protein Structure Determination using Grid Computing</span></span><br>
+   <span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Jason W. Schmidberger, Blair Bethwaite, Colin Enticott, Mark A. Bate, Steve G. Androulakis, Noel Faux, Cyril F. Reboul, Jennifer M. N. Phan, James C. Whisstock, Wojtek J. Goscinski, Slavisa Garic, David Abramson, and Ashley M. Buckle</span></font></li>
+ 
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2009-13.pdf"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Folding@home: Lessons From Eight Years of Volunteer Distributed Computing</span> </span><br>
+   <span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Adam L. Beberg, Guha Jayachandran, Siraj Khaliq, Vijay S. Pande</span></font></li>
+ 
+</ul>
+
+
+
+<hr>
+
+<h2><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hicomb.org/HiCOMB2008/index.html"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >HiCOMB 2008</span></span> <span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Online Proceedings</span></h2>
+<h2><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Seventh IEEE International Workshop on High Performance Computational Biology</span></h2>
+<h2><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Miami, FL, April 14, 2008</span></h2>
+<ul>
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2008-00.pdf"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Introductory Remarks</span></span><br>
+   <span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Bertil Schmidt, Srinivas Aluru, and David A. Bader</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2008-01.pdf"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Ordered Index Seed Algorithm for Intensive DNA Sequence Comparison</span></span><br>
+   <span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >D. Lavenier</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2008-02.pdf"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Parallel, Scalable, Memory-Efficient Backtracking for Combinatorial Modeling of Large-Scale Biological Systems</span></span><br>
+   <span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >B.-H. Park, M. Schmidt, K. Thomas, T. Karpinets, N.F. Samatova</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2008-03.pdf"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Parallelized preprocessing algorithms for high-density oligonucleotide array data</span></span><br>
+   <span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >M. Schmidberger, U. Mansmann</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2008-04.pdf"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >On the Effectiveness of Rebuilding RNA Secondary Structures from Sequence Chunks</span></span><br>
+   <span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >M. Taufer, T. Solorio, A. Licon, D. Mireles, M.-Y. Leung</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2008-05.pdf"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >A Parallel Architecture for Regulatory Motif Algorithm Assessment</span></span><br>
+   <span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >D. Quest, K. Dempsey, D. Bastola, H. Ali</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2008-06.pdf"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Design and Development of a FPGA-based Cascade Markov Model for Recognition of Steroid Hormone Response Elements</span></span><br>
+   <span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >M. Stepanova, F. Lin, V. Lin</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2008-07.pdf"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Supporting High Performance Bioinformatics Flat-File Data Processing</span></span><br>
+   <span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >X. Zhang, G. Agrawal</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2008-08.pdf"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Sample-Align-D: A High Performance Multiple Sequence Alignment System using Phylogenetic Sampling and Domain Decomposition</span></span><br>
+   <span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >F. Saeed, A. Khokhar</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2008-09.pdf"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Adaptive Locality-Effective Kernel Methods for Phosphorylation Site Prediction</span></span><br>
+   <span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >P. Yoo, Y.S. Ho, B.B. Zhou, A. Zomaya</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2008-10.pdf"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Impacts of Multicores on Large-scale Molecular Dynamics Simulations</span></span><br>
+   <span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >S. Alam, J. Vetter, P. Agarwal, H. Ong, S. Hampton</span></font></li>
+
+
+</ul>
+
+<hr>
+      
+
+<h2><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hicomb.org/HiCOMB2007/index.html"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >HiCOMB 2007</span></span> <span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Online Proceedings</span></h2>
+<h2><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Sixth IEEE International Workshop on High Performance Computational Biology</span></h2>
+<h2><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Long Beach, CA, March 26, 2007</span></h2>
+<ul>
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2007-00.pdf"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Introductory Remarks</span></span><br>
+   <span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Ananth Grama, Shankar Subramaniam, Srinivas Aluru, and David A. Bader</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2007-01.pdf"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >On the path to enable multi-scale biomolecular simulations on Petaflop supercomputer with multi-core processors</span></span><br>
+   <span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Sadaf Alam, Pratul Agarwal</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2007-02.pdf"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Analysis of a Computational Biology Simulation Technique on Emerging Processing Architectures</span></span><br>
+   <span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Jeremy Meredith, Sadaf Alam, Jeffrey S. Vetter</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2007-03.pdf"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >A Graph-Theoretic Analysis of the Human Protein-Interaction Network Using Multicore Parallel Algorithms</span></span><br>
+   <span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >David A. Bader, Kamesh Madduri</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2007-04.pdf"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Biomolecular Path Sampling Enabled by Processing in Network Storage</span></span><br>
+   <span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Paul Brenner, Justin Wozniak, Jesus Izaguirre, Aaron Striegel, Douglas Thain, Jeff Peng</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2007-05.pdf"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Preliminary results in accelerating profile HMM search on FPGAs</span></span><br>
+   <span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Arpith Jacob, Joseph Lancaster, Jeremy Buhler, Roger Chamberlain</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2007-06.pdf"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >High Performance Database Searching with HMMer on FPGAs</span></span><br>
+   <span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Tim Oliver, Leow Yuan Yeow, Bertil Schmidt</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2007-07.pdf"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Exploring the viability of the Cell Broadband Engine for bioinformatics applications</span></span><br>
+   <span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Vipin Sachdeva, Mike Kistler, Evan Speight, Tzy-Hwa Kathy Tzeng</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2007-08.pdf"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Data-Driven Time-Parallelization in the AFM Simulation of Proteins</span></span><br>
+   <span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Lei Ji, Hugh Nymeyer, Ashok Srinivasan, Yanan Yu</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2007-09.pdf"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >RNAVLab: A unified environment for computational RNA structure analysis based on grid computing technology</span></span><br>
+   <span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Michela Taufer, Ming-Ying Leung, Kyle L. Johnson, Abel Licon</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2007-10.pdf"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >An Automated Data Processing Pipeline for Virus Structure Determination at High Resolution</span></span><br>
+   <span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Chen Yu, Dan C. Marinescu, John P. Morrison, Brian C. Clayton, David A. Power</span></font></li>
+
+</ul>
+
+<hr>
+      
+
+<h2><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hicomb.org/HiCOMB2006/index.html"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >HiCOMB 2006</span></span> <span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Online Proceedings</span></h2>
+<h2><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Fifth IEEE International Workshop on High Performance Computational Biology</span></h2>
+<h2><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Rhodes Island, Greece, April 25, 2006</span></h2>
+<ul>
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2006-00.pdf"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Introductory Remarks</span></span><br>
+   <span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Chau-Wen Tseng, David A. Bader, and Srinivas Aluru</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2006-01.pdf"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Bio-Sequence Database Scanning on a GPU</span></span><br>
+   <span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Weiguo Liu, Bertil Schmidt, Gerrit Voss, Andre Schroder, Wolfgang Muller-wittig</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2006-02.pdf"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Some Initial Results on Hardware BLAST Acceleration with a Reconfigurable Architecture</span></span><br>
+   <span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Euripides Sotiriades, Christos Kozanitis, Apostolos Dollas</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2006-03.pdf"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Phylospaces: Reconstructing Evolutionary Trees in Tuple Space</span></span><br>
+   <span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Marc L. Smith, Tiffani L. Williams</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2006-04.pdf"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Parallel Implementation of a Quartet-Based Algorithm for Phylogenetic Analysis</span></span><br>
+   <span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >B. B. Zhou, D. Chu, M. Tarawneh, P. Wang, C. Wang, A. Y. Zomaya, R. P. Brent</span> </font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2006-05.pdf"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Phylogenetic Models of Rate Heterogeneity: A High Performance Computing Perspective</span></span><br>
+   <span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Alexandros Stamatakis</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2006-06.pdf"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Parallel Multiple Sequence Alignment with Local Phylogeny Search by Simulated Annealing</span></span><br>
+   <span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Jaroslaw Zola, Denis Trystram, Andrei Tchernykh, Carlos Brizuela</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2006-07.pdf"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >MT-ClustalW: Multithreading Multiple Sequence Alignment</span></span><br>
+   <span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Kridsadakorn Chaichoompu, Surin Kittitornkun, Sissades Tongsima</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2006-08.pdf"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Parallel Implementation of the Replica Exchange Molecular Dynamics Algorithm on Blue Gene/L</span></span><br>
+   <span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >M. Eleftheriou, A. Rayshubski, J. W. Pitera, B. G. Fitch, R. Zhou, R. S. Germain</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2006-09.pdf"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Application Re-Structuring and Data Management on a GRID Environment: a Case Study for Bioinformatics</span></span><br>
+   <span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Giovanni Ciriello, Matteo Comin, Concettina Guerra</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2006-10.pdf"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >A Method to Improve Structural Modeling Based on Conserved Domain Clusters</span></span><br>
+   <span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Fa Zhang, Lin Xu, Bo Yuan</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2006-11.pdf"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >An Experimental Study of Optimizing Bioinformatics Applications</span></span><br>
+   <span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Guangming Tan, Lin Xu, Shengzhong Feng, Ninghui Sun</span></font></li>
+
+</ul>
+
+<hr>
+
+
+<h2><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hicomb.org/HiCOMB2005/index.html"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >HiCOMB 2005</span></span> <span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Online Proceedings</span></h2>
+<h2><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Fourth IEEE International Workshop on High Performance Computational Biology</span></h2>
+<h2><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Denver, CO, April 4, 2005</span></h2>
+<ul>
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2005-00.pdf"><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Introductory Remarks</span></span><br>
+   <span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Nancy Amato, David A. Bader, and Srinivas Aluru</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2005-01.pdf"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >BioFilter: An architecture for parallel deployment and dynamic chaining of standalone bioinformatics tools</span></span><br>
+   <span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Thomas Brettin and Avinash Kewalramani</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2005-02.pdf"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Comparison of Different Versions of Current BLAST Software on Nucleotide Sequences</span></span><br>
+   <span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >I. Elizabeth Cha and Eric Rouchka</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2005-03.pdf"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Statistical Methods for the Discovery of Co-operative Transcription Factors: the Co-bind code revised</span></span><br>
+   <span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Giovanni Lavorgna, Alessandro Marongiu, Simone Melchionna, Paolo Palazzari, Vittorio Rosato, and Paolo Verrecchia</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2005-04.pdf"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >A Case Study on Pattern-based Systems for High Performance</span></span><br>
+   <span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Weiguo Liu and Bertil Schmidt</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2005-05.pdf"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >High-Performance Direct Pairwise Comparison of Large Genomic Sequences</span></span><br>
+   <span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Chris Mueller, Mehmet Dalkilic and Andrew Lumsdaine</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2005-06.pdf"><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >RC-BLAST: Towards an Open Source Hardware Implementation</span></span><br>
+   <span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Krishna Muriki, Keith Underwood and Ron Sass</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2005-07.pdf"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >FROST: Revisited and Distributed</span></span><br>
+   <span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Vincent Poirriez, Antoine Marin, Rumen Andonov and Jean-Francois Gibrat</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2005-08.pdf"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >An Efficient Program for Phylogenetic Inference Using Simulated Annealing</span></span><br>
+   <span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Alexandros Stamatakis</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2005-09.pdf"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Predictor@Home: A "Protein Structure Prediction Supercomputer" Based on Public-Resource Computing</span></span><br>
+   <span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Michela Taufer and C. An and A. Kerstens and C.L. Brooks III</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2005-10.pdf"><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >ESTmapper: Efficiently Aligning DNA Sequences to Genomes</span></span><br>
+   <span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Xue Wu, Woei-Jyh (Adam) Lee and Chau-Wen Tseng</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2005-11.pdf"><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Folding@Home: Advances in biophysics and biomedicine from world-wide grid computing (invited keynote)</span></span><br>
+   <span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Vijay Pande</span></font></li>
+
+</ul>
+
+<hr>
+
+
+<h2><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hicomb.org/HiCOMB2004/index.html"><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >HiCOMB 2004</span></span> <span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Online Proceedings</span></h2>
+<h2><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Third IEEE International Workshop on High Performance Computational Biology</span></h2>
+<h2><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Santa Fe, NM, April 26, 2004</span></h2>
+<ul>
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2004-00.pdf"><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Introductory Remarks</span></span><br>
+      <span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Dan C. Marinescu, David A. Bader, and Srinivas Aluru</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2004-01.pdf"><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Three-dimensional reconstruction of viruses: challenges and strategies</span></span><br>
+      <span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Timothy S. Baker</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2004-02.pdf"><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Study of a Highly Accurate and Fast-Protein Ligand Docking Algorithm Based Upon Molecular Dynamics</span></span><br>
+      <span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >M. Taufer, M. Crowley, D. Price, A.A. Chien, and C. L. Brooks III</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2004-03.pdf"><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Parallel Protein Folding with STAPL</span></span><br>
+      <span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >S. Thomas and N. Amato</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2004-04.pdf"><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >A Hypergraph Model for the Yeast Protein Complex Network</span></span><br>
+      <span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >E. Ramadan, A. Tarafdar, and A. Pothen</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2004-05.pdf"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Dynamic Programming for LR-PCR Segmentation of Bacterium Genomes</span></span><br>
+      <span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >R. Andonov, D. Lavenier, N. Yanev, and P. Veber</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2004-06.pdf"><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Parallel RNA Sequence-Structure Alignment</span></span><br>
+      <span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >T. Liu and B. Schmidt</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2004-07.pdf"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Constrained De Novo Peptide Identification via Multiobjective Optimization</span></span><br>
+      <span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >J. M. Mallard, A. Heredia-Langner, D.J. Baxter, K. H. Jarman, and W. R. Cannon</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2004-08.pdf"><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Identification of Mycobacteriun Species Using Curated Custom Databases</span></span><br>
+      <span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >D. Kuyper, H. Ali, A. M. Mohamed, and S. H. Hinrichs</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2004-09.pdf"><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >High Performance Computational Tools for Motif Discovery</span></span><br>
+      <span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >N. E. Baldwin, R. L. Collins, M. A. Langston, M. R. Leuze, C. T. Symons, and B. H. Voy</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2004-10.pdf"><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >High Performance Biosequence Database Scanning on Reconfigurable Platforms</span></span><br>
+      <span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >T. Oliver and B. Schmidt</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2004-11.pdf"><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >New Fast and Acurate Heuristics for Inference of Large Phylogenic Trees</span></span><br>
+      <span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >A.P. Stamatakis, T. Ludwig, and H. Meier</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2004-12.pdf"><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Large-Scale Simulation of Eukaryotic Cell Signaling Processes</span></span><br>
+      <span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >J. H. Miller and F. Zheng</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2004-13.pdf"><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Particle Swarm Optimization and Neural Network Application for QSAR</span></span><br>
+      <span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Z. Wang, G. L. Durst, R.C. Eberhart, D.B. Boyd, and Z. B. Miled</span></font></li>
+
+</ul>
+
+<hr>
+
+<h2><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hicomb.org/HiCOMB2003/index.html"><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >HiCOMB 2003</span></span> <span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Online Proceedings</span></h2>
+<h2><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Second IEEE International Workshop on High Performance Computational Biology</span></h2>
+<h2><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Nice, France, April 22, 2003</span></h2>
+
+<ul>
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2003-00.pdf"><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Introductory Remarks</span></span><br>
+   <span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >S. Aluru and D.A. Bader</span></font></li>
+      
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2003-01.pdf"><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Sequence Alignment on the Cray MTA-2</span></span><br>
+   <span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Shahid H. Bokhari and Jon R. Sauer</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2003-02.pdf"><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Using Hybrid Alignment for Iterative Sequence Database Searches</span></span><br>
+   <span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Yuheng Li, Mario Lauria, and Ralf Bundschuh</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2003-03.pdf"><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >A Fast Algorithm for the Exhaustive Analysis of 12-Nucleotide-Long DNA Sequences: Applications to Human Genomics</span></span><br>
+   <span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Vicente Arnau and Ignacio Mar&iacute;n</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2003-04.pdf"><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Realtime Primer Design for DNA chips</span></span><br>
+   <span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Harald Simmler, H. Singpiel, and R. M&auml;nner</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2003-05.pdf"><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Accurate method for fast design of diagnostic oligonucleotide probe sets for DNA microarrays</span></span><br>
+   <span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Andreas Krause, Markus Kr&auml;utner, and Harald Meier</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2003-06.pdf"><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Gene Clustering using Self-Organizing Maps and Particle Swarm Optimization</span></span><br>
+   <span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >X. Xiao, E. Dow, R. Eberhart, Z. Ben Miled, and R. J. Oppelt</span></font></li>
+   
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2003-07.pdf"><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Protein Structure Prediction by Applying an Evolutionary Algorithm</span></span><br>
+   <span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Richard O. Day, Gary B. Lamont, and Ruth Pachter</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2003-08.pdf"><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >PROSIDIS: a Special Purpose Processor for PROtein SImilarity DIScovery</span></span><br>
+   <span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >A. Marongiu, P. Palazzari, and V. Rosato</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2003-09.pdf"><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Parallelisation of IBD computation for determining genetic disease map</span></span><br>
+   <span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Nouhad J. Rizk</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2003-10.pdf"><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Parallel Detection of Regulatory Elements with gMP</span></span><br>
+   <span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Bertil Schmidt, Lin Feng, Amey Laud, and Yusdi Santoso</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2003-11.pdf"><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Solving the Protein Threading Problem in Parallel</span></span><br>
+   <span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Nicola Yanev and Rumen Andonov</span></font></li>
+
+   <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2003-12.pdf"><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Phylogenetic Tree Inference on PC Architectures with AxML/PAxML</span></span><br>
+   <span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Alexandros P. Stamatakis and Thomas Ludwig</span></font></li>
+
+</ul>
+
+<hr>
+
+<h2><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hicomb.org/HiCOMB2002/index.html"><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >HiCOMB 2002</span></span> <span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Online Proceedings</span></h2>
+<h2><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >First IEEE International Workshop on High Performance Computational Biology</span></h2>
+<h2><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Fort Lauderdale, FL, April 15, 2002</span></h2>
+
+<ul>
+  <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2002-00.pdf"><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Introductory Remarks</span></span><br>
+      <span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >S. Aluru and D.A. Bader</span></font></li>
+  <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2002-01.pdf"><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >TurboBLAST: A Parallel Implementation of BLAST Based on the TurboHub
+    Architecture for High Performance Bioinformatics</span></span><br>
+      <span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >R.D. Bjornson, A.H. Sherman, S.B. Weston, N.Willard, and J. Wing</span></font></li>
+  <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2002-02.pdf"><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >Improving Performance of Multiple Sequence Alignment Analysis in
+    Multi-client Environments</span></span><br>
+      <span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >U. Catalyurek, R. Ferreira, T. Kurc, and J. Saltz</span></font></li>
+  <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2002-03.pdf"><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >TCS: Estimating Gene Genealogies</span></span><br>
+      <span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >M. Clement, Q. Snell, P. Walker, D. Posada, and K.A. Crandall</span></font></li>
+  <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2002-04.pdf"><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Parallel Genehunter:Implementation of a linkage analysis package for
+    distributed memory architectures</span></span><br>
+      <span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >G. Conant, A. Wagner, S. Plimpton, W. Old, and P. Fain</span></font></li>
+  <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2002-05.pdf"><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Parallel EST Clustering</span></span><br>
+    <span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >A. Kalyanaraman, S. Aluru, and S. Kothari, Iowa State University</span></font></li>
+  <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2002-06.pdf"><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Parallel Out-of-core Algorithm for Genome-Scale Enumeration of Metabolic
+    Systematic Pathways</span></span><br>
+      <span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >N.F. Samatova, A. Geist, G. Ostrouchov, and A.V. Melechko</span></font></li>
+  <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2002-07.pdf"><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Massively Parallel Solutions for Molecular Sequence Analysis</span></span><br>
+      <span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >B. Schmidt, H. Schr&ouml;der, and M. Schimmler</span></font></li>
+  <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2002-08.pdf"><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Monte Carlo Simulation of HIV-1 Evolution in Response to Selection by
+    Antibodies</span></span><br>
+      <span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >J. Silva and A. Hughes</span></font></li>
+  <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2002-09.pdf"><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >Aligning Two Fragmented Sequences</span></span><br>
+      <span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >V. Veeramachaneni, P. Berman, and W. Miller</span></font></li>
+  <li><font color="#000080"><span onclick="return false" style="text-decoration:underline; color:blue" href="papers/HICOMB2002-10.pdf"><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Quasiperiodic Biosequences and Modulo Incidence Matrices</span></span><br>
+      <span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >H. Wan and E. Song</span></font></li>
+</ul>
+
+<hr>
+
+<i><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >This material is presented to ensure timely dissemination of scholarly
+and technical work. Copyright and all rights therein are retained by
+authors or by other copyright holders. All persons copying this
+information are expected to adhere to the terms and constraints
+invoked by each author's copyright. In most cases, these works may not
+be reposted without the explicit permission of the copyright holder.</span>

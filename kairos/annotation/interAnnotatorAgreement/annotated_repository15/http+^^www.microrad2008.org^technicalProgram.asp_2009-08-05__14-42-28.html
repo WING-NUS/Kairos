@@ -1,0 +1,1440 @@
+
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/7/annotation/annotated_repository/http+^^www.microrad2008.org^technicalProgram.asp_2009-08-05__14-42-28.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/7/annotation/annotated_repository/http+^^www.microrad2008.org^technicalProgram.asp_2009-08-05__14-42-28.yaml created on Thu Aug 13 13:58:17 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+	<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+	<meta name="Date" content="2003-12-15">
+	<meta name="Author" content="Luca Ruisi">
+	<meta name="Copyright" content="IFAC CNR">
+	<meta name="Description" content="10th Specialist Meeting on MICROVAWE RADIOMETRY and REMOTE SENSING for the ENVIROMENT">
+	<meta name="Keywords" content="specialist, meeting, microwave, radiometry, remote sensing, enivroment, florence, italy, research, instrument design, land, ocean atmosphere">
+	<title>Microrad 2008 - 10th Specialist Meeting on MICROVAWE RADIOMETRY and REMOTE SENSING for the ENVIROMENT</title>
+	<link rel="stylesheet" type="text/css" href="inc/stile.css">
+	<script type="text/javascript" src="inc/utility.inc.js"></script>
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)" class="Page"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+
+<center>
+<div id='header'>
+	<table border='0' cellspacing='0' cellpadding='0'>
+	  <tr>
+	    <td rowspan='2' width='175'><span onclick="return false" style="text-decoration:underline; color:blue" href='index.asp'><img onmousedown="imd(this)" border='0' src='images/logo.gif' alt='Microrad 2008 Home page'></span></td>
+	    <td rowspan='2' width='415'><img onmousedown="imd(this)" border='0' src='images/imgHeader.jpg' alt=''></td>
+	    <td width='170'>
+<form method='post' action='login.asp?from=index.asp'>
+	<table border='0' align='center'>
+		<tr><td align='center'><b><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >AUTHOR AREA</span></b></td></tr>
+		<tr><td><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Username</span></td></tr>
+		<tr><td><input type='text' name='uid' size='20'></td></tr>
+		<tr><td><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Password</span></td></tr>
+		<tr><td><input type='password' name='pwd' size='15'> <input class='submit' type='submit' size='5' value='Go'></td></tr>
+	</table>
+</form></td>
+	  </tr>
+	  <tr>
+	    <td class='boxDate' height='40'><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, August 5, 2009</span></td>
+	  </tr>
+	</table>
+</div>
+</center>
+
+<table border="0" cellpadding="0" cellspacing="0" align="center">
+	<tr>
+		<td class='rightSide' valign='top'>
+			<img onmousedown="imd(this)" border='0' src='images/imgLeftSide01.jpg'><br>
+<table border='0' cellpadding='1' cellspacing='0'>
+	<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='index.asp'><img onmousedown="imd(this)" border='0' src='images/btHomePage.gif' alt='Home Page'></span></td></tr>
+	<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='steeringCommittee.asp'><img onmousedown="imd(this)" border='0' src='images/btSteeringCommittee.gif' alt='Steering Committee'></span></td></tr>
+	<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='localOrganizingCommittee.asp'><img onmousedown="imd(this)" border='0' src='images/btLocalOrganizingCommittee.gif' alt='Local Organizing Committee'></span></td></tr>	
+	<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='conferenceTopics.asp'><img onmousedown="imd(this)" border='0' src='images/btConferenceTopics.gif' alt='Conference Topics'></span></td></tr>
+	<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='sponsors.asp'><img onmousedown="imd(this)" border='0' src='images/btSponsors.gif' alt='Sponsors'></span></td></tr>
+	<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='importantDates.asp'><img onmousedown="imd(this)" border='0' src='images/btImportantDates.gif' alt='Important Dates'></span></td></tr>
+	<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='presentationGuidelines.asp'><img onmousedown="imd(this)" border='0' src='images/btPresentationGuidelines.gif' alt='Presentation Guidelines'></span></td></tr>
+	<!--<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='abstractSubmission.asp'><img onmousedown="imd(this)" border='0' src='images/btAbstractSubmission.gif' alt='Abstract Submission'></span></td></tr>-->
+	<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='finalPaperSubmission.asp'><img onmousedown="imd(this)" border='0' src='images/btFinalPaperSubmission.gif' alt='Final Paper Submission'></span></td></tr>
+	<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='paperPrize.asp'><img onmousedown="imd(this)" border='0' src='images/btPaperPrize.gif' alt='Paper Prize'></span></td></tr>
+	<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='technicalProgram.asp'><img onmousedown="imd(this)" border='0' src='images/btTechnicalProgram.gif' alt='Technical Program'></span></td></tr>
+	<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='tgrsSpecialIssue.asp'><img onmousedown="imd(this)" border='0' src='images/btTGRS.gif' alt='TGRS Special Issue'></span></td></tr>
+	<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='venue.asp'><img onmousedown="imd(this)" border='0' src='images/btVenue.gif' alt='Venue'></span></td></tr>
+	<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='accommodation.asp'><img onmousedown="imd(this)" border='0' src='images/btAccommodation.gif' alt='Accommodation'></span></td></tr>	
+	<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='registration.asp'><img onmousedown="imd(this)" border='0' src='images/btRegistration.gif' alt='Registration'></span></td></tr>
+	<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='gallery.asp'><img onmousedown="imd(this)" border='0' src='images/btPhotoGallery.gif' alt='Photo Gallery'></span></td></tr>
+	<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='toursAndEvents.asp'><img onmousedown="imd(this)" border='0' src='images/btToursAndEvents.gif' alt='Tours and Events'></span></td></tr>	
+	<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='contacts.asp'><img onmousedown="imd(this)" border='0' src='images/btContacts.gif' alt='Contacts'></span></td></tr>	
+	<tr><td><span onclick="return false" style="text-decoration:underline; color:blue" href='florenceInformation.asp'><img onmousedown="imd(this)" border='0' src='images/btFlorenceInformation.gif' alt='Florence Information'></span></td></tr>
+</table>
+<img onmousedown="imd(this)" border='0' src='images/imgLeftSide02.jpg'>
+<br>
+<div align='center'>
+	<b><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Organized by</span></b>
+	<br><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href='http://www.cetem.org/' target='_blank'><img onmousedown="imd(this)" border='0' src='images/logoCETEM.gif' alt='Centro di Telerilevamento a Microonde'></span>
+	<br>
+	<span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Centro di</span><br><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Telerilevamento</span><br><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >a Microonde</span>
+	<br><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >(Ce.Te.M.)</span>
+	<br><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href='http://www.ifac.cnr.it/' target='_blank'><img onmousedown="imd(this)" border='0' src='images/logoIFAC.gif' alt='Istituto di Fisica Applicata "N.Carrara"'></span>
+	<br>
+	<span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Istituto di Fisica</span><br><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Applicata "N.Carrara"</span>
+	<br><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >(IFAC-CNR)</span>
+	<br><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>
+</div>
+		</td>
+		<td valign='top' width='415'>
+	
+			<p align='right'>
+				<br><span onclick="return false" style="text-decoration:underline; color:blue" href='index.asp'><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Home Page</span></span> <span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >&raquo; Technical Program &nbsp;</span>
+			</p>
+			
+			<p class='mainTitle'>
+				<span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span><b><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Technical Program</span></b>
+			</p>
+
+			<center>
+			<div id='boxCallAbstract2'>
+			<br><b><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Click on the presentation title to download the pdf file</span></b></span>
+				<br><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>
+			</div>				
+			</center>
+
+			<br><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>
+			
+			<p class='mainText'>
+				<font class='titleText'><b><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Session Schedule</span></b></font>
+			</p>
+
+			<table width="95%" border="0" align='center' cellpadding="2" cellspacing="0" class="tabBordered">
+			  <tr>
+			    <td bgcolor="#99FFFF" class="bordered"><strong><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Monday- 10 March 2008</span></strong></td>
+			  </tr>
+			  <tr>
+			    <td class="bordered"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >17:30 &ndash; Registration</span></td>
+			  </tr>
+		  </table>
+<br>	
+<hr size="1" width="90%">
+<br>		
+<!-------- 11 Marzo ---------------------------------------------------------->
+			
+			<table width="95%" border="0" align='center' cellpadding="2" cellspacing="0" bordercolor="#333333" class="tabBordered">
+  <tr>
+    <td colspan="2" valign="top" bgcolor="#FFFF99" class="bordered"><p><strong><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday    11th March 2008</span></strong></p></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >08:00</span></td>
+    <td valign="top" class="bordered"><em><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >08:30 – 09:00</span></td>
+    <td valign="top" class="bordered"><em><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Welcoming Remarks</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >09:00 – 10:40</span> </td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Session on AMSR/AMSR-E (I) (Chairs: E. Lobl,    A. Shibata)</span></strong></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >09:00</span> </td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_09.00_AMSR_Lobl.pdf"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Wakasa Bay-An AMSR Precipitation    Validation Campaign -</span> <em><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >E. Lobl,</span></em> <em><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >K. Aonashi, B.Griffith, C. Kummerow,    G. Liu, M. Murakami, T. Wilheit</span></em></span><em> </em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >09:20</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_09.20_Wilheit_RAIN_ALG.pdf"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Progress on a Common AMSR-E/TMI    Level-3 Oceanic Rainfall Algorithm -</span> <em><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >T. Wilheit, R. Weitz</span> </em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >09:40</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_09.40_Mitnik_Mesoscale.pdf"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Microwave characteristics of    organized mesoscale convection over the ocean –</span> <em><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >L. Mitnik, M. Mitnik</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >10:00</span></td>
+    <td valign="top" class="bordered"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >An accuracy of hurricane/typhoon    wind speed retrieved from AMSR-E 7 and 10 GHz horizontal brightness    temperature –</span> <em><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >S. Saitoh</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >10:20</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_10.20_Egawa.pdf"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Evaluation of Retrieved Cloud    Liquid Water from AMSR-E, and Impact on Numerical Weather Prediction -</span> <em><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >T.    Egawa</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><em><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >10:40 – 11:00</span> </em></td>
+    <td valign="top" class="bordered"><em><strong><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></strong></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >11:00 – 12:40</span></td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Session on AMSR/AMSR-E (II)</span></strong></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >11:00</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_11.00_Eito.pdf"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >The sensitivity of passive    microwave responses to the hydrometeor properties simulated by a cloud    resolving model in real rainfall systems associated with Baiu front –</span> <em><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >H.    Eito, K. Aonashi</span> </em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >11:20</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_11.20_tedesco2.pdf"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Assessing dynamic approaches in    snow water equivalent/snow depth retrieval from AMSR-E brightness    temperatures –</span> <em><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >M. Tedesco, J.L. Foster, R. Kelly</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >11:40</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_11.40_Bindlish.pdf"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Estimation of soil temperature for    soil moisture retrievals using microwave observations –</span> <em><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >R. Bindlish, T.    Jackson, J. Du</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >12:00</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_12.00_Kaihotsu.pdf"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Surface Soil Drying Observed by    AMSR-E in the Mongolian Plateau –</span> <em><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >I. Kahiotsu, T. Koike, T. Ohta, K.    Tamagawa, D. Gombo, O. Dambaravjaa, T. Yamanaka</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >12:20</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_12.20_Santi_AMSRE.pdf"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >A simple technique    to improve the AMSR-E spatial resolution –</span> <em><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >E. Santi, M. Brogioni, G.    Macelloni</span></em><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <em><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >S. Paloscia, P. Pampaloni, S. Pettinato</span> </em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><em><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >12:40 – 14:20</span></em></td>
+    <td valign="top" class="bordered"><em><strong><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></strong></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >14:20 – 16:00</span></td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Session on Soil Moisture - Honouring    Tom Schmugge and Anatolji Shutko (I) (Chairs:     T. Jackson and P. Pampaloni)</span></strong></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >14:20</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_14.20_JacksonMR.pdf"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Passive Microwave Radiometry of    Land: Contributions of Tom Schmugge and Anatoli Shutko –</span> <em><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >T. Jackson, P.    Pampaloni</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >14:40</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_14.40_Schmugge3_11_08.pdf"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Early Passive Microwave    Observations from Aircraft: Soil Moisture, Snow and Sea Ice –</span> <em><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >T. Schmugge</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >15:00</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_15.00_Shutko.pdf"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >30 Years of Research into    Microwave Radiometry of Vegetation Canopies in IRE RAS –</span> <em><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >A. Chukhlantsev,    A. Shutko</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >15:20</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_15.20_Calvet_MRad.pdf"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Soil moisture products: satellite    / model / in-situ cross-validation –</span> <em><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >J.C. Calvet, C. Rüdiger, N. Fritz,    J.F. Mahfouf</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >15:40</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_15.40_dejeu.pdf"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Satellite Soil Moisture in    Research Applications –</span> <em><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >R. De Jeu, T.    Holmes, M. Owe, A. Van Dijk, T. Jupp, Y. Liu, G. Wang, H. Dolman</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><em><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >16:00 – 16:20</span> </em></td>
+    <td valign="top" class="bordered"><strong><em><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></em></strong></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >16:20 – 18:00</span></td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Session on Soil Moisture - Honouring    Tom Schmugge and Anatolji Shutko (II)</span></strong></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >16:20</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_16.20_Wigneron-soil.pdf"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Improved parameterization of the    soil emission in L-MEB –</span> <em><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >J-P Wigneron, A. Chanzy, Y. Kerr, J.-C. Shi, V.    Mironov, P. de Rosnay, M-J Escorihuela, A. Cano, F. Demontoux, J. Grant,    H.Lawrence, A. Mialon, K. Saleh</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >16:40</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_16.40_Haarbrink.pdf"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Simultaneous Airborne Passive    Microwave, Lidar, Photo, and Thermal Data for GIMS –</span> <em><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >R. Haarbrink, A. Shutko, E. Novichikhin, I. Sidorov, V. Kanev, K.    Milenov, L. Milenova, K. Ivanov</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >17:00</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_17.00_Tsang.pdf"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Frequency Dependences of Microwave    Emission of Soils with Roughness of from 1.5 GHz to 37 GHz Based on Numerical    Solutions of Maxwell Equations –</span> <em><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >K.S. Chen, P. Xu, L. Tsang, J.C. Shi</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >17:20</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_17.20_Hornbuckle.pdf"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Extending the tau-omega Model to    Account for Significant Scattering in Vegetation –</span> <em><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >B. Hornbuckle</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >17:40</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080311_17.40_Paloscia_SMC_Forest.pdf"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Soil moisture effect    on microwave emission under forest canopies -</span> <em><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >A. Della Vecchia, P.    Ferrazzoli, L.Guerriero, S.Paloscia, P.Pampaloni, E.Santi, S.Pettinato</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >18:30</span></td>
+    <td valign="top" class="bordered"><strong><em><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Reception at    Chiesa di Orsanmichele</span></em></strong></td>
+  </tr>
+		  </table>
+			
+ <br>	
+<hr size="1" width="90%">
+<br>
+			
+			<!-------- 12 Marzo ---------------------------------------------------------->
+			<table width="95%" border="0" align='center' cellpadding="2" cellspacing="0" bordercolor="#333333" class="tabBordered">
+<tr>
+    <td colspan="2" valign="top" bgcolor="#66FF99" class="bordered"><strong><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday    12th March 2008</span></strong></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >08:30 – 10:10</span></td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Session on SMOS (I) (Chairs: A.    Camps and Y. Kerr)</span></strong></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >08:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_08.30_Kerr.pdf"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >The SMOS Mission: objectives and    status –</span> <em><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >SMOS Team - Y. Kerr, P. Waldteufel, J.P. Wigneron, H. Hahne, S.    Mecklenburg</span> </em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >08:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_08.50_MartinNeira.pdf"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >SMOS Calibration: Approach and    Expectations –</span> <em><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >M. Martìn-Neira, M. Brown, J. Closa, I. Corbella, F.    Torres, A. Colliander, J. Lemmetyinen, J. Kainulainen, M. Suess</span> </em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >09:10</span></td>
+    <td valign="top" class="bordered"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >I</span><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_09.10_Anterrieu.pdf"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >mage Reconstruction Algorithms    for 2D Aperture Synthesis Radiometers –</span> <em><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >E. Anterrieu, A. Camps</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >09:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_09.30_Wigneron.pdf"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Parameterisation and calibration    of L-MEB in the Level-2 SMOS algorithm –</span> <em><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >J.P.    Wigneron, Y. Kerr, K. Saleh, P. Richaume, P. de Rosnay, M.J. Escorihuela,    J.C. Calvet, A. Cano, A. Chanzy, F. Demontoux,</span></em> <em><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >J. Grant, M.    Guglielmetti, H. Lawrence, E. Lopez-Baeza, A. Mialon, T. Pellarin, G.C.    Rüdiger, G. Ruffié, M. Schwank, N. Skou, P. Waldteufel, M. Berger, S. Delwart</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >09:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_09.50_JFont.pdf"><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >The SMOS ocean salinity retrieval    algorithm –</span><em> <span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >J. Font, J. Boutin, N. Reul, P. Waldteufel, C. Gabarró,    S.Zine, J. Tenerelli, M. Talone, F. Petitcolin, J.L. Vergely, S. Delwart, I.    Meirold-Mautner</span> </em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><em><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >10:10 – 10:30</span> </em></td>
+    <td valign="top" class="bordered"><strong><em><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></em></strong></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >10:30 – 12:10</span></td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Session on SMOS (II)</span></strong></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >10:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_10.30_Drinkwater.pdf"><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Cryosphere Applications of ESA’s    SMOS Earth Explorer Opportunity Mission –</span> <em><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >M.R. Drinkwater</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >10:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_10.50_Reul.pdf"><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Overview of SMOS ground campaigns    over the ocean –</span> <em><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >N. Reul</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >11:10</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_11.10_Saleh.pdf"><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Main outcomes of the CoSMOS/NAFE    campaign for the validation of the SMOS soil moisture retrieval algorithm –</span> <em><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >K. Saleh, Y. Kerr, G. Boulet, M.J. Escorihuela, P. Maisongrande, P. Richaume,    P. de Rosnay, J.P. Wigneron, J. Grant, E. Lopez-Baeza, M. Berger, S. Delwart,    R. Panciera, J. Walker</span> </em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >11:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_11.30_Marco_Talone.pdf"><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >The Impact of Combining SMOS and    ARGO Data on the SMOS Level 3 Product, the Repercussions on the Coastal    Vicinity Effect</span> <em><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >– M. Talone, A. Camps, B. Mourre, R. Sabia,</span></em> <em><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >C.    Gabarro’, J. Font, M. Vall-llossera</span> </em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >11:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_11.50_LeVine.pdf"><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >The Aquarius/SAC-D mission and    Status of the Aquarius Instrument –</span> <em><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >D.M. Le Vine, G.S.E. Lagerloef, F.    Pellerano, S. Yueh, R. Colomb</span> </em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><em><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >12:10 – 13:5 0</span></em></td>
+    <td valign="top" class="bordered"><em><strong><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></strong></em></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >13:50 – 15:30</span></td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Session on Sensors &amp; Missions (I) (Chairs: N. Skou    and S. Reising)</span></strong></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >13:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_13.50_Skou.pdf"><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Measurements on Active Cold Loads    for Radiometer Calibration –</span> <em><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >N. Skou, S. Soebjerg, J. Balling</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >14:10</span></td>
+    <td valign="top" class="bordered"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Polarimetric Interferometric    Radiometers: Analysis of Front-end Non-idealities –</span> <em><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >A. Colliander, P. De    Maagt, T. Närhi</span></em></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >14:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_14.30_Czekala.pdf"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >A New Generation of Passive    Microwave Radiometers for Atmospheric Remote Sensing –</span> <em><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >T. Rose, H.    Czekala, U. Löhnert, A. Battaglia</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >14:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_14.50Camps.pdf"><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >PAU in SeoSAT: A Proposed Hybrid    L-band Microwave Radiometer/GPS Reflectometer to Improve Sea Surface Salinity    Estimates from Space –</span> <em><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >A. Camps, N. Rodríguez-Álvarez, X.Bosch-Lluis, J.F.Marchán,    I.Ramos-Pérez, M. Segarra, Ll.Sagués, D.Tarragó, O. Cuñado, R. Vilaseca, A.    Tomàs, J. Mas</span></em></span><em></em> </td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >15:10</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_15.10Shokr.pdf"><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >A New Algorithm to Retrieve Ice    Concentration from Passive Microwave Data –</span> <em><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >M. Shokr, A. Lambe, T. Agnew</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><em><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >15:30 – 16:30</span></em></td>
+    <td valign="top" class="bordered"><strong><em><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Break &amp; Poster Presentation</span></em></strong></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >16:30 – 18:10</span> </td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Session on Sensors &amp; Missions (II)</span></strong></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >16:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_16.30_Corbella.pdf"><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >MIRAS Ground Characterization –</span> <em><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >I. Corbella, F. Torres, N. Duffo, M. Vall-llossera, A. Camps, V. Gonzalez, M.    Martìn-Neira</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >16:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_16.50_Alimenti.pdf"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Forest    Fire Detection by Low-Cost 13GHz Radiometer –</span> <em><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >F. Alimenti, S. Bonafoni, G.    Tasselli, S. Leone, L. Roselli, K. Solbach, P. Basili</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >17:10</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_17.10_Yanetal_MicrRad08.pdf"><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Intercomparison of the Cross-Track    and Conical Scanning –</span> <em><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >B. Yan, F. Weng, J. Derber</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >17:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_17.30_Brown.pdf"><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Anomalies Associated    with Reflector Emissivity and Noise Diode Stability Uncovered During the    Pre-launch Calibration of the Advanced Microwave Radiometer: Root Cause and    Resolution –</span> <em><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >S. Brown, A. Kitiyakara, A. Prata, D. Dawson, E. Long</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >17:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080312_17.50_Marzanoetal_FLORAD.pdf"><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Flower constellation of    micro-satellite millimeter-wave radiometers for pseudogeostationary    atmospheric observations at regional scale –</span> <em><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >F.S. Marzano, D. Cimini, M.    Montopoli, A. Nassisi, D. Oricchio, T. Rossi, M. De Sanctis, L. Pulvirenti,    N. Pierdicca, A. Mugnai, D. Mortari</span> </em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >19:30</span></td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Piano Recital at the Teatro del Sale</span></strong></td>
+  </tr>
+			</table>
+			
+<br>	
+<hr size="1" width="90%">
+<br>
+			
+			<!-------- POSTER SESSION I---------------------------------------------------------->
+			<table width="95%" border="0" align='center' cellpadding="2" cellspacing="0" class="tabBordered">
+  <tr>
+    <td align="center" valign="top" class="bordered"><strong><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session I –    Tuesday 11th/Wednesday 12th March 2008</span></strong><strong> </strong></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" class="bordered"><strong><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Sensors    and Missions</span></strong></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Resonances in corrugated horn    antennas manifesting as baseline features in balanced spectra</span> <em><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >– E. De    Wachter, A. Haefele, N. Kaempfer, S. Ka, A. Murk, J. Oh, C. Straub</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Combined Airborne    Radio-instruments for Ocean and Land Studies (CAROLS)</span> <em><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >– D. Hauser, P.    Fanise, M. Parde’, N. Skou, A. Ruis</span> </em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Development of Space L-band    radiometric system and radiometer-polarimeter for subsatellite measurements</span> <em><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >–  M.T. Smirnov, A.N. Armand , S.V. Marechek,    V.P. Savorski, Yu.G. Tishchenko, V.S. Ablyazov, A. Khaldin</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/posters/Pazmany_A_compact_airborne.pdf"><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >A compact airborne G-band (183    GHz) water vapour radiometer and retrievals of liquid cloud parameters from    coincident radiometer and millimeter wave radar measurements</span> <em><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >– A. Pazmany,    M. Wolde</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >High-resolution spectral    radiometer imaging system –</span> <em><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >M. Jirousek, M. Peichl, H. Suess</span> </em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >CALIMAS: Overview and current    status of the Spanish Contribution to the SMOS CAL/VAL Activities</span> <em><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >- J.    Ballabrera-Poy, A. Fernández-Ríos, A. Rius, A. Lavín, M. Portabella,</span> </em><em><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >A.</span></em><em><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Hernández-Guerra,</span> </em><em><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >E. García, J. Mallorquí, M. Vall-llossera, I.    Corbella, J. Font,</span> </em><em><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >A. Camps</span></em> </td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >Use of Pseudo-Random Noise    Sequences in Microwave Radiometer Calibration</span> <em><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >–</span> </em><em><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >I.    Ramos-Perez,</span></em><em> <span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >X. Bosch-Lluis,    A. Camps, N. Rodríguez-Álvarez, J.F Marchan-Hernandez, E. Valencia</span></em> </td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >The Impact of the Number of Bits in Digital Beamforming    Real Aperture and Synthetic Aperture Radiometers -</span> <em><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >X.    Bosch-Lluis,</span> </em><em><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >I. Ramos-Pérez,    A. Camps, E. Valencia, J.F. Marchan-Hernandez, N. Rodríguez-Álvarez, M.    Vericat, M.A. Guerrero</span></em> </td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Light L-band Radiometer for    Unmanned Small Aircraft Applications -</span> <em><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >A. Aguasca,</span> </em><em><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >P. Benedicto, A. Camps</span></em> </td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >ELBARA II, L-band Radiometer    Systems to be deployed for SMOS Cal/Val Purposes</span> <em><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >– A. Wiessmann, M.    Schwank, C. Werner, C. Mätzler, B. Elsasser, U. Wegmuller</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >The WindSat Polarimetric Microwave    Radiometer Mission – Advances in Data Products</span> <em><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >– P. Gaiser, M. Bettenhausen, L. Li, I. Adams, W.     Johnston</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Specialized RFI Filter For    Synthetic Aperture Radiometers and Performance With 2D-STAR –</span> <em><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >M. Haken, D.M. Le Vine</span> </em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >Frequency-selective devices based    on a polarization multibeam interferometer for radiometers in the millimeter    and submillimeter wavelength ranges</span> <em><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >– L. Kniazkov, N. Ruzhentsev</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >A end-to-end simulator for the    AltiKa radiometer</span> <em><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >– B. Picard, E. Obligis, N. Steunou, P. Sengenes, L.    Eymard</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >On the reduction of the systematic    error in imaging radiometry by aperture synthesis: a new approach for the    SMOS space mission</span> <em><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >– A. Khazaal, H. Carfantan, E. Anterrieu</span> </em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >On-Orbit Radiometric Validation    and Field-of-View Calibration of Spaceborne Microwave Sounding Instruments</span> <em><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >–    W. Blackwell</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/posters/poster_Pinori_et_al.pdf"><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >Preparing the ESA-SMOS (Soil    Moisture and Ocean Salinity) mission - Overview of the User Data Products and    Data Distribution Strategy</span> <em><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >– R. Crapolicchio, S. Pinori, S. Mecklenburg</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/posters/poster_LeeClare.pdf"><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >New submillimeter airborne    instrument for cloud and surface measurements</span> <em><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >– Clare Lee</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Development of a Miniaturized    Microwave Radiometer for Satellite Remote Sensing</span> <em><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >– S. Reising, S.    Padmanabhan, W. Foster, D.McKague</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >New Methods for Networked    Microwave Radiometers Operational Quality Control in Realtime</span><em> <span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >– P.    Huguenin, D. Ruffieux, B. Calpini</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Development of an Observational    System Simulation Experiment (OSSE) for a Geostationary Microwave Imager</span> <em><span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >–    A. Gasiewski, B.L. Weber, A. Jash</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Development of a    microstrip array antenna for L-band radiometer –</span> <em><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >A. Cucini, G. Macelloni,    F. Mariottini, P. Pampaloni, C. Riminesi,A. Toccafondi</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >Development of space-borne microwave radiometers by JAXA –</span> <em><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >H.Sasaki, S.Saitoh, A.Shibata</span></em> </td>
+   <tr>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/posters/poster_MR08_Kainulainen.pdf"><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >Error propagation in SMOS calibration subsystem –</span> <em><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >J. Kainulainen, J. Lemmetyinen, K. Rautiainen, A. Colliander, J. Uusitalo and J.Lahtinen</span></em></span><em></em> </td> 
+  </tr>
+  <tr>
+    <td align="center" valign="top" class="bordered"><strong><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >Soil</span></strong></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >Continuous monitoring of surface    roughness changes over a bare soil field using L-band brightness temperature</span> <em><span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >–    A. Mialon, J.P. Wigneron, P. de Rosnay, M.J. Escorihuela, Y. Kerr</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >Perturbative solution for the    scattering from multilayered structure with rough boundaries -  </span> <em><span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >D. Riccio, A. Iodice, P. Imperatore</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >Spaceborne microwave radiometry of    the Moon surface layer: a model-based study</span> <em><span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >– F. S. Marzano, M. Montopoli,    P. Tognolatti, N. Pierdicca, G. Perrotta</span> </em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >An Intercomparison of ERS-Scat and    AMSR-E Observations, and SVAT Soil Moisture Simulations over France</span><em> <span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >– C.    Rüdiger, T. Holmes, J.C. Calvet, R. de Jeu, W. Wagner</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >Historical data set of    satellite–derived global land surface moisture</span> <em><span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >– M. Owe, R. de Jeu, T.    Holmes</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/posters/poster_dente.pdf"><span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >Passive and active microwave data    for soil moisture retrieval at global scale</span> <em><span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >– L. Dente, R. de Jeu, Z.    Vekerdy, Z.B. Su</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >Microwave Remote Sensing of Deformations    on Curved/Rough Surface under a Layered Medium</span> <em><span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >– O. Mudanyali, A. Yapar</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/posters/poster_Voelksch.pdf"><span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >L-band Signatures Emitted from    Soils with Orientated Surface Structures</span> <em><span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >– I.    Völksch, M. Schwank, C. Mätzler, M. Stähli</span> </em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >Global Soil Moisture Retrievals    from WindSat Spaceborne Radiometer</span> <em><span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >– L. Li, P. Gaiser, T. Jackson</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >Determination of Earth Surface    Roughness through Surface Impedance Modeling</span> <em><span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >– E. Kilic, M. Cayoren, G.S.    Unal</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/posters/Pulvirenti_On_the_errors.pdf"><span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >On the radiometric errors in    satellite microwave radiometric imaging of a terrain with complex topography</span> <em><span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >–    L. Pulvirenti , F.S. Marzano</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >Remote sensing of land surface    using microwave radiometers, infrared radiometers, optical cameras and lidar:    Bulgaria-2007 experiment</span> <em><span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >– R. Haarbrink, A. Shutko, E. Novichikhin, S.    Golovachev, A. Chukhlantsev, V. Krapivin, V. Kanev, K. Milenov, L. Milenova,    K. Ivanov, A. Krisilov, I. Sidorov</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/posters/poster_jimenez.pdf"><span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >Combined passive microwave and    infrared estimates of land surface skin temperature: application to the    estimation of land surface turbulent fluxes</span> <em><span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >– C. Jimenez, C. Prigent, F.    Aires</span> </em></span></td>
+  </tr>
+			</table>
+			
+<br>	
+<hr size="1" width="90%">
+<br>
+			
+			<!-------- 13 Marzo ---------------------------------------------------------->
+			<table width="95%" border="0" align='center' cellpadding="2" cellspacing="0" class="tabBordered">
+  <tr>
+    <td colspan="2" valign="top" bgcolor="#CCFFFF" class="bordered"><strong><span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >Thursday    13th March 2008</span></strong></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >08:30 – 10:10</span></td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >Session on d’Auria Memorial    (I)  (Chairs: D. Solimini and E.    Westwater)</span></strong></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >08:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_08.30_Pierdicca.pdf"><span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >Microwave radiometry of clouds and    precipitation: the contribution of the La Sapienza group and Giovanni d’Auria    –</span> <em><span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >F.S. Marzano</span></em><span class="coloringspan" id="282" onmousedown="md(this)" onmouseup="mu(this)" >,</span><em> <span class="coloringspan" id="283" onmousedown="md(this)" onmouseup="mu(this)" >N. Pierdicca, P.    Basili, P. Ciotti, L. Pulvirenti</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="284" onmousedown="md(this)" onmouseup="mu(this)" >08:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_08.50_Marzano.pdf"><span class="coloringspan" id="285" onmousedown="md(this)" onmouseup="mu(this)" >From radiowave propagation to    remote sensing: the way blazed by Prof. d’Auria –</span> <em><span class="coloringspan" id="286" onmousedown="md(this)" onmouseup="mu(this)" >N.     Pierdicca, P. Basili, P. Ciotti, F.S. Marzano, D.    Solimini</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="287" onmousedown="md(this)" onmouseup="mu(this)" >09:10</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_09.10_Ferrazzoli_mrad.pdf"><span class="coloringspan" id="288" onmousedown="md(this)" onmouseup="mu(this)" >Previous    studies about microwave signatures of agricultural fields -</span><em> <span class="coloringspan" id="289" onmousedown="md(this)" onmouseup="mu(this)" >P. Ferrazzoli,</span></em> <em><span class="coloringspan" id="290" onmousedown="md(this)" onmouseup="mu(this)" >P. Pampaloni, S. Paloscia, D. Solimini</span></em></span><em></em> </td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="291" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;09:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_09.30_Staelin.pdf"><span class="coloringspan" id="292" onmousedown="md(this)" onmouseup="mu(this)" >Future challenges in passive    microwave atmospheric remote sensing from satellites –</span> <em><span class="coloringspan" id="293" onmousedown="md(this)" onmouseup="mu(this)" >D. Staelin</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="294" onmousedown="md(this)" onmouseup="mu(this)" >09:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_09.50_Westwater.pdf"><span class="coloringspan" id="295" onmousedown="md(this)" onmouseup="mu(this)" >Deployments of Microwave and    Millimeter-wave Radiometers in the Arctic –</span> <em><span class="coloringspan" id="296" onmousedown="md(this)" onmouseup="mu(this)" >Ed    R. Westwater</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><em><span class="coloringspan" id="297" onmousedown="md(this)" onmouseup="mu(this)" >10:10 – 10:30</span></em></td>
+    <td valign="top" class="bordered"><em><strong><span class="coloringspan" id="298" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></strong></em></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="299" onmousedown="md(this)" onmouseup="mu(this)" >10:30 – 12:10</span></td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="300" onmousedown="md(this)" onmouseup="mu(this)" >Session on d’Auria Memorial (II)</span></strong></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="301" onmousedown="md(this)" onmouseup="mu(this)" >10:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_10.30_Cimini.pdf"><span class="coloringspan" id="302" onmousedown="md(this)" onmouseup="mu(this)" >Temperature and humidity profiling    in the Arctic using millimeter- and submillimeter-wave radiometry –</span><em> <span class="coloringspan" id="303" onmousedown="md(this)" onmouseup="mu(this)" >D.    Cimini, Ed R. Westwater, A. Gasiewski, M. Klein, V. Leuski</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="304" onmousedown="md(this)" onmouseup="mu(this)" >10:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_10.50_Obligis.pdf"><span class="coloringspan" id="305" onmousedown="md(this)" onmouseup="mu(this)" >New retrieval algorithms for the    wet tropospheric correction using neural networks –</span> <em><span class="coloringspan" id="306" onmousedown="md(this)" onmouseup="mu(this)" >E. Obligis, S.    Labroue, L. Eymard, A. Rahmani</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="307" onmousedown="md(this)" onmouseup="mu(this)" >11:10</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_11.10_Reising.pdf"><span class="coloringspan" id="308" onmousedown="md(this)" onmouseup="mu(this)" >Retrieval of 3-D Tropospheric    Water Vapor using a Network of Scanning Compact Microwave Radiometers –</span> <em><span class="coloringspan" id="309" onmousedown="md(this)" onmouseup="mu(this)" >S.    Reising, S. Padmanabhan, J. Vivekanandan, F. Iturbide-Sanchez</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="310" onmousedown="md(this)" onmouseup="mu(this)" >11:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_11.30_Garrett.pdf"><span class="coloringspan" id="311" onmousedown="md(this)" onmouseup="mu(this)" >NOAA-08: An Optimal Atmospheric    Dataset for Algorithm Training and Covariance Matrix Generation –</span> <em><span class="coloringspan" id="312" onmousedown="md(this)" onmouseup="mu(this)" >K.    Garrett, S. Boukabara, F. Weng</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="313" onmousedown="md(this)" onmouseup="mu(this)" >11:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_11.50_Candy.pdf"><span class="coloringspan" id="314" onmousedown="md(this)" onmouseup="mu(this)" >The potential of polarimetric    radiometry for Numerical Weather Prediction –</span> <em><span class="coloringspan" id="315" onmousedown="md(this)" onmouseup="mu(this)" >B. Candy, S. English, D.    Bebbington</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><em><span class="coloringspan" id="316" onmousedown="md(this)" onmouseup="mu(this)" >12:10 – 13:50</span></em></td>
+    <td valign="top" class="bordered"><em><strong><span class="coloringspan" id="317" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></strong></em> </td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="318" onmousedown="md(this)" onmouseup="mu(this)" >13: 50 – 15:30</span></td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="319" onmousedown="md(this)" onmouseup="mu(this)" >Session on Atmosphere (I) (Chairs:    F. Marzano and D. Staelin)</span></strong></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="320" onmousedown="md(this)" onmouseup="mu(this)" >13:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_13.50_Okamoto_Shige.pdf"><span class="coloringspan" id="321" onmousedown="md(this)" onmouseup="mu(this)" >High Precision and High Resolution    Global Precipitation Map from Satellite Data –</span> <em><span class="coloringspan" id="322" onmousedown="md(this)" onmouseup="mu(this)" >K. Okamoto</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="323" onmousedown="md(this)" onmouseup="mu(this)" >14:10</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_14.10_Sreerekha.pdf"><span class="coloringspan" id="324" onmousedown="md(this)" onmouseup="mu(this)" >Optimization of oxygen sounding    channel frequencies and polarisations</span> <em><span class="coloringspan" id="325" onmousedown="md(this)" onmouseup="mu(this)" >– T. Sreerekha, S. English</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="326" onmousedown="md(this)" onmouseup="mu(this)" >14:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_14.30_Blackwell.pdf"><span class="coloringspan" id="327" onmousedown="md(this)" onmouseup="mu(this)" >Improved Modeling and Retrieval of    Convective Precipitation from Spaceborne Passive Microwave Measurements –</span> <em><span class="coloringspan" id="328" onmousedown="md(this)" onmouseup="mu(this)" >W.    Blackwell</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="329" onmousedown="md(this)" onmouseup="mu(this)" >14:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_14.50_Aonashi.pdf"><span class="coloringspan" id="330" onmousedown="md(this)" onmouseup="mu(this)" >GSMaP passive    microwave precipitation retrieval algorithms –</span> <em><span class="coloringspan" id="331" onmousedown="md(this)" onmouseup="mu(this)" >K.Aonashi</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="332" onmousedown="md(this)" onmouseup="mu(this)" >15:10</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_15.10_Matzler.pdf"><span class="coloringspan" id="333" onmousedown="md(this)" onmouseup="mu(this)" >Advances in surface-based    radiometry, with emphasis on liquid water –</span> <em><span class="coloringspan" id="334" onmousedown="md(this)" onmouseup="mu(this)" >C. Mätzler, J. Morland</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><em><span class="coloringspan" id="335" onmousedown="md(this)" onmouseup="mu(this)" >15:30 – 15:50</span></em></td>
+    <td valign="top" class="bordered"><em><strong><span class="coloringspan" id="336" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></strong></em></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="337" onmousedown="md(this)" onmouseup="mu(this)" >15:50 – 17:30</span></td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="338" onmousedown="md(this)" onmouseup="mu(this)" >Session on Atmosphere (II)</span></strong></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="339" onmousedown="md(this)" onmouseup="mu(this)" >15:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_15.50_Golovachev.pdf"><span class="coloringspan" id="340" onmousedown="md(this)" onmouseup="mu(this)" >Studies of mid-latitude and    diagnosis of tropical hurricanes beginning with the methods of microwave    radiometry –</span> <em><span class="coloringspan" id="341" onmousedown="md(this)" onmouseup="mu(this)" >A. Grankov, S. Golovachev,    V. Krapivin, A. Mil’shin, A. Shutko</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="342" onmousedown="md(this)" onmouseup="mu(this)" >16:10</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_16.10_PBouchard.pdf"><span class="coloringspan" id="343" onmousedown="md(this)" onmouseup="mu(this)" >Observations of Attenuation Due to    Liquid-bearing Stratocumulus Clouds over Ottawa Using a Ground-based    Profiling Radiometer -</span> <em><span class="coloringspan" id="344" onmousedown="md(this)" onmouseup="mu(this)" >P. Bouchard</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="345" onmousedown="md(this)" onmouseup="mu(this)" >16:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_16.30_Defer.pdf"><span class="coloringspan" id="346" onmousedown="md(this)" onmouseup="mu(this)" >Analysis of the radiometric signal    in clouds based on multi-sensor TRMM observations –</span> <em><span class="coloringspan" id="347" onmousedown="md(this)" onmouseup="mu(this)" >E. Defer, C. Prigent,    A. De Lima, C. Pearl, B. Rossow, J. Pardo, J.P. Pinty</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="348" onmousedown="md(this)" onmouseup="mu(this)" >16:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_16.50_Straub.pdf"><span class="coloringspan" id="349" onmousedown="md(this)" onmouseup="mu(this)" >Development of a 22 GHz    Correlating Radiometer for the Observation of Stratospheric Water Vapor –</span> <em><span class="coloringspan" id="350" onmousedown="md(this)" onmouseup="mu(this)" >C.    Straub, A. Murk, N. Kämpfer, D. Zardet, B. Stuber</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="351" onmousedown="md(this)" onmouseup="mu(this)" >17:10</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080313_17.10_Pospichal.pdf"><span class="coloringspan" id="352" onmousedown="md(this)" onmouseup="mu(this)" >Boundary layer observations in    West Africa using a ground-based 14-channel microwave radiometer –</span> <em><span class="coloringspan" id="353" onmousedown="md(this)" onmouseup="mu(this)" >B.    Pospichal, S. Crewell</span> </em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="354" onmousedown="md(this)" onmouseup="mu(this)" >20:30</span></td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="355" onmousedown="md(this)" onmouseup="mu(this)" >Social Dinner at Grand Hotel</span></strong></td>
+  </tr>
+			</table>
+			
+<br>	
+<hr size="1" width="90%">
+<br>
+			
+			<!-------- 14 Marzo ---------------------------------------------------------->
+			<table width="95%" border="0" align='center' cellpadding="2" cellspacing="0" class="tabBordered">
+  <tr>
+    <td colspan="2" valign="top" bgcolor="#CC99FF" class="bordered"><strong><span class="coloringspan" id="356" onmousedown="md(this)" onmouseup="mu(this)" >Friday    14th March 2008</span></strong></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="357" onmousedown="md(this)" onmouseup="mu(this)" >08:30 – 10:10</span></td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="358" onmousedown="md(this)" onmouseup="mu(this)" >Session on Soil and Vegetation    (Chairs: R. Lang and N. Pierdicca)</span></strong></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="359" onmousedown="md(this)" onmouseup="mu(this)" >08:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080314_08.30_Shi.pdf"><span class="coloringspan" id="360" onmousedown="md(this)" onmouseup="mu(this)" >Microwave Vegetation Indices    Derived from Satellite Microwave Radiometers –</span> <em><span class="coloringspan" id="361" onmousedown="md(this)" onmouseup="mu(this)" >J.C. Shi, T. Jackson</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="362" onmousedown="md(this)" onmouseup="mu(this)" >08:50</span></td>
+    <td valign="top" class="bordered"><span class="coloringspan" id="363" onmousedown="md(this)" onmouseup="mu(this)" >Estimation of Canopy Attenuation    for Active/Passive Microwave Soil Moisture Retrievals –</span> <em><span class="coloringspan" id="364" onmousedown="md(this)" onmouseup="mu(this)" >M. Kurum, R. Lang,    P. O’Neill, A. Joseph, T. Jackson, M. Cosh</span></em></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="365" onmousedown="md(this)" onmouseup="mu(this)" >09:10</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080314_09.10_Chuklantsev.pdf"><span class="coloringspan" id="366" onmousedown="md(this)" onmouseup="mu(this)" >Complex Microwave Transmissivity    of Tree Crowns –</span> <em><span class="coloringspan" id="367" onmousedown="md(this)" onmouseup="mu(this)" >A. Chukhlantsev, V. Kobylianskij, S. Marechek, Y.    Tsargorodtsev, A. Shutko</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="368" onmousedown="md(this)" onmouseup="mu(this)" >09:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080314_09.30_MikeSchwank.pdf"><span class="coloringspan" id="369" onmousedown="md(this)" onmouseup="mu(this)" >Testing a New Model for the L-band    Radiation of Moist Leaf Litter –</span> <em><span class="coloringspan" id="370" onmousedown="md(this)" onmouseup="mu(this)" >M. Schwank, M. Guglielmetti, C. Mätzler,    H. Flühler</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="371" onmousedown="md(this)" onmouseup="mu(this)" >09:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080314_09.50_Erbas.pdf"><span class="coloringspan" id="372" onmousedown="md(this)" onmouseup="mu(this)" >Small scale effects on the    brightness temperature at 1.4 GHz: ponding in an agricultural field -</span> <em><span class="coloringspan" id="373" onmousedown="md(this)" onmouseup="mu(this)" >C.    Erbas, B. Hornbuckle</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><em><span class="coloringspan" id="374" onmousedown="md(this)" onmouseup="mu(this)" >10:10 – 10:30</span></em></td>
+    <td valign="top" class="bordered"><em><strong><span class="coloringspan" id="375" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></strong></em></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="376" onmousedown="md(this)" onmouseup="mu(this)" >10:30 – 12:10</span></td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="377" onmousedown="md(this)" onmouseup="mu(this)" >Session on Ocean (Chairs: D.M. Le    Vine, L.Mitnik)</span></strong></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="378" onmousedown="md(this)" onmouseup="mu(this)" >10:30</span></td>
+    <td valign="top" class="bordered"><span class="coloringspan" id="379" onmousedown="md(this)" onmouseup="mu(this)" >A</span><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080314_10.30_shibata.pdf"><span class="coloringspan" id="380" onmousedown="md(this)" onmouseup="mu(this)" >MSR-E SST observation in Arctic Ocean for summer 2007 –</span><em> <span class="coloringspan" id="381" onmousedown="md(this)" onmouseup="mu(this)" >A. Shibata, H.    Murakami</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="382" onmousedown="md(this)" onmouseup="mu(this)" >10:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080314_10.50_Dean_Smith.pdf"><span class="coloringspan" id="383" onmousedown="md(this)" onmouseup="mu(this)" >An Anisotropic Ocean Surface    Emissivity Model Based on WindSat Polarimetric Brightness Observations –</span> <em><span class="coloringspan" id="384" onmousedown="md(this)" onmouseup="mu(this)" >D.F.    Smith, B. Weber, A. Gasiewski</span></em></span><em> </em></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="385" onmousedown="md(this)" onmouseup="mu(this)" >11:10</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080314_11.10_thomas_meissner_talk.pdf"><span class="coloringspan" id="386" onmousedown="md(this)" onmouseup="mu(this)" >Wind Retrievals under Rain for    Passive Satellite Microwave Radiometers using C and X Band Frequencies and    its Application to Hurricane Tracking –</span> <em><span class="coloringspan" id="387" onmousedown="md(this)" onmouseup="mu(this)" >T. Meissner, F. Wentz</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="388" onmousedown="md(this)" onmouseup="mu(this)" >11:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080314_11.30_Bobak.pdf"><span class="coloringspan" id="389" onmousedown="md(this)" onmouseup="mu(this)" >On the Correlation of    Area-Extensive Measurement of Fractional Area Whitecap Coverage With    Microwave Brightness Temperatures –</span> <em><span class="coloringspan" id="390" onmousedown="md(this)" onmouseup="mu(this)" >J. Bobak, W. Asher, D. Dowgiallo, M.    Anguelova</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="391" onmousedown="md(this)" onmouseup="mu(this)" >11:50</span></td>
+    <td valign="top" class="bordered"><span class="coloringspan" id="392" onmousedown="md(this)" onmouseup="mu(this)" >L-band radiometry and reflection    of the Galaxy by a rough ocean surface –</span> <em><span class="coloringspan" id="393" onmousedown="md(this)" onmouseup="mu(this)" >E. Dinnat, D.M. Le Vine, S.    Abraham</span></em></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><em><span class="coloringspan" id="394" onmousedown="md(this)" onmouseup="mu(this)" >12:10 – 13:50</span></em></td>
+    <td valign="top" class="bordered"><em><strong><span class="coloringspan" id="395" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></strong></em></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="396" onmousedown="md(this)" onmouseup="mu(this)" >13:50 – 15:30</span></td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="397" onmousedown="md(this)" onmouseup="mu(this)" >Session on Snow and Sea Ice (I)    (Chairs: L. Tsang and J. C. Shi)</span></strong></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="398" onmousedown="md(this)" onmouseup="mu(this)" >13:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080314_13.50_Tsang.pdf"><span class="coloringspan" id="399" onmousedown="md(this)" onmouseup="mu(this)" >Microwave emission from snowpacks:    modelling the effects of volume scattering, surface scattering and layering –</span> <em><span class="coloringspan" id="400" onmousedown="md(this)" onmouseup="mu(this)" >L. Tsang</span></em><span class="coloringspan" id="401" onmousedown="md(this)" onmouseup="mu(this)" >,</span><em> <span class="coloringspan" id="402" onmousedown="md(this)" onmouseup="mu(this)" >D. Liang, X. Xu, P.Xu</span> </em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="403" onmousedown="md(this)" onmouseup="mu(this)" >14:10</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080314_14.10_Gasiewski.pdf"><span class="coloringspan" id="404" onmousedown="md(this)" onmouseup="mu(this)" >Airborne Mapping of Soil Moisture    and Snow Water Equivalent</span> <em><span class="coloringspan" id="405" onmousedown="md(this)" onmouseup="mu(this)" >– A. Gasiewski, E. McIntyre, M. Klein, D. Smith,    D. Manda, V. Leuski, B. S. Stankov</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="406" onmousedown="md(this)" onmouseup="mu(this)" >14:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080314_14.30_Takala.pdf"><span class="coloringspan" id="407" onmousedown="md(this)" onmouseup="mu(this)" >Detection of snow melt onset using    different algorithms in global scale –</span> <em><span class="coloringspan" id="408" onmousedown="md(this)" onmouseup="mu(this)" >M. Takala, J. Pulliainen</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="409" onmousedown="md(this)" onmouseup="mu(this)" >14:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080314_14.50_Macelloni.pdf"><span class="coloringspan" id="410" onmousedown="md(this)" onmouseup="mu(this)" >Monitoring of temporal and spatial    variability of the East Antarctic plateau using passive microwave data -</span> <em><span class="coloringspan" id="411" onmousedown="md(this)" onmouseup="mu(this)" >G.Macelloni,    M. Brogioni, S. Paloscia, S. Pettinato, P. Pampaloni, E.     Santi</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="412" onmousedown="md(this)" onmouseup="mu(this)" >15:10</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080314_15.10_b_johnson.pdf"><span class="coloringspan" id="413" onmousedown="md(this)" onmouseup="mu(this)" >Combined Passive and Active    Microwave Retrieval of Falling Snow During the 2003 Wakasa Bay Field    Experiment –</span> <em><span class="coloringspan" id="414" onmousedown="md(this)" onmouseup="mu(this)" >B. Johnson, G. Skofronick Jackson, G. Petty, J. Wang</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><em><span class="coloringspan" id="415" onmousedown="md(this)" onmouseup="mu(this)" >15:30 – 16:30</span></em></td>
+    <td valign="top" class="bordered"><em><strong><span class="coloringspan" id="416" onmousedown="md(this)" onmouseup="mu(this)" >Break &amp; Poster Presentation</span></strong></em></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="417" onmousedown="md(this)" onmouseup="mu(this)" >16:30 – 17:50</span></td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="418" onmousedown="md(this)" onmouseup="mu(this)" >Session on Snow and Sea Ice (II)</span></strong></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="419" onmousedown="md(this)" onmouseup="mu(this)" >16:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080314_16.30_Wiebe.pdf"><span class="coloringspan" id="420" onmousedown="md(this)" onmouseup="mu(this)" >Validation of the ASI Ice    Concentration Algorithm using Landsat-7 ETM+ and SAR imagery –</span> <em><span class="coloringspan" id="421" onmousedown="md(this)" onmouseup="mu(this)" >H. Wiebe,    G. Heygster</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="422" onmousedown="md(this)" onmouseup="mu(this)" >16:50</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080314_16.50_Kongoli.pdf"><span class="coloringspan" id="423" onmousedown="md(this)" onmouseup="mu(this)" >The retrievals of sea-ice    concentration from variationally-retrieved microwave surface emissivities –</span> <em><span class="coloringspan" id="424" onmousedown="md(this)" onmouseup="mu(this)" >C.    Kongoli, S.A. Boukabara, B. Yan, F. Weng, R. Ferraro</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="425" onmousedown="md(this)" onmouseup="mu(this)" >17:10</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080314_17.10_Zabolotskikh.pdf"><span class="coloringspan" id="426" onmousedown="md(this)" onmouseup="mu(this)" >Neural-Network based algorithm for    ice concentration retrievals from satellite passive microwave data –</span> <em><span class="coloringspan" id="427" onmousedown="md(this)" onmouseup="mu(this)" >L.    Bobylev, E. Zabolotskikh, L. Mitnik, O. Johannessen</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="428" onmousedown="md(this)" onmouseup="mu(this)" >17:30</span></td>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/presentations/20080314_17.30_Brogioni.pdf"><span class="coloringspan" id="429" onmousedown="md(this)" onmouseup="mu(this)" >A theoretical analysis on the sensitivity    of microwave emission to snow parameters –</span> <em><span class="coloringspan" id="430" onmousedown="md(this)" onmouseup="mu(this)" >M. Brogioni</span></em></span></td>
+  </tr>
+  <tr>
+    <td width="90" valign="top" class="bordered"><span class="coloringspan" id="431" onmousedown="md(this)" onmouseup="mu(this)" >18:00</span></td>
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="432" onmousedown="md(this)" onmouseup="mu(this)" >Farewell and Best Posters Awards</span></strong></td>
+  </tr>
+			</table>
+			
+<br>	
+<hr size="1" width="90%">
+<br>
+			
+			<!-------- POSTER SESSION II ---------------------------------------------------------->
+			<table width="95%" border="0" align='center' cellpadding="2" cellspacing="0" class="tabBordered">
+  <tr align="center">
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="433" onmousedown="md(this)" onmouseup="mu(this)" >Poster Session II    –Thursday 13th / Friday 14th March 2008</span></strong> </td>
+  </tr>
+  <tr align="center">
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="434" onmousedown="md(this)" onmouseup="mu(this)" >Atmosphere</span></strong></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="435" onmousedown="md(this)" onmouseup="mu(this)" >Theoretical study of the impact of    scanning geometry on microwave sounding of temperature and humidity</span> <em><span class="coloringspan" id="436" onmousedown="md(this)" onmouseup="mu(this)" >– F.    Weng, S. Boukabara, K. Garrett</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="437" onmousedown="md(this)" onmouseup="mu(this)" >Atmospheric opacity and phase    delay at sub-millimeter wavelengths</span> <em><span class="coloringspan" id="438" onmousedown="md(this)" onmouseup="mu(this)" >– J. Cernicharo, M.C. Wiedner, E.    Serabyn, J.R. Pardo</span> </em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/posters/murad_ASMUWARA.pdf"><span class="coloringspan" id="439" onmousedown="md(this)" onmouseup="mu(this)" >A one year time series of    tropospheric water vapor and temperature profiles observed by the ASMUWARA    microwave radiometer</span> <em><span class="coloringspan" id="440" onmousedown="md(this)" onmouseup="mu(this)" >– E.N. Koffi, C. Mätzler, E.     Brocard, M. Schneebeli</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="441" onmousedown="md(this)" onmouseup="mu(this)" >Arctic polar algorithms for    atmospheric water parameter retrievals from satellite passive microwave data</span> <em><span class="coloringspan" id="442" onmousedown="md(this)" onmouseup="mu(this)" >–    E. Zabolotskikh, L. Mitnik, L. Bobylev, O. Johannessen</span> </em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/posters/Desportes2008.pdf"><span class="coloringspan" id="443" onmousedown="md(this)" onmouseup="mu(this)" >1D-Var Retrieval of the Wet    Tropospheric Correction in Coastal Regions</span> <em><span class="coloringspan" id="444" onmousedown="md(this)" onmouseup="mu(this)" >– L. Eymard, E. Obligis, C.    Desportes</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="445" onmousedown="md(this)" onmouseup="mu(this)" >Radiance assimilation of lower    tropospheric sounding microwave channels over land</span> <em><span class="coloringspan" id="446" onmousedown="md(this)" onmouseup="mu(this)" >– F. Hilton, S.    English, T. Sreerekha</span></em> </td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="447" onmousedown="md(this)" onmouseup="mu(this)" >Observation of stratospherical    trace gases by millimeter wave radiometry in tropical South     America</span> <em><span class="coloringspan" id="448" onmousedown="md(this)" onmouseup="mu(this)" >– G. Kopp, P. Hoffmann, J. Gross, G. Hochschild</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="449" onmousedown="md(this)" onmouseup="mu(this)" >A Novel    Microwave Radiometer for Assessment of Atmospheric Propagation Conditions for    10 and 90 GHz Frequency Bands -</span> <em><span class="coloringspan" id="450" onmousedown="md(this)" onmouseup="mu(this)" >D.    Nörenberg, S. Crewell, Th. Rose, A. Martellucci</span></em> </td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="451" onmousedown="md(this)" onmouseup="mu(this)" >Retrieval of atmospheric water    vapour profile using the Megha-Tropiques</span> <em><span class="coloringspan" id="452" onmousedown="md(this)" onmouseup="mu(this)" >– C. Prigent, H. Brogniez, F.    Bernardo, F. Aires</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="453" onmousedown="md(this)" onmouseup="mu(this)" >Development of a neural network    for precipitable water vapor retrieval over ocean and land</span> <em><span class="coloringspan" id="454" onmousedown="md(this)" onmouseup="mu(this)" >– P. Ciotti, F.    Pelliccia, V. Mattioli, S. Bonafoni, P. Basili</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="455" onmousedown="md(this)" onmouseup="mu(this)" >Analysis of microwave and    millimeter-wave water vapor brightness temperatures in the Arctic</span> <em><span class="coloringspan" id="456" onmousedown="md(this)" onmouseup="mu(this)" >– V.Y. Leuski, M. Klein, A.J. Gasiewski, D. Cimini, Ed R. Westwater, V.    Mattioli</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="457" onmousedown="md(this)" onmouseup="mu(this)" >Comparison of ground-based    millimeter-wave observations in the Arctic winter</span> <em><span class="coloringspan" id="458" onmousedown="md(this)" onmouseup="mu(this)" >– V. Payne, M. Exner, M.    Mlawer, D. Turner, Ed R. Westwater, D. Cimini</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="459" onmousedown="md(this)" onmouseup="mu(this)" >Analysis of rainfall retrieval    from ground-based multi-channel microwave radiometry</span> <em><span class="coloringspan" id="460" onmousedown="md(this)" onmouseup="mu(this)" >– F.S. Marzano, D.    Cimini, A. Memmo</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="461" onmousedown="md(this)" onmouseup="mu(this)" >Use of NWP data and ground    microwave radiometers for the climatological assessment of radiowave    propagation models</span> <em><span class="coloringspan" id="462" onmousedown="md(this)" onmouseup="mu(this)" >– L. Luini, C. Riva, A. Martellucci</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="463" onmousedown="md(this)" onmouseup="mu(this)" >The impact of assimilating SSMIS    radiances on analysed temperature and moisture fields in the Met Office    global NWP model</span> <em><span class="coloringspan" id="464" onmousedown="md(this)" onmouseup="mu(this)" >– S. Swadley, B. Candy, F. Hilton, J. English, W. Bell</span></em></td>
+  </tr>
+  <tr align="center">
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="465" onmousedown="md(this)" onmouseup="mu(this)" >Clouds    and Precipitations</span></strong><strong> </strong></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="466" onmousedown="md(this)" onmouseup="mu(this)" >Error modelling related to    microwave radiance assimilation of clouds and precipitation</span> <em><span class="coloringspan" id="467" onmousedown="md(this)" onmouseup="mu(this)" >– R. Bennartz,    M. Kulie</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/posters/poster_Battaglia_etal.pdf"><span class="coloringspan" id="468" onmousedown="md(this)" onmouseup="mu(this)" >Ground-based observations of    precipitating clouds by a scanning polarimetric triple-frequency microwave    radiometer -</span> <em><span class="coloringspan" id="469" onmousedown="md(this)" onmouseup="mu(this)" >A. Battaglia, P. Saavedra, C. Simmer, T. Rose</span> </em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="470" onmousedown="md(this)" onmouseup="mu(this)" >Rain retrieval using 183 GHz    absorption lines</span> <em><span class="coloringspan" id="471" onmousedown="md(this)" onmouseup="mu(this)" >– S. La Viola, V. Levizzani</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="472" onmousedown="md(this)" onmouseup="mu(this)" >Observations of the temporal and    spatial distribution of water vapour and clouds with a scanning microwave    radiometer</span> <em><span class="coloringspan" id="473" onmousedown="md(this)" onmouseup="mu(this)" >– S. Kneifel, U. Loehnert, S. Crewell, J. Schween</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="474" onmousedown="md(this)" onmouseup="mu(this)" >On the Use of Microwave Sounder    Data for High-Temporal Rainfall Maps based on Microwave Radiometers</span> <em><span class="coloringspan" id="475" onmousedown="md(this)" onmouseup="mu(this)" >– S.    Shige, T. Yamamoto, T. Tsukiyama, S. Kida, T. Kubota, K. Okamoto</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/posters/poster_brocard.pdf"><span class="coloringspan" id="476" onmousedown="md(this)" onmouseup="mu(this)" >Deriving wind components at    cloud-base height using a commercial infrared camera and a microwave    radiometer</span> <em><span class="coloringspan" id="477" onmousedown="md(this)" onmouseup="mu(this)" >– E. Brocard, M. Schneebeli, C. Mätzler</span> </em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="478" onmousedown="md(this)" onmouseup="mu(this)" >Use of millimeter and    sub-millimeter wavelengths to retrieve cloud/rain information in tropical    systems</span> <em><span class="coloringspan" id="479" onmousedown="md(this)" onmouseup="mu(this)" >– E. Defer, C. Prigent, F. Aires, J. Chaboureau, J.P. Pinty, J.    Pardo</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/posters/poster_payne.pdf"><span class="coloringspan" id="480" onmousedown="md(this)" onmouseup="mu(this)" >Air-broadened half-widths of the    22 GHz and 183 GHz water vapor</span> <em><span class="coloringspan" id="481" onmousedown="md(this)" onmouseup="mu(this)" >lines - V. Payne, J. Delamere, K.    Cady-Pereira, J.L. Moncet, E. Mlawer, T.    Clough, R. Gamache</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="482" onmousedown="md(this)" onmouseup="mu(this)" >Potential of millimeter wavelength    observations for remote sensing of precipitation and hydrometeors</span> <em><span class="coloringspan" id="483" onmousedown="md(this)" onmouseup="mu(this)" >– M.    Mech, S. Crewell, J.P. Chaboureau, I. Meirold-Mautner, C. Prigent</span></em></td>
+  </tr>
+  <tr align="center">
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="484" onmousedown="md(this)" onmouseup="mu(this)" >Ocean</span></strong></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="485" onmousedown="md(this)" onmouseup="mu(this)" >The microwave emission of a    non-smooth periodic sea surface</span> <em><span class="coloringspan" id="486" onmousedown="md(this)" onmouseup="mu(this)" >– A. Selunski, A. Kuzmin</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="487" onmousedown="md(this)" onmouseup="mu(this)" >Improving the Neural Networks'    Retrieval of Sea Surface Salinity for SMOS Mission</span> <em><span class="coloringspan" id="488" onmousedown="md(this)" onmouseup="mu(this)" >– A. Ammar, S. Labroue, C. Mejia, M. Crépon, S. Thiria, E.     Obligis</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="489" onmousedown="md(this)" onmouseup="mu(this)" >L-Band Dielectric Constant    Measurements of Seawater: Accuracy Issues and Measurements</span> <em><span class="coloringspan" id="490" onmousedown="md(this)" onmouseup="mu(this)" >– R. Lang, C.    Utku, Y. Tarkocin, D.M. Le Vine</span> </em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="491" onmousedown="md(this)" onmouseup="mu(this)" >The potential of QuikSCAT and    WindSat observations for the estimation of sea surface wind vector under    severe weather conditions –</span><em> <span class="coloringspan" id="492" onmousedown="md(this)" onmouseup="mu(this)" >Y. Quilfen, C. Prigent, B. Chapron, A. Mouche</span> </em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="493" onmousedown="md(this)" onmouseup="mu(this)" >Air-sea interaction monitoring by    remote and contact measurements: the results of the CAPMOS'05 and CAPMOS'07    experiments on an oceanographic platform in the Black Sea</span> <em><span class="coloringspan" id="494" onmousedown="md(this)" onmouseup="mu(this)" >– M. Pospelov,    Y. Goryachkin, N. Komarova, A. Kuzmin, A. Kuznetsov, P. Pampaloni, I. Repina,    M. Smirnov, S. Zecchetto</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="495" onmousedown="md(this)" onmouseup="mu(this)" >Dynamics of short waves spectrum measured    by remote and contact sensors from an oceanographic platform</span> <em><span class="coloringspan" id="496" onmousedown="md(this)" onmouseup="mu(this)" >– M.    Pospelov, V. Antonov, A. Kuzmin, I. Sadovsky</span></em></td>
+  </tr>
+  <tr align="center">
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="497" onmousedown="md(this)" onmouseup="mu(this)" >Snow</span></strong></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="498" onmousedown="md(this)" onmouseup="mu(this)" >Melting snow in Greenland and    Antarctica from space-borne microwave data and climate model results</span> <em><span class="coloringspan" id="499" onmousedown="md(this)" onmouseup="mu(this)" >– M.    Tedesco,</span></em> <em><span class="coloringspan" id="500" onmousedown="md(this)" onmouseup="mu(this)" >R. Armstrong, K. Steffen, W. Abdalati, X. Fettweis, M.    Brodzik</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="501" onmousedown="md(this)" onmouseup="mu(this)" >The millimeter wave response to    volume density and grain size of dry statistically homogeneous snow. An    algorithm for retrieval of snow depth from radiometer data at the frequencies    22 and 37 GHz</span> <em><span class="coloringspan" id="502" onmousedown="md(this)" onmouseup="mu(this)" >– V. Golunov</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="503" onmousedown="md(this)" onmouseup="mu(this)" >Comparison of predictions by the    modified HUT snow emission model with brightness temperature data    representing forested terrain and snow-covered lake ice</span> <em><span class="coloringspan" id="504" onmousedown="md(this)" onmouseup="mu(this)" >– J. Pulliainen,    A. Kontu, J. Lemmetyinen, M. Takala</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="505" onmousedown="md(this)" onmouseup="mu(this)" >The retrievals of effective grain    size and snow water equivalent from variatonally-retrieved microwave surface    emissivities</span> <em><span class="coloringspan" id="506" onmousedown="md(this)" onmouseup="mu(this)" >– C. Kongoli, S. Boukabara,    F. Weng</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="507" onmousedown="md(this)" onmouseup="mu(this)" >Regional features of microwave    radiation and snow cover interaction on the example of the north of the    european part of</span> <em><span class="coloringspan" id="508" onmousedown="md(this)" onmouseup="mu(this)" >Russia</span></em><em> <span class="coloringspan" id="509" onmousedown="md(this)" onmouseup="mu(this)" >– V. Tikhonov,</span></em> <em><span class="coloringspan" id="510" onmousedown="md(this)" onmouseup="mu(this)" >D. Boyarskii, L. Kitaev, M. Raev, E.     Cherenkova</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="511" onmousedown="md(this)" onmouseup="mu(this)" >A theoretical analysis on the    sensitivity of microwave emission to snow parameters –</span> <em><span class="coloringspan" id="512" onmousedown="md(this)" onmouseup="mu(this)" >M. Brogioni, G.    Macelloni, S. Paloscia, P. Pampaloni, S. Pettinato, E. Santi</span></em></td>
+  </tr>
+  <tr align="center">
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="513" onmousedown="md(this)" onmouseup="mu(this)" >Sea    Ice</span></strong></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="514" onmousedown="md(this)" onmouseup="mu(this)" >Multi year sea ice concentration mapping    using passive and active microwave satellite data</span> <em><span class="coloringspan" id="515" onmousedown="md(this)" onmouseup="mu(this)" >– E.     Shalina, O.M. Johannessen</span> </em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="516" onmousedown="md(this)" onmouseup="mu(this)" >L-band radiometry for sea ice applications</span><em> <span class="coloringspan" id="517" onmousedown="md(this)" onmouseup="mu(this)" >– G. Heygster, C. Haas, L.    Kaleschke, D. Stammer, R. Tomboe</span></em></td>
+  </tr>
+  <tr align="center">
+    <td valign="top" class="bordered"><strong><span class="coloringspan" id="518" onmousedown="md(this)" onmouseup="mu(this)" >Vegetation</span></strong></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/posters/panama_murad.pdf"><span class="coloringspan" id="519" onmousedown="md(this)" onmouseup="mu(this)" >Ground-Based X-Band Opacity    Measurements of Tropical Tree Canopies in Panama and its Link to Intercepted    Rain, Eddy Fluxes, Sap Flow and Other Meteorological Variables</span><em> <span class="coloringspan" id="520" onmousedown="md(this)" onmouseup="mu(this)" >– M.    Schneebeli, W. Eugster, S. Wolf, C. Maetzler</span></em></span></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="521" onmousedown="md(this)" onmouseup="mu(this)" >Radiometric Observations of Vines    from the Green Period to the Withering</span> <em><span class="coloringspan" id="522" onmousedown="md(this)" onmouseup="mu(this)" >– A. Monerris, M. Vall-llossera, A.    Camps, M. Piles</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span class="coloringspan" id="523" onmousedown="md(this)" onmouseup="mu(this)" >The Mediterranean Ecosystem L-Band    EXperiment over vineyards (MELBEX-II)</span> <em><span class="coloringspan" id="524" onmousedown="md(this)" onmouseup="mu(this)" >– A. Cano, C. Millán-Scheiding, J.P.    Wigneron, C. Antolín, J. Balling, J.P. Grant, A. Kruszewski, K. Saleh, S.    Søbjærg, N. Skou, E. Lopez-Baeza</span></em></td>
+  </tr>
+  <tr>
+    <td valign="top" class="bordered"><span onclick="return false" style="text-decoration:underline; color:blue" href="public/posters/poster_ferrazzoli.pdf"><span class="coloringspan" id="525" onmousedown="md(this)" onmouseup="mu(this)" >Modeling the multi-frequency    emission of Mediterranean forests and comparisons with experimental data</span> <em><span class="coloringspan" id="526" onmousedown="md(this)" onmouseup="mu(this)" >–    A. Della Vecchia, P. Ferrazzoli, L. Guerriero, R.    Rahmoune, E. Santi, S. Pettinato, S. Paloscia</span></em></span></td>
+  </tr>
+			</table>			
+		  <br>
+
+		</td>
+		<td class='leftSide' valign='top'>
+			
+<div id='boxNews'>
+	<table border='0' cellpadding='4' width='100%'>
+		<tr>
+			<td><font class='newsTitle'><b><span class="coloringspan" id="527" onmousedown="md(this)" onmouseup="mu(this)" >NEWS</span></b></font></td>
+		</tr>
+	<tr><td colspan='2'><span onclick="return false" style="text-decoration:underline; color:blue" href='showNews.asp?idNews=88'><font class='announceTitle'><span class="coloringspan" id="528" onmousedown="md(this)" onmouseup="mu(this)" >23/04/2008</span></font></span><br><span onclick="return false" style="text-decoration:underline; color:blue" href='showNews.asp?idNews=88'><font class='announceText'><span class="coloringspan" id="529" onmousedown="md(this)" onmouseup="mu(this)" >Paper Prizes</span></font></span></td></tr><tr><td colspan='2'><span onclick="return false" style="text-decoration:underline; color:blue" href='showNews.asp?idNews=87'><font class='announceTitle'><span class="coloringspan" id="530" onmousedown="md(this)" onmouseup="mu(this)" >18/04/2008</span></font></span><br><span onclick="return false" style="text-decoration:underline; color:blue" href='showNews.asp?idNews=87'><font class='announceText'><span class="coloringspan" id="531" onmousedown="md(this)" onmouseup="mu(this)" >Photo Gallery</span></font></span></td></tr><tr><td colspan='2'><span onclick="return false" style="text-decoration:underline; color:blue" href='showNews.asp?idNews=86'><font class='announceTitle'><span class="coloringspan" id="532" onmousedown="md(this)" onmouseup="mu(this)" >18/04/2008</span></font></span><br><span onclick="return false" style="text-decoration:underline; color:blue" href='showNews.asp?idNews=86'><font class='announceText'><span class="coloringspan" id="533" onmousedown="md(this)" onmouseup="mu(this)" >Final Paper deadline</span></font></span></td></tr><tr><td colspan='2'><span onclick="return false" style="text-decoration:underline; color:blue" href='showNews.asp?idNews=85'><font class='announceTitle'><span class="coloringspan" id="534" onmousedown="md(this)" onmouseup="mu(this)" >28/02/2008</span></font></span><br><span onclick="return false" style="text-decoration:underline; color:blue" href='showNews.asp?idNews=85'><font class='announceText'><span class="coloringspan" id="535" onmousedown="md(this)" onmouseup="mu(this)" >Final Program available</span></font></span></td></tr><tr><td align='right'><span class="coloringspan" id="536" onmousedown="md(this)" onmouseup="mu(this)" >[</span><span onclick="return false" style="text-decoration:underline; color:blue" href='news.asp'><span class="coloringspan" id="537" onmousedown="md(this)" onmouseup="mu(this)" >View all news</span></span><span class="coloringspan" id="538" onmousedown="md(this)" onmouseup="mu(this)" >]</span></td></tr>
+		
+	</table>
+</div>
+
+<script language="JavaScript" type="text/javascript">
+<!--
+// -----------------------------------------------------------------------------
+// Globali
+// È richiesta la versione principale di Flash
+var requiredMajorVersion = 8;
+// È richiesta la versione minore di Flash
+var requiredMinorVersion = 0;
+// Versione di Flash richiesta
+var requiredRevision = 0;
+// La versione supportata di JavaScript
+var jsVersion = 1.0;
+// -----------------------------------------------------------------------------
+// -->
+</script>
+<script language="VBScript" type="text/vbscript">
+<!-- // Helper di Visual Basic richiesto per rilevare le informazioni sulla versione dei controlli ActiveX di Flash Player
+Function VBGetSwfVer(i)
+  on error resume next
+  Dim swControl, swVersion
+  swVersion = 0
+  
+  set swControl = CreateObject("ShockwaveFlash.ShockwaveFlash." + CStr(i))
+  if (IsObject(swControl)) then
+    swVersion = swControl.GetVariable("$version")
+  end if
+  VBGetSwfVer = swVersion
+End Function
+// -->
+</script>
+<script language="JavaScript1.1" type="text/javascript">
+<!-- // Rileva tipo di browser client
+var isIE  = (navigator.appVersion.indexOf("MSIE") != -1) ? true : false;
+var isWin = (navigator.appVersion.toLowerCase().indexOf("win") != -1) ? true : false;
+var isOpera = (navigator.userAgent.indexOf("Opera") != -1) ? true : false;
+jsVersion = 1.1;
+// Helper di JavaScript richiesto per rilevare le informazioni sulla versione del plug-in Flash Player
+function JSGetSwfVer(i){
+	// Le versioni di NS/Opera dalla 3 in poi verificano la presenza del plug-in Flash nell'array dei plug-in
+	if (navigator.plugins != null && navigator.plugins.length > 0) {
+		if (navigator.plugins["Shockwave Flash 2.0"] || navigator.plugins["Shockwave Flash"]) {
+			var swVer2 = navigator.plugins["Shockwave Flash 2.0"] ? " 2.0" : "";
+      		var flashDescription = navigator.plugins["Shockwave Flash" + swVer2].description;
+			descArray = flashDescription.split(" ");
+			tempArrayMajor = descArray[2].split(".");
+			versionMajor = tempArrayMajor[0];
+			versionMinor = tempArrayMajor[1];
+			if ( descArray[3] != "" ) {
+				tempArrayMinor = descArray[3].split("r");
+			} else {
+				tempArrayMinor = descArray[4].split("r");
+			}
+      		versionRevision = tempArrayMinor[1] > 0 ? tempArrayMinor[1] : 0;
+            flashVer = versionMajor + "." + versionMinor + "." + versionRevision;
+      	} else {
+			flashVer = -1;
+		}
+	}
+	// MSN/WebTV 2.6 supporta Flash 4
+	else if (navigator.userAgent.toLowerCase().indexOf("webtv/2.6") != -1) flashVer = 4;
+	// WebTV 2.5 supporta Flash 3
+	else if (navigator.userAgent.toLowerCase().indexOf("webtv/2.5") != -1) flashVer = 3;
+	// Le versioni precedenti di WebTV supportano Flash 2
+	else if (navigator.userAgent.toLowerCase().indexOf("webtv") != -1) flashVer = 2;
+	// Impossibile effettuare il rilevamento in tutti gli altri casi
+	else {
+		
+		flashVer = -1;
+	}
+	return flashVer;
+} 
+// Se viene chiamata senza parametri, questa funzione restituisce un valore 
+// a punto mobile che dovrebbe essere la versione di Flash Player oppure 0.0
+// ad es.: Flash Player 7r14 restituisce 7.14
+// Se chiamato con il parametro reqMajorVer, reqMinorVer, reqRevision restituisce true se quella versione o una versione successiva è disponibile
+function DetectFlashVer(reqMajorVer, reqMinorVer, reqRevision) 
+{
+ 	reqVer = parseFloat(reqMajorVer + "." + reqRevision);
+   	// Esamina ciclicamente all'indietro le versioni fino a trovare quella più recente	
+	for (i=25;i>0;i--) {	
+		if (isIE && isWin && !isOpera) {
+			versionStr = VBGetSwfVer(i);
+		} else {
+			versionStr = JSGetSwfVer(i);		
+		}
+		if (versionStr == -1 ) { 
+			return false;
+		} else if (versionStr != 0) {
+			if(isIE && isWin && !isOpera) {
+				tempArray         = versionStr.split(" ");
+				tempString        = tempArray[1];
+				versionArray      = tempString .split(",");				
+			} else {
+				versionArray      = versionStr.split(".");
+			}
+			versionMajor      = versionArray[0];
+			versionMinor      = versionArray[1];
+			versionRevision   = versionArray[2];
+			
+			versionString     = versionMajor + "." + versionRevision;   // 7.0r24 == 7.24
+			versionNum        = parseFloat(versionString);
+        	// è la versione maggiore >= versione maggiore richiesta E la versione minore >= versione minore richiesta
+			if ( (versionMajor > reqMajorVer) && (versionNum >= reqVer) ) {
+				return true;
+			} else {
+				return ((versionNum >= reqVer && versionMinor >= reqMinorVer) ? true : false );	
+			}
+		}
+	}	
+	return (reqVer ? false : 0.0);
+}
+// -->
+</script>
+<script language="JavaScript" type="text/javascript">
+<!-- 
+var hasRightVersion = DetectFlashVer(requiredMajorVersion, requiredMinorVersion, requiredRevision);
+if(hasRightVersion) {  // se è stata rilevata una versione accettabile
+    var oeTags = '<object classid="clsid:D27CDB6E-AE6D-11cf-96B8-444553540000"'
+    + 'width="170" height="210"'
+    + 'codebase="http://download.macromedia.com/pub/shockwave/cabs/flash/swflash.cab">'
+    + '<param name="movie" value="slideShow.swf" /><param name="menu" value="false" /><param name="quality" value="high" /><param name="bgcolor" value="#ffffff" />'
+    + '<embed src="slideShow.swf" menu="false" quality="high" bgcolor="#ffffff" '
+    + 'width="170" height="210" name="slideShow" align="middle"'
+    + 'play="true"'
+    + 'loop="false"'
+    + 'quality="high"'
+    + 'allowScriptAccess="sameDomain"'
+    + 'type="application/x-shockwave-flash"'
+    + 'pluginspage="http://www.macromedia.com/go/getflashplayer">'
+    + '<\/embed>'
+    + '<\/object>';
+    document.write(oeTags);   // incorpora il filmato Flash
+  } else {  // la versione di Flash è troppo vecchia o non è possibile rilevare il plug-in
+    var alternateContent = '<img onmousedown="imd(this)" border="0" src="images/imgRightSide01.jpg">';
+    document.write(alternateContent);  // Inserisci contenuto non Flash
+  }
+// -->
+</script>
+<noscript>
+	<img onmousedown="imd(this)" border='0' src='images/imgRightSide01.jpg'>
+</noscript>
+
+<br>
+<div align='center'>
+<p style='background-color: #F0F0F0; color:#444444; border: 1px solid; padding-bottom:15px;'><span onclick="return false" style="text-decoration:underline; color:blue" href='public/mrad08_call.pdf' target='_blank'><br><b><span class="coloringspan" id="539" onmousedown="md(this)" onmouseup="mu(this)" >Download Call for Paper</span></b></span></p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href='public/mrad08_call.pdf' target='_blank'><img onmousedown="imd(this)" border='0' src='images/call.gif'></span>
+</div>
+		</td>
+	</tr>
+</table>
+
+<center>
+<div id='footer'>
+	<table border='0' align='center'>
+		<tr>
+			<td align='center'><span onclick="return false" style="text-decoration:underline; color:blue" href='http://www.grss-ieee.org' target='_blank'><img onmousedown="imd(this)" border='0' src='images/logoGRSS.gif' alt='IEEE GRSS'></span></td>
+			<td width='10'><span class="coloringspan" id="540" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+			<td align='center'><span onclick="return false" style="text-decoration:underline; color:blue" href='http://www.ieee.org' target='_blank'><img onmousedown="imd(this)" border='0' src='images/logoIEEE.gif' alt='IEEE'></span></td>
+			<td width='10'><span class="coloringspan" id="541" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+			<td align='center'><span onclick="return false" style="text-decoration:underline; color:blue" href='http://www.ieee-sezioneitalia.it' target='_blank'><img onmousedown="imd(this)" border='0' src='images/logoIEEEItaly.gif' alt='IEEE Italy Section'></span></td>
+			<td width='10'><span class="coloringspan" id="542" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+			<td align='center'><span onclick="return false" style="text-decoration:underline; color:blue" href='http://www.die.uniroma1.it/ieee-grs' target='_blank'><img onmousedown="imd(this)" border='0' src='images/logoGRSSItaly.gif' alt='IEEE GRSS Central Italy Chapter'></span></td>
+			<td width='10'><span class="coloringspan" id="543" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+			<td align='center'><span onclick="return false" style="text-decoration:underline; color:blue" href='http://www.ursi.org' target='_blank'><img onmousedown="imd(this)" border='0' src='images/logoURSI.gif' alt='URSI'></span></td>
+			<td width='10'><span class="coloringspan" id="544" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+			<td align='center'><span onclick="return false" style="text-decoration:underline; color:blue" href='http://www.asi.it' target='_blank'><img onmousedown="imd(this)" border='0' src='images/logoASI.gif' alt='Agenzia Spaziale Italiana'></span></td>
+			<td width='10'><span class="coloringspan" id="545" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+			<td align='center'><span onclick="return false" style="text-decoration:underline; color:blue" href='http://www.esa.int' target='_blank'><img onmousedown="imd(this)" border='0' src='images/logoESA.gif' alt='European Space Agency'></span></td>
+		</tr>
+	</table>
+	<table border='0' align='center'>
+		<tr>
+			<td align='center'><span onclick="return false" style="text-decoration:underline; color:blue" href='http://www.jaxa.jp/index_e.html' target='_blank'><img onmousedown="imd(this)" border='0' src='images/logoJAXA.gif' alt='Japan Aerospace Exploration Agency'></span></td>
+			<td width='10'><span class="coloringspan" id="546" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+			<td align='center'><span onclick="return false" style="text-decoration:underline; color:blue" href='http://www.asita.it/ait/Associazione.html' target='_blank'><img onmousedown="imd(this)" border='0' src='images/logoAIT.gif' alt='AIT' height='40'></span></td>
+			<td width='10'><span class="coloringspan" id="547" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+			<td align='center'><span onclick="return false" style="text-decoration:underline; color:blue" href='http://www.thalesonline.com/space' target='_blank'><img onmousedown="imd(this)" border='0' src='images/logoThalesAleniaSpace.gif' alt='Thales Alenia Space'></span></td>
+			<td width='10'><span class="coloringspan" id="548" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>

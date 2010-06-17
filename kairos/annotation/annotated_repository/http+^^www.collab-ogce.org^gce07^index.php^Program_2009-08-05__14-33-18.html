@@ -1,0 +1,616 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en" dir="ltr">
+  <head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.collab-ogce.org^gce07^index.php^Program_2009-08-05__14-33-18.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.collab-ogce.org^gce07^index.php^Program_2009-08-05__14-33-18.yaml created on Wed Aug 05 17:31:44 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <meta name="KEYWORDS" content="Program" />
+<meta name="robots" content="index,follow" />
+<link rel="shortcut icon" href="/favicon.ico" />
+    <title>Program - Gce07</title>
+    <style type="text/css" media="screen,projection">/*<![CDATA[*/ @import "/gce07/skins/monobook/main.css"; /*]]>*/</style>
+    <link rel="stylesheet" type="text/css" media="print" href="/gce07/skins/common/commonPrint.css" />
+    <!--[if lt IE 5.5000]><style type="text/css">@import "/gce07/skins/monobook/IE50Fixes.css";</style><![endif]-->
+    <!--[if IE 5.5000]><style type="text/css">@import "/gce07/skins/monobook/IE55Fixes.css";</style><![endif]-->
+    <!--[if gte IE 6]><style type="text/css">@import "/gce07/skins/monobook/IE60Fixes.css";</style><![endif]-->
+    <!--[if IE]><script type="text/javascript" src="/gce07/skins/common/IEFixes.js"></script>
+    <meta http-equiv="imagetoolbar" content="no" /><![endif]-->
+    <script type="text/javascript" src="/gce07/index.php?title=-&amp;action=raw&amp;gen=js"></script>    <script type="text/javascript" src="/gce07/skins/common/wikibits.js"></script>
+    <style type="text/css">/*<![CDATA[*/
+@import "/gce07/index.php?title=MediaWiki:Monobook.css&action=raw&ctype=text/css&smaxage=18000";
+@import "/gce07/index.php?title=-&action=raw&gen=css&maxage=18000";
+/*]]>*/</style>              </head>
+  <body onload="on_load()" onkeyup="on_key_up(event)"                 class="ns-0"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+    <div id="globalWrapper">
+      <div id="column-content">
+	<div id="content">
+	  <span onclick="return false" style="text-decoration:underline; color:blue" name="top" id="top"></span>
+	  	  <h1 class="firstHeading"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></h1>
+	  <div id="bodyContent">
+	    <h3 id="siteSub"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >From Gce07</span></h3>
+	    <div id="contentSub"></div>
+	    	    	    <!-- start content -->
+	    <ul><li> <b><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >The template for final version of proceedings is available</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/f/f9/Gce07-template.doc" class='internal' title="Gce07-template.doc"> <span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >here</span></span><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >.</span></b>
+</li><li> <b><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >The workshop is located in Room C2 of the Reno Convention Center.</span></b> <span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >For a map, see</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.visitrenotahoe.com/facilities/reno_sparks_cc/plans/ballroom.pdf" class='external free' title="http://www.visitrenotahoe.com/facilities/reno sparks cc/plans/ballroom.pdf" rel="nofollow"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >http://www.visitrenotahoe.com/facilities/reno_sparks_cc/plans/ballroom.pdf</span></span><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >.</span>
+</li></ul>
+<div class="editsection" style="float:right;margin-left:5px;"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >[</span><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php?title=Program&amp;action=edit&amp;section=1" title="Program"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >edit</span></span><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >]</span></div><span onclick="return false" style="text-decoration:underline; color:blue" name="Sunday.2C_November_11"></span><h2><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Sunday, November 11</span></h2>
+<table border="1">
+<tr>
+<th><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Time</span>
+</th><th><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Title</span>
+</th><th><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Presenters</span>
+</th><th><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span>
+</th><th><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Presentation</span>
+</th></tr>
+<tr>
+<td><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >9:45-10:00</span> </td><td> <span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Welcome and Overview</span> </td><td> <span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Marlon Pierce</span> </td><td> <span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+</td></tr>
+<tr>
+<td colspan="5" align="center"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Session 1: Application Portals</span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >10:00-10:30</span> </td><td><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >A Science Collaboration Environment for the Network for Earthquake Engineering Simulation</span> </td><td><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Choonhan Youn, Chaitan Baru, Ahmed Elgamal and Dogan Seber</span>
+</td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/5/54/Youn.pdf" class='internal' title="Youn.pdf"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Youn.pdf</span></span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/c/c5/YounSlides.ppt" class='internal' title="YounSlides.ppt"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >10:30-11:00</span> </td><td><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Building QuakeSim Portlets with GTLAB</span></td><td> <span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Mehmet Nacar, Marlon E. Pierce and Andrea Donnellan</span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/0/06/Nacar.pdf" class='internal' title="Nacar.pdf"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Nacar.pdf</span></span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/8/81/NacarSlides.ppt" class='internal' title="NacarSlides.ppt"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >11:00-11:30</span> </td><td> <span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >SimpleGrid Toolkit: Enabling Efficient Learning and Development of TeraGrid Science Gateway</span></td><td><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Shaowen Wang, Yan Liu, Nancy Wilkins-Diehr and Stuart Martin</span></td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/c/c5/Wang.pdf" class='internal' title="Wang.pdf"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Wang.pdf</span></span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/6/6a/WangSlides.ppt" class='internal' title="WangSlides.ppt"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td colspan="5" align="center"><i><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Break until 1:00 pm</span></i>
+</td></tr>
+<tr>
+<td colspan="5" align="center"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Session 2: Gateway Infrastructure</span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >1:00-1:30</span> </td><td> <span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >A Grid Authorization Model for Science Gateways</span> </td><td><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Tom Scavo and Von Welch</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/e/e4/Scavo.pdf" class='internal' title="Scavo.pdf"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Scavo.pdf</span></span></td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://docs.google.com/Present?docid=ddj3qnj2_90mb66t2" class='external text' title="http://docs.google.com/Present?docid=ddj3qnj2 90mb66t2" rel="nofollow"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >1:30-2:00</span> </td><td><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >GridTorrent Framework: A High-performance Data Transfer and Data Sharing Framework for Scientific Computing</span> </td><td> <span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Ali Kaplan, Geoffrey C. Fox and Gregor von Laszewski</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/1/13/Kaplan.pdf" class='internal' title="Kaplan.pdf"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Kaplan.pdf</span></span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/d/d1/KaplanSlides.ppt" class='internal' title="KaplanSlides.ppt"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >2:00-2:30</span> </td><td> <span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Python for Scientific Gateways Development</span> </td><td><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Randy Heiland, Sean Mooney, Joshua Boverhof, Keith Jackson, Marcus Christie, Maciek Swat, Ariel Balter and Joseph Insley</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/6/61/Heiland.pdf" class='internal' title="Heiland.pdf"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Heiland.pdf</span></span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/5/52/HeilandSlides.ppt" class='internal' title="HeilandSlides.ppt"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td colspan="5" align="center"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Session 3: Visualization Gateways</span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >3:00-3:30</span> </td><td><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Watt: A Compiler for Automated Visualization Service Generation</span> </td><td><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Evan Bollig, Martin Lyness and Gordon Erlebacher</span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/b/b9/Bollig.pdf" class='internal' title="Bollig.pdf"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Bollig.pdf</span></span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/6/65/BolligSlides.pdf" class='internal' title="BolligSlides.pdf"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >3:30-4:00</span> </td><td><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Creating Grid Resources for Use in Undergraduate Coursework</span> </td><td> <span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >John Huffman, Richard Repasky and Joseph Rinkovsky</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/6/68/Huffman.pdf" class='internal' title="Huffman.pdf"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Huffman.pdf</span></span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/c/c5/HuffmanSlides.ppt" class='internal' title="HuffmanSlides.ppt"> <span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >4:00-4:30</span> </td><td> <span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Life Beyond the Browser: The TeraDRE</span> </td><td><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >David Braun, X. Carol Song and Laura Arns</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/b/b7/Song.pdf" class='internal' title="Song.pdf"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Song.pdf</span></span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/0/03/BraunSlides.pdf" class='internal' title="BraunSlides.pdf"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >4:30-5:00</span> </td><td> <span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Day 1 Speaker Panel, SC07 Demo Announcements, and Wrap Up</span></td><td> <span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >All</span></td><td><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+</td></tr></table>
+<div class="editsection" style="float:right;margin-left:5px;"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >[</span><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php?title=Program&amp;action=edit&amp;section=2" title="Program"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >edit</span></span><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >]</span></div><span onclick="return false" style="text-decoration:underline; color:blue" name="Monday.2C_November_12"></span><h2><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Monday, November 12</span></h2>
+<table border="1">
+<tr>
+<th><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Time</span>
+</th><th><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Title</span>
+</th><th><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Presenters</span>
+</th><th><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Paper</span>
+</th><th><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Presentation</span>
+</th></tr>
+<tr>
+<td colspan="5" align="center"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Session 4: Web 2.0 and Gateways, Part I</span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >9:00-9:30</span> </td><td><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >The Web as the Platform for Research (invited)</span></td><td><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Savas Parastaditis, Microsoft</span></td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Parastaditis_Abstract" title="Parastaditis Abstract"> <span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Abstract</span></span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://savas.parastatidis.name/2007/11/12/919a1978-9c1f-4b7b-8824-009363863b8e.aspx" class='external text' title="http://savas.parastatidis.name/2007/11/12/919a1978-9c1f-4b7b-8824-009363863b8e.aspx" rel="nofollow"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >9:30-10:00</span> </td><td><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Integrating Cutting-edge Research into Learning through Web 2.0 and Virtual Environments</span> </td><td> <span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Krishna Madhavan and Sebastien Goasguen</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/1/15/Madhavan.pdf" class='internal' title="Madhavan.pdf"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Madhavan.pdf</span></span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >10:00-10:30</span> </td><td> <span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Providing Dynamic Virtualized Access to Grid Resources via the Web 2.0 Paradigm</span> </td><td><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Luca Clementi, Zhaohui Ding, Sriram Krishnan, Xiaohui Wei, Peter Arzberger and Wilfred W. Li</span></td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/3/33/Clementi.pdf" class='internal' title="Clementi.pdf"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Clementi.pdf</span></span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/9/9a/ClementiSlides.pdf" class='internal' title="ClementiSlides.pdf"> <span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td colspan="5" align="center"> <span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Session 5: Web 2.0 and Gateways, Part II</span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >10:30-11:00</span> </td><td><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >The Vine Toolkit (invited)</span></td><td><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Michael Russell, Poznan Supercomputing Center</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Russell_abstract" title="Russell abstract"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Abstract</span></span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/f/f8/RussellSlides.pdf" class='internal' title="RussellSlides.pdf"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >11:00-11:30</span> </td><td><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >The Integration of AJAX, Interactive X Windows Applications and Application Input Generation  into the UCLA Grid Portal</span> </td><td> <span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Joan Slottow, Prakashan Korambath and Kejian Jin</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/6/64/Slottow.pdf" class='internal' title="Slottow.pdf"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Slottow.pdf</span></span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/3/3e/SlottowSlides.pdf" class='internal' title="SlottowSlides.pdf"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >11:30-12:00</span> </td><td> <span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Towards A Rich-Context Participatory Cyberenvironment</span></td><td><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Yong Liu, Robert McGrath, James Myers and Joe Futrelle</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/0/0c/Liu.pdf" class='internal' title="Liu.pdf"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Liu.pdf</span></span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/c/ce/LiuSlides.ppt" class='internal' title="LiuSlides.ppt"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td colspan="5" align="center"> <i><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Break Until 1:00</span></i>
+</td></tr>
+<tr>
+<td colspan="5" align="center"><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Session 6: Instruments and Gateways</span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >1:00-1:30</span> </td><td><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >A Portal-based interface for compositing multiple streams of experimental data to video</span></td><td><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Gilead Kutnick, Donald McMullen, Kianosh Huffman and Yu Ma</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/9/9a/Kutnick.pdf" class='internal' title="Kutnick.pdf"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Kutnick.pdf</span></span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/1/13/KutnickSlides.ppt" class='internal' title="KutnickSlides.ppt"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >1:30-2:00</span> </td><td><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Multitier Portal Architecture for Thin- and Thick-client Neutron Scattering Experiment Support</span> </td><td> <span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Mark L. Green and Stephen D. Miller</span></td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/4/44/Green.pdf" class='internal' title="Green.pdf"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Green.pdf</span></span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/6/63/GreenSlides.pdf" class='internal' title="GreenSlides.pdf"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >2:00-2:30</span> </td><td> <span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Enabling User-Oriented Data Access in a Satellite Data Portal</span> </td><td><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Rajesh Kalyanam, Lan Zhao, Taezoon Park, Larry Biehl and X. Carol Song</span></td><td><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/5/5b/Zhao.pdf" class='internal' title="Zhao.pdf"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Zhao.pdf</span></span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/b/b6/KalyanamSlides.ppt" class='internal' title="KalyanamSlides.ppt"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td colspan="5" align="center"> <span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Session 7: Information Services</span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >2:30-3:00</span> </td><td><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Information Services for the TeraGrid (invited)</span></td><td><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >J. P. Navarro, ANL/TeraGrid</span></td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Navarro_Abstract" title="Navarro Abstract"> <span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Abstract</span></span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/9/98/NavarroSlides.ppt" class='internal' title="NavarroSlides.ppt"> <span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td colspan="5" align="center"> <span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Break until 3:30</span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >3:30-4:00</span> </td><td><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Portlets for User Centric Job and Task Monitoring for Open Science Grid Virtual Organizations</span> </td><td> <span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >David Alexander, Rooparani Pundaleeka, Jerome Lauret and Valeri Fine</span></td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/6/67/Alexander.pdf" class='internal' title="Alexander.pdf"><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Alexander.pdf</span></span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/a/a9/AlexanderSlides.pdf" class='internal' title="AlexanderSlides.pdf"><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >4:00-4:30</span> </td><td> <span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >JavaScript COG Kit (invited)</span> </td><td><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Gregor von Laszewski, RIT</span></td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php?title=Laszewski_Abstract&amp;action=edit" class="new" title="Laszewski Abstract"><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Abstract</span></span> </td><td> <span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/images/3/39/LaszewskiSlides.pdf" class='internal' title="LaszewskiSlides.pdf"> <span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Slides</span></span>
+</td></tr>
+<tr>
+<td> <span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >4:30-5:00</span></td><td><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Wrap Up, Day 2 Round Table, and SC07 Demo Announcements</span> </td><td><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >All</span></td><td><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >-</span>
+</td></tr></table>
+
+<!-- Saved in parser cache with key wikidb_gce07:pcache:idhash:1288-0!1!0!0!!en!2 and timestamp 20090804145053 -->
+<div class="printfooter">
+<span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Retrieved from "</span><span onclick="return false" style="text-decoration:underline; color:blue" href="http://gridfarm007.ucs.indiana.edu/gce07/index.php/Program"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >http://gridfarm007.ucs.indiana.edu/gce07/index.php/Program</span></span><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >"</span></div>
+	    	    <!-- end content -->
+	    <div class="visualClear"></div>
+	  </div>
+	</div>
+      </div>
+      <div id="column-one">
+	<div id="p-cactions" class="portlet">
+	  <h5><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Views</span></h5>
+	  <ul>
+	    <li id="ca-nstab-main"
+	       class="selected"	       ><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Program"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Article</span></span></li><li id="ca-talk"
+	       class="new"	       ><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php?title=Talk:Program&amp;action=edit"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Discussion</span></span></li><li id="ca-edit"
+	       	       ><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php?title=Program&amp;action=edit"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Edit</span></span></li><li id="ca-history"
+	       	       ><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php?title=Program&amp;action=history"><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >History</span></span></li>	  </ul>
+	</div>
+	<div class="portlet" id="p-personal">
+	  <h5><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Personal tools</span></h5>
+	  <div class="pBody">
+	    <ul>
+	    <li id="pt-login"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php?title=Special:Userlogin&amp;returnto=Program"><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Create an account or log in</span></span></li>	    </ul>
+	  </div>
+	</div>
+<!--
+	<div class="portlet" id="p-logo">
+	  <span onclick="return false" style="text-decoration:underline; color:blue" style="background-image: url(/gce07/skins/common/images/wiki.png);"
+	    href="/gce07/index.php/Main_Page"
+	    title="Main Page"></span>
+	</div>
+-->
+	<script type="text/javascript"> if (window.isMSIE55) fixalpha(); </script>
+		<div class='portlet' id='p-navigation'>
+	  <h5><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Navigation</span></h5>
+	  <div class='pBody'>
+	    <ul>
+	    	      <li id="n-Welcome-to-GCE07"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Main_Page"><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Welcome to GCE07</span></span></li>
+	     	      <li id="n-Program"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Program"><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span></li>
+	     	      <li id="n-Demo-Schedule"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Demo_Schedule"><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Demo Schedule</span></span></li>
+	     	      <li id="n-Call-for-Papers"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Call_For_Papers"><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span></li>
+	     	      <li id="n-Submissions"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Submissions"><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Submissions</span></span></li>
+	     	      <li id="n-Tech-Committee"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Technical_Committee"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Tech Committee</span></span></li>
+	     	      <li id="n-Important-Dates"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Important_Dates"><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></li>
+	     	      <li id="n--Logistics"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Logistics"> <span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Logistics</span></span></li>
+	     	    </ul>
+	  </div>
+	</div>
+		<div class='portlet' id='p-Previous GCE Workshops'>
+	  <h5><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Previous GCE Workshops</span></h5>
+	  <div class='pBody'>
+	    <ul>
+	    	      <li id="n--GCE05-Website"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://pipeline0.acel.sdsu.edu/mtgs/gce05/ "> <span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >GCE05 Website</span></span></li>
+	     	      <li id="n--GCE05-Proceedings"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www3.interscience.wiley.com/cgi-bin/jissue/114298946 "> <span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >GCE05 Proceedings</span></span></li>
+	     	      <li id="n--GCE06-Website"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cogkit.org/GCE06/GCE06/GCE06%20-%20Home.html"> <span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >GCE06 Website</span></span></li>
+	     	      <li id="n--GCE06-Proceedings"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/GCE06_Proceedings"> <span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >GCE06 Proceedings</span></span></li>
+	     	      <li id="n--GCE06-Photos"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://156.56.94.167/~kihuffma/photos/GCE06/index.html "> <span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >GCE06 Photos</span></span></li>
+	     	    </ul>
+	  </div>
+	</div>
+		<div class='portlet' id='p-Related Sites'>
+	  <h5><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Related Sites</span></h5>
+	  <div class='pBody'>
+	    <ul>
+	    	      <li id="n--Supercomputing-07"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://sc07.supercomputing.org/ "> <span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Supercomputing 07</span></span></li>
+	     	      <li id="n--SC07-Tech-Program"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://sc07.supercomputing.org/?pg=techprogram.html "> <span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >SC07 Tech Program</span></span></li>
+	     	    </ul>
+	  </div>
+	</div>
+		<div class='portlet' id='p-Admin Links'>
+	  <h5><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Admin Links</span></h5>
+	  <div class='pBody'>
+	    <ul>
+	    	      <li id="n-recentchanges"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Special:Recentchanges"><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Recent changes</span></span></li>
+	     	      <li id="n-randompage"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Special:Random"><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Random page</span></span></li>
+	     	      <li id="n-Help"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Help"><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Help</span></span></li>
+	     	      <li id="n-Contact"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Contact"><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Contact</span></span></li>
+	     	    </ul>
+	  </div>
+	</div>
+		<div id="p-search" class="portlet">
+	  <h5><label for="searchInput"><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Search</span></label></h5>
+	  <div class="pBody">
+	    <form name="searchform" action="/gce07/index.php/Special:Search" id="searchform">
+	      <input id="searchInput" name="search" type="text"
+	        accesskey="f" value="" />
+	      <input type='submit' name="go" class="searchButton" id="searchGoButton"
+	        value="Go"
+	        /><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><input type='submit' name="fulltext"
+	        class="searchButton"
+	        value="Search" />
+	    </form>
+	  </div>
+	</div>
+	<div class="portlet" id="p-tb">
+	  <h5><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Toolbox</span></h5>
+	  <div class="pBody">
+	    <ul>
+		  		  <li id="t-whatlinkshere"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Special:Whatlinkshere/Program"><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >What links here</span></span></li>
+		  		  <li id="t-recentchangeslinked"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Special:Recentchangeslinked/Program"><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Related changes</span></span></li>
+		                	      	      	      	      	      	      	      <li id="t-upload"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Special:Upload"><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Upload file</span></span></li>	      	      <li id="t-specialpages"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Special:Specialpages"><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Special pages</span></span></li>	      	      	      <li id="t-print"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php?title=Program&amp;printable=yes"><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Printable version</span></span></li>
+	      	    </ul>
+	  </div>
+	</div>
+	      </div><!-- end of the left (by default at least) column -->
+      <div class="visualClear"></div>
+      <div id="footer">
+    <div id="f-poweredbyico"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.mediawiki.org/"><img onmousedown="imd(this)" src="/gce07/skins/common/images/poweredby_mediawiki_88x31.png" alt="MediaWiki" /></span></div>		<ul id="f-list">
+	  <li id="f-lastmod"> <span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >This page was last modified 00:59, 13 November 2007.</span></li>	  <li id="f-viewcount"><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >This page has been accessed 19,604 times.</span></li>	  	  	  	  <li id="f-about"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Gce07:About" title="Gce07:About"><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >About Gce07</span></span></li>	  <li id="f-disclaimer"><span onclick="return false" style="text-decoration:underline; color:blue" href="/gce07/index.php/Gce07:General_disclaimer" title="Gce07:General disclaimer"><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Disclaimers</span>

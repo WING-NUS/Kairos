@@ -1,0 +1,758 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<?xml version="1.0" encoding="iso-8859-1"?><head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.apec-conf.org^content^view^155^216^_2009-08-05__14-31-41.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.apec-conf.org^content^view^155^216^_2009-08-05__14-31-41.yaml created on Wed Aug 05 17:31:35 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<title>APEC - The Applied Power Electronics Conference and Exposition</title>
+<meta name="description" content="Official home page of the Applied Power Electronics Conference and Exposition co-sponsored by IEEE and PSMA" />
+<meta name="keywords" content="APEC, applied, power, electronics, conference, exposition, AC, adjustable, aerospace, aided, analysis, assurance, application, association, battery, CAD, CAE, call, circuit, compatibility, component, components, computer, consumer, control, converter, converters, design, DC, DC-DC, DC/DC, DCDC, D2D, defense, development, distributed, drive, electrical, electromagnetic, electronic, EMC, EMI, engineer, engineers, exhibit, exhibition, history, IAS, IEEE, inductor, industry, institute, integrated, interference, inverter, magnetic, magnetics, manufacturability, manufacture, manufacturing, marketing, modeling, modelling, motion, motor, paper, papers, PCIM, PELS, Powercon, practical, proceedings, professional, program, protection, PSMA, qualifications, quality, rap, regulatory, residential, requirement, requirements, semiconductor, semiconductors, seminar, sensor, session, show, snubber, snubbing, society, strategies, strategy, source, specification, speed, supply, supplies, system, systems, technical, thermal, tool, tools, trade, transformer, uninterruptible" />
+<meta name="Generator" content="Joomla! - Copyright (C) 2005 - 2007 Open Source Matters. All rights reserved." />
+<meta name="robots" content="index, follow" />
+<base href="http://www.apec-conf.org/" />
+	<link rel="shortcut icon" href="http://www.apec-conf.org/images/favicon.ico" />
+	 
+  
+ 
+<link rel="alternate" title="APEC - The Applied Power Electronics Conference and Exposition" href="http://www.apec-conf.org/index2.php?option=com_rss&no_html="1" type="application/rss+xml" />
+<link href="templates/mp_cayuse/css/template_css.css" rel="stylesheet" type="text/css" />
+<!-- link href="/components/com_joomlaboard/template/default/forum.css" rel="stylesheet" type="text/css" / -->
+<style type="text/css">
+<!--
+body {
+background-image: url(/templates/mp_cayuse/images/bck2.jpg);
+background-repeat:repeat-x;
+background-color: #e6e6e6;
+}
+//-->
+</style>
+<link href="http://www.apec-conf.org/templates/mp_cayuse/ext_menu_flyout/css/menu.css" rel="stylesheet" type="text/css"/>
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<div align="center">
+  <table width="780" border="0" cellspacing="0" cellpadding="0">
+    <tr>
+      <td><img onmousedown="imd(this)" src="templates/mp_cayuse/images/top.gif" width="780" alt="top" height="24" /></td>
+    </tr>
+  </table><table width="780" border="0" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF">
+    <tr>
+      <td width="179" valign="top" rowspan="2" background="templates/mp_cayuse/images/apec_logo.jpg"><span onclick="return false" style="text-decoration:underline; color:blue" href="/index.php"><img onmousedown="imd(this)" src="/images/blank.gif" width="170" height="60" border="0" alt="" /></span></td>
+      <td width="12" height="56" background="templates/mp_cayuse/images/bck4.gif"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+      <td width="575" align="right" valign="middle" background="templates/mp_cayuse/images/therm1.gif"><table width="570" border="0" cellpadding="0" cellspacing="0"><tr><td id="apec_theme_txt"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td><td align="right" class="apec_top_right">
+        
+<form action="index.php?option=com_search" method="get">
+	<div class="search">
+		<input name="searchword" id="mod_search_searchword" maxlength="20" alt="search" class="inputbox" type="text" size="20" value="search..."  onblur="if(this.value=='') this.value='search...';" onfocus="if(this.value=='search...') this.value='';" /><input type="submit" value="GO" class="button"/>	</div>
+
+	<input type="hidden" name="option" value="com_search" />
+	<input type="hidden" name="Itemid" value="" />	
+</form><table width="100%" border="0" cellpadding="0" cellspacing="1"><tr><td nowrap="nowrap"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/index.php" class="mainlevel-nav" ><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span><span class="mainlevel-nav"> <span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </span><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/component/option,com_facileforms/Itemid,70/" class="mainlevel-nav" ><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Contact Us</span></span><span class="mainlevel-nav"> <span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </span><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/component/option,com_joomap/Itemid,39/" class="mainlevel-nav" ><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Site Map</span></span></td></tr></table>      </td></tr></table></td>
+      <td width="14" background="templates/mp_cayuse/images/bck8.gif"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+    </tr>
+    <tr>
+      <td height="31" colspan="3" background="templates/mp_cayuse/images/bck3.jpg" align="left" valign="top"><div id="theme-text"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;The Applied Power Electronics Conference and Exposition</span></div></td>
+    </tr>
+  </table>
+  <table width="780" border="0" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF">
+    <tr>
+      <td width="179" height="198" valign="top" id="leftcoltd"><table width="100%" border="0" align="center" cellpadding="0" cellspacing="0">
+          <tr>
+            <td align="center">		<table cellpadding="0" cellspacing="0" class="moduletable">
+				<tr>
+			<td>
+				<script type="text/javascript" language="JavaScript" src="http://www.apec-conf.org/templates/mp_cayuse/ext_menu_flyout/js/menu.js"></script>
+<div class="menu-suckerfish-vertical">
+<ul id="menulist_root-suckerfish-vertical"
+class="mainlevel-suckerfish-vertical"
+><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/3/2/" class="mainlevel-suckerfish-vertical"><span class="expanded"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >About APEC</span></span></span><ul id="menulist_1-suckerfish-vertical"
+
+><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/3/3/" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >About the Conference</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/2/4/" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >History</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/1/5/" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Future</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/32/57/" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Previous Years</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/69/97/" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Past Locations and Chairs</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="#" onclick="javascript: window.open('http://www.apec-conf.org/images/PDF/2009/apec_2009_wrap_up_report.pdf', '', 'toolbar=no,location=no,status=no,menubar=no,scrollbars=yes,resizable=yes,width=780,height=550'); return false" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >APEC 2009 Wrap-Up Report</span></span>
+</li></ul></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/168/261/" class="mainlevel-suckerfish-vertical"><span class="expanded"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Participating in APEC</span></span></span><ul id="menulist_2-suckerfish-vertical"
+
+><li><span onclick="return false" style="text-decoration:underline; color:blue" href="#" onclick="javascript: window.open('http://www.apec-conf.org/images/PDF/2010/2010_call_for_papers.pdf', '', 'toolbar=no,location=no,status=no,menubar=no,scrollbars=yes,resizable=yes,width=780,height=550'); return false" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >2010 Call For Papers</span></span>
+</li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="#" onclick="javascript: window.open('http://www.apec-conf.org/images/PDF/2010/2010_call_for_seminars.pdf', '', 'toolbar=no,location=no,status=no,menubar=no,scrollbars=yes,resizable=yes,width=780,height=550'); return false" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >2010 Call for Seminars</span></span>
+</li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/273/244/" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >2010 Call for Special Presentations</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.epapers.org/apec2010/ESR/" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Submit a Paper</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/images/2010_Documents/apec_2009_technical_paper_reviewer_form.doc" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Sign up to Review Technical Papers</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/297/265/" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Conference Deadlines</span></span></li></ul></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/15/18/" class="mainlevel-suckerfish-vertical"><span class="expanded"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Hotel and Travel</span></span></span><ul id="menulist_3-suckerfish-vertical"
+
+><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/60/87/" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Requesting a Letter of Invitation</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/269/225/" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Visa Information</span></span></li></ul></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/264/214/" class="mainlevel_active-suckerfish-vertical"><span class="expanded"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Free Downloads</span></span></span><ul id="menulist_4-suckerfish-vertical"
+
+><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/159/215/" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >2009 Plenary</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/155/216/" class="sublevel_current-suckerfish-vertical" id="active_menu-suckerfish-vertical"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >2009 Special Presentations</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/265/219/" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >2009 Photos</span></span></li></ul></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/33/64/" class="mainlevel-suckerfish-vertical"><span class="expanded"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Committee</span></span></span><ul id="menulist_5-suckerfish-vertical"
+
+><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/33/60/" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Conference Committee</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/34/65/" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Committee Login</span></span></li></ul></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/component/option,com_facileforms/Itemid,69/" class="mainlevel-suckerfish-vertical"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Contact Us</span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/20/26/" class="mainlevel-suckerfish-vertical"><span class="expanded"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Policies and Procedures</span></span></span><ul id="menulist_7-suckerfish-vertical"
+
+><li><span onclick="return false" style="text-decoration:underline; color:blue" href="#" onclick="javascript: window.open('http://www.apec-conf.org/images/PDF/apec_policies_and_procedures_rev_2-0_20061208.pdf', '', 'toolbar=no,location=no,status=no,menubar=no,scrollbars=yes,resizable=yes,width=780,height=550'); return false" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Policies and Procedures (PDF)</span></span>
+</li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="#" onclick="javascript: window.open('http://www.apec-conf.org/images/stories/apec%20operating%20agreement.pdf', '', 'toolbar=no,location=no,status=no,menubar=no,scrollbars=yes,resizable=yes,width=780,height=550'); return false" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors Operating Agreement (PDF)</span></span>
+</li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="#" onclick="javascript: window.open('http://www.apec-conf.org/images/PDF/2009/apec_speaker_terms_and_conditions.pdf', '', 'toolbar=no,location=no,status=no,menubar=no,scrollbars=yes,resizable=yes,width=780,height=550'); return false" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Speaker Terms & Conditions (PDF)</span></span>
+</li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="#" onclick="javascript: window.open('http://www.apec-conf.org/images/PDF/2009/apec_itar_document.pdf', '', 'toolbar=no,location=no,status=no,menubar=no,scrollbars=yes,resizable=yes,width=780,height=550'); return false" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >APEC ITAR (PDF)</span></span>
+</li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/270/228/" class="sublevel-suckerfish-vertical"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Privacy Policy</span></span></li></ul></li></ul>
+</div>			</td>
+		</tr>
+		</table>
+					<table cellpadding="0" cellspacing="0" class="moduletable">
+				<tr>
+			<td>
+				<br />
+<br />
+<div align="center">
+<div id="sponsorbox">
+<b><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >APEC Sponsors&nbsp;</span></b><br />
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.psma.com" target="_blank"><img onmousedown="imd(this)" src="/images/stories/Sponsors/PSMA_Logo_sm.gif" alt="PSMA logo" border="0" height="34" vspace="15" width="60" /></span><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ieee.org" target="_blank"><img onmousedown="imd(this)" src="/images/stories/Sponsors/IEEE_Logo_sm.jpg" alt="IEEE logo" border="0" height="15" hspace="5" vspace="20" width="60" /></span><br />
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.pels.org" target="_blank"><img onmousedown="imd(this)" src="/images/stories/Sponsors/PELS_Logo_sm.gif" alt="pels logo" border="0" height="61" width="60" /></span><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ewh.ieee.org/soc/ias/" target="_blank"><img onmousedown="imd(this)" src="/images/stories/Sponsors/IAS_Logo_sm.gif" alt="IAS logo" border="0" height="38" hspace="5" vspace="8" width="60" /></span><br />
+</div>
+</div>
+			</td>
+		</tr>
+		</table>
+				<table cellpadding="0" cellspacing="0" class="moduletable">
+				<tr>
+			<td>
+				<br />
+<div align="center">
+<div class="sidebox">
+<b><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Website Comments</span></b><br />
+<div align="center">
+<span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Correction or comment</span>
+</div>
+<div align="center">
+<span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >on apec-conf.org?</span>
+</div>
+<div align="center">
+<span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Please</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="component/option,com_facileforms/Itemid,69/" target="_self"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >let us know.</span></span><br />
+</div>
+</div>
+</div>
+			</td>
+		</tr>
+		</table>
+		</td>
+          </tr>
+        </table>
+      </td>
+      <td width="601" valign="top"><div align="left"><div style="width:601px;height:15px;background:#000000;"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></div>
+<span class="pathway"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/" class="pathway"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span> <img onmousedown="imd(this)" src="http://www.apec-conf.org/images/M_images/arrow.png" alt="arrow" /> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/264/214/" class="pathway"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Free Downloads</span></span> <img onmousedown="imd(this)" src="http://www.apec-conf.org/images/M_images/arrow.png" alt="arrow" />   <span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >2009 Special Presentations</span> </span><br /><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+                  <table width="98%"  border="0" align="center" cellpadding="0" cellspacing="0">
+            <tr>
+              <td>
+<table width="100%"  border="0" cellspacing="0" cellpadding="0">
+                  <tr>
+                    <td width="100%" valign="top">				<table class="contentpaneopen">
+			<tr>
+								<td class="contentheading" width="100%">
+					<span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >2009 Special Presentations</span>									</td>
+							<td align="right" width="100%" class="buttonheading">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/index2.php?option=com_content&amp;do_pdf=1&amp;id=155" target="_blank" onclick="window.open('http://www.apec-conf.org/index2.php?option=com_content&amp;do_pdf=1&amp;id=155','win2','status=no,toolbar=no,scrollbars=yes,titlebar=no,menubar=no,resizable=yes,width=640,height=480,directories=no,location=no'); return false;" title="PDF">
+					<img onmousedown="imd(this)" src="http://www.apec-conf.org/images/M_images/pdf_button.png"  alt="PDF" name="PDF" align="middle" border="0" /></span>
+			</td>
+							<td align="right" width="100%" class="buttonheading">
+					<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/index2.php?option=com_content&amp;task=view&amp;id=155&amp;pop=1&amp;page=0&amp;Itemid=4" target="_blank" onclick="window.open('http://www.apec-conf.org/index2.php?option=com_content&amp;task=view&amp;id=155&amp;pop=1&amp;page=0&amp;Itemid=4','win2','status=no,toolbar=no,scrollbars=yes,titlebar=no,menubar=no,resizable=yes,width=640,height=480,directories=no,location=no'); return false;" title="Print">
+						<img onmousedown="imd(this)" src="http://www.apec-conf.org/images/M_images/printButton.png"  alt="Print" name="Print" align="middle" border="0" /></span>
+				</td>
+							<td align="right" width="100%" class="buttonheading">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/index2.php?option=com_content&amp;task=emailform&amp;id=155&amp;itemid=4" target="_blank" onclick="window.open('http://www.apec-conf.org/index2.php?option=com_content&amp;task=emailform&amp;id=155&amp;itemid=4','win2','status=no,toolbar=no,scrollbars=yes,titlebar=no,menubar=no,resizable=yes,width=400,height=250,directories=no,location=no'); return false;" title="E-mail">
+					<img onmousedown="imd(this)" src="http://www.apec-conf.org/images/M_images/emailButton.png"  alt="E-mail" name="E-mail" align="middle" border="0" /></span>
+			</td>
+						</tr>
+			</table>
+			
+		<table class="contentpaneopen">
+				<tr>
+			<td valign="top" colspan="2">
+				<p>
+<span style="font-size: 10pt"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >The Special Presentation Sessions were introduced at APEC 2004. These presentations have been solicited from the leaders in the power electronics industry especially to address topics of current interest. Like the Professional Education Seminars, they were chosen for their specific topics and were not selected through the peer review process.</span> <br />
+<br />
+<span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >These special presentations do not have papers in the APEC Proceedings. To download the presentation in Adobe Acrobat PDF format, right click the presentation title and choose &quot;Save target as...&quot; or the equivalent command for your browser. Acrobat Version 5 or later is needed to view and print the presentations.</span> </span>
+</p>
+<!-- Session SP1 -->
+<h3><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Session SP1: Market Trends</span></h3>
+<table border="0">
+	<tbody>
+		<tr vAlign="top">
+			<td colSpan="2" align="left"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday, February 17, 2009; 8:30 AM - Noon</span><br />
+			<dl><dt style="font-weight: bold"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair:</span></dt><dd><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Ada Cheng,</span> <span style="font-style: italic"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >International Rectifier</span></span></dd></dl></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP1.1&nbsp;</span> </td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp1.1b_steve_ohr_gartner_on_energy_costs.pdf" title="Special presentation 1.1 link"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >What happens when the cost of electricity skyrockets?</span></span><br />
+			<span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Stephan Ohr,</span> <em><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Analog and Power Semiconductors</span></em></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP1.2</span></td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp1.2_ims_research_apec_data_center_presentation.pdf" title="Special presentation 1.2 link"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Future Power Requirements in Data Centers? Variables to Consider</span></span><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+			<span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Michael Markides,&nbsp;</span><em><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >IMS Research</span></em></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP1.3&nbsp;</span></td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp1.3b_barryf.pdf" title="Special presentation 1.3 link"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >The Future of Li-Ion Battery Management</span></span><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br />
+			<span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >B. Papermaster,</span> <em><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Texas Instruments</span></em> </td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP1.4</span></td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp1.4b_datapoint_research_lighting_market_version2final.pdf" title="Special presentation 1.4 link"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Global Lighting Revolution - Market Forecasts for Lamps, Ballasts, &amp; Semiconductors</span><br />
+			</span><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Jon Gamble,</span> <em><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Datapoint Research Ltd.</span></em></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP1.5</span></td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp1.5b_utca.pdf" title="Special presentation 1.5 link"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >MicroTCA Standard Platform and Power Needs</span><br />
+			</span><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Frank Cirolia,</span> <em><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Emerson Network Power</span> </em></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP1.6</span></td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp1.6_drives.pdf" title="Special presentation 1.6 link"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Market Trends: How motor drive design is evolving in appliance applications</span></span><br />
+			<span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Eric Persson,</span> <em><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >International Rectifier</span> </em></td>
+		</tr>
+		<tr>
+			<td vAlign="top"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><strong><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >SP1.7</span></strong></td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp1.7b_sic_gan_power_electronics_for_diffusion.pdf" title="Special presentation 1.7 link"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >SiC and GaN Power Devices: Market Status and Perspectives</span></span><br />
+			<span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >P. Roussel,</span> <em><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Yole Development</span></em><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;</span></td>
+		</tr>
+	</tbody>
+</table>
+<h3><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Session SP2:&nbsp;System Design</span> </h3>
+<table border="0">
+	<tbody>
+		<tr vAlign="top">
+			<td colSpan="2" align="left"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, February 18, 2009; 8:30 - 10:15 AM</span><br />
+			<dl><dt style="font-weight: bold"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Session Chairs:</span></dt><dd><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >TBD,</span> <em><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Cisco</span></em> <span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >and Bodo Arlt,</span> <em><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Bodo's Power Systems</span></em></dd></dl></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP2.1&nbsp;</span> </td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp2.1_gerstle.pdf" title="Special presentation 2.1 link"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Best Thermal Practices for Power Conversion Devices</span></span><br />
+			<span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Don Gerstle,</span> <em><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Murata Power Solutions</span></em></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP2.2</span></td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp2.2b-isurin.pdf" title="Special presentation 2.2 link"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >The Architecture of Automotive Industrial Power Converters : The Relationship Between Efficiency and Cost</span></span><br />
+			<span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Alexander Isurin and Alexander Cook,</span> <em><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Vanner</span></em></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP2.3&nbsp;</span></td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp2.3apec%202009-qian_1.pdf" title="Special presentation 2.3 link"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Portable Power System Design Considerations for Extending Battery Run-Time</span></span><br />
+			<span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Jinrong Qian,</span> <em><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Texas Instruments</span></em></td>
+		</tr>
+		<tr>
+			<td><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><strong><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >SP2.4</span></strong></td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp2.4b_vicor_%28revised%29_r2-19-09.pdf" title="Special presentation 2.4 link"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Intelligent Power System Design</span></span><br />
+			<span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Stephen Oliver,</span> <em><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Vicor</span></em> </td>
+		</tr>
+	</tbody>
+</table>
+<h3><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Session SP3:&nbsp;System Design</span></h3>
+<table border="0">
+	<tbody>
+		<tr vAlign="top">
+			<td colSpan="2" align="left"><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, February 18, 2009; 2:00 - 5:30 PM</span><br />
+			<dl><dt style="font-weight: bold"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair:</span></dt><dd><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Bob White and Dragan Maksimovic,</span> <em><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >University of Colorado</span></em></dd></dl></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP3.1&nbsp;</span> </td>
+			<td><span style="font-weight: bold; font-size: 9pt"></span><strong><span style="color: #000066"><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp3-1_shepard.pdf" title="Special presentation 3.1 link"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Observations on DC-DC Converter Markets</span></span><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span></strong><br />
+			<span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Jeff Shepard,</span> <em><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Darnell Group</span></em></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP3.2</span></td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp3-2_becker.pdf" title="Special presentation 3.2 link"><span style="font-weight: bold; font-size: 9pt; color: #000066"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >400VDC Distribution &ndash; Beyond the Bus</span></span><br />
+			</span><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Dustin J Becker,</span> <em><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Emerson Network Power</span> </em></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP3.3&nbsp;</span></td>
+			<td><span style="font-weight: bold; font-size: 9pt; color: #000066"><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp3-3_nowakowski.pdf" title="Special presentation 3.3 link"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >The Changing Landscape of Semiconductor DC/DC Converters</span></span><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span><br />
+			<span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Rich Nowakowski ,</span> <em><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Texas Instruments</span></em></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP3.4</span></td>
+			<td><strong><span onclick="return false" style="text-decoration:underline; color:blue" target="_self" href="images/PDF/2009/special_presentations/sp3-4_vinsant.pdf" title="Special Presentation 3.4"><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >The Future of DC to DC Conversion: Adaptive Compensation Technology is Changing Loop Stability Criteria</span></span><br />
+			</strong><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Ron Vinsant,</span> <em><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Powervation</span></em><strong> </strong></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP3.5</span></td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp3-5_zane_energy_harvest_apec09_final.pdf" title="Special presentation 3.5 link"><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Low Power Energy Harvesting &ndash; Making the Difference with Energy Efficient Power Management</span></span><br />
+			<span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Regan Zane,</span> <em><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >University of Colorado at Boulder</span></em></td>
+		</tr>
+		<tr>
+			<td align="center" vAlign="top">
+			<p align="center">
+			<span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><strong><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >SP3.6</span></strong> 
+			</p>
+			</td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp3-6-garcia.pdf" title="Special presentation 3.6 link"><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >DC-DC Converters for Energy Efficiency</span></span><br />
+			<span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Oscar Garcia,</span> <em><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >CEI_UPM</span></em></td>
+		</tr>
+		<tr>
+			<td align="center" vAlign="top">
+			<p align="center">
+			<span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><strong><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >SP3.7</span></strong> 
+			</p>
+			</td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp3-7%20erickson.pdf" title="Special presentation 3.7 link"><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Future of Power Electronics for Photovoltaics</span><br />
+			</span><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Robert W. Erickson,</span> <em><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >University of Colorado, Boulder</span></em> </td>
+		</tr>
+	</tbody>
+</table>
+<h3><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Session SP4: Power Electronics For A Greener World</span></h3>
+<table border="0">
+	<tbody>
+		<tr vAlign="top">
+			<td colSpan="2" align="left"><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, February 19, 2009; 8:30 - 11:30 AM</span><br />
+			<dl><dt style="font-weight: bold"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Session Chair:</span></dt><dd><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Cliff Keys,</span> <em><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Power Systems Design Europe &amp; North America</span></em></dd></dl></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP4.1&nbsp;</span> </td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp4.1_isuppli.pdf" title="Special presentation 4.1 link"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >The Power of the Sun</span></span><br />
+			<span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Marijana Vukicevic,</span> <em><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >iSuppli Corporation</span></em><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP4.2&nbsp;</span> </td>
+			<td><span style="color: #ff0000"><span style="color: #000000"><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp4.2%20epcos_fk%20dc-link_modified.pdf" title="Special presentation 4.2 link"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >DC-Link Capacitors for Industrial Applications</span></span></span><br />
+			</span><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >S. Chandran,</span> <em><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Epcos Electronic Components</span></em> </td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP4.3&nbsp;</span> </td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp4.3b_nextreme_presentation_1-29-08.pdf" title="Special presentation 4.3 link"><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Active Thermal Management - A Bottoms up Approach</span></span><br />
+			<span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Dr. Paul A. Magill,</span> <em><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Nextreme</span></em></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP4.4&nbsp;</span> </td>
+			<td><strong><span onclick="return false" style="text-decoration:underline; color:blue" target="_self" href="images/PDF/2009/special_presentations/sp4.4_nascar_comparisons.pdf" title="Special Presentation 4.4"><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >The NASCAR Model: Worldwide Energy Regulations and Market Requirements</span></span><br />
+			</strong><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >J. Taylor,</span> <em><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Dell</span></em><strong> </strong></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP4.5&nbsp;</span> </td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp4.5b_mti_6w-s_rev2.pdf" title="Special presentation 4.5 link"><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >The 6 W&rsquo;s of micro Fuel Cells s What?Why?Where?Who?When?W!</span></span><br />
+			<span><span><span><span style="font-size: 10pt; font-family: Arial"><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >J. Frawley</span></span></span></span></span><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <em><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >MTI Micro</span></em></td>
+		</tr>
+		<tr>
+			<td vAlign="top"><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><strong><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >SP4.6</span><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2008/special_presentations/sp4.6b_presentation.pdf" title="Special Presentation 4.6 link"> </span></strong></td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp4.6b_tip-nist09.pdf" title="Special presentation 4.6 link"><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Critical National Needs Addressed Through Innovation: The Technology Innovation Program</span></span><br />
+			<span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >G. Castellucci,</span> <em><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >National Institute of Standards and Technology</span></em> </td>
+		</tr>
+	</tbody>
+</table>
+<h3><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Session SP5: Current Topics in Power-Electronics Research</span></h3>
+<table border="0">
+	<tbody>
+		<tr vAlign="top">
+			<td colSpan="2" align="left"><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Thursday,&nbsp;February 19, 2009; 2:00 - 5:30 PM</span><br />
+			<br />
+			<dl><dt style="font-weight: bold"><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Session Chairs:</span></dt><dd><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Joshua Israelsohn,</span> <em><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >JAS Technical Media</span></em> </dd></dl></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP5.1&nbsp;</span> </td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp5.1c_ufms_r%26d_power_electronics_and_related_areas_final.pdf" title="Special presentation 5.1 link"><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >UFMS - Universidade Federal de Mato Grosso do Sul Power Electronics Related Research</span></span><br />
+			<span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Jo&atilde;o O. P. Pinto,</span> <em><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Universidade Federal de Mato Grosso do Sul</span> </em></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP5.2</span></td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp5.2b-shorter.pdf" title="Special presentation 5.2 link"><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Power Electronics Research at NC State University</span></span><br />
+			<span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Alex Huang,</span> <em><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >North Carolina State University</span> </em></td>
+		</tr>
+		<tr vAlign="top">
+			<td style="font-weight: bold"><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP5.3&nbsp;</span></td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp5.3b_cityu-pe-research.pdf" title="Special presentation 5.3 link"><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Power Electronics Research City University of Hong Kong</span></span><br />
+			<span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Ron Hui,</span> <em><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >City University of Hong Kong</span></em></td>
+		</tr>
+		<tr>
+			<td vAlign="top"><strong><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP5.4&nbsp;</span></strong></td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp5.4b_pekarek-apec09.pdf" title="Special presentation 5.4 link"><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Energy Sources and Systems at Purdue University</span></span><br />
+			<span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >C. Ong, S. Pekarek, S. Sudhoff, O. Wasynczuk,&nbsp;</span><em><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Purdue University</span> </em></td>
+		</tr>
+		<tr>
+			<td vAlign="top"><strong><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;SP5.5&nbsp;</span></strong><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp5.5b_hurley.pdf" title="Special presentation 5.5 link"><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Power Electronics Research at the National University of Ireland Galway</span></span> <br />
+			<span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >W.G. Hurley,</span> <em><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >National University of Ireland, Galway</span> </em></td>
+		</tr>
+		<tr>
+			<td><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><strong><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >SP5.6</span></strong></td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp5.6b_ecpe_researchoverview_kolar_short_100209_.pdf" title="Special presentation 5.6 link"><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >Overview of Power Electronics Research within the European ECPE Industrial and Research Network</span></span><br />
+			<span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >Johann W. Kolar,</span> <em><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >European Center for Power Electronics</span></em> </td>
+		</tr>
+		<tr>
+			<td><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><strong><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >SP5.7</span></strong></td>
+			<td><span onclick="return false" style="text-decoration:underline; color:blue" target="_blank" href="images/PDF/2009/special_presentations/sp5.7b_survey_of_trends_for_integrated_point-of-load_converters_apec_09.pdf" title="Special presentation 5.7 link"><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Survey of Trends for Integrated Point-of-Load Converters</span><br />
+			</span><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Fred C. Lee,</span> <em><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >Center for Power Electronics Systems</span></em></td>
+		</tr>
+	</tbody>
+</table>
+			</td>
+		</tr>
+				</table>
+
+		<span class="article_seperator"><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span>
+
+					<table align="center" style="margin-top: 25px;">
+			<tr>
+									<th class="pagenav_prev">
+						<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/159/4/">
+							<span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >&lt; Prev</span></span>
+					</th>
+										<td width="50"><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>
+
+					</td>
+										<th class="pagenav_next">
+						<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/265/4/">
+							<span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Next &gt;</span></span>
+					</th>
+								</tr>
+			</table>
+			</td>
+     <td width="0%" valign="top" ></td>
+                  </tr>
+                </table></td>
+            </tr>
+            <tr>
+              <td><div align="center"><br />
+                  <table width="98%" height="4" border="0" align="center" cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td height="3" background="templates/mp_cayuse/images/dot2.gif"></td>
+                      <td background="templates/mp_cayuse/images/dot2.gif"></td>
+                    </tr>
+                  </table>
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/component/option,com_frontpage/Itemid,1/" class="bar"><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span><font color="#666666"> <span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </font><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/3/2/" class="bar"><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >About APEC</span></span><font color="#666666"> <span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </font><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/168/261/" class="bar"><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >Participating in APEC</span></span><font color="#666666"> <span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </font><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/15/18/" class="bar"><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >Hotel and Travel</span></span><font color="#666666"> <span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </font><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/264/214/" class="bar"><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >Free Downloads</span></span><font color="#666666"> <span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </font><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/33/64/" class="bar"><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Committee</span></span><font color="#666666"> <span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </font><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/component/option,com_facileforms/Itemid,69/" class="bar"><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Contact Us</span></span><font color="#666666"> <span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </font><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/view/20/26/" class="bar"><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Policies and Procedures</span></span><font color="#666666"> <span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </font><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.apec-conf.org/content/section/14/78/" class="bar"><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Help with Joomla</span></span><font color="#666666"> <span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >|</span> </fon                <p> <br /> <br /><span class="Stil2"><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >| &copy;&nbsp;APEC - The Applied Power Electronics Conference and Exposition 2008 |</span><br /><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >| design by</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.davidfogle.com" class="copyright"><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >Shakespear Design</span></span> <span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >|</span></span></p>
+              </div><br /><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>

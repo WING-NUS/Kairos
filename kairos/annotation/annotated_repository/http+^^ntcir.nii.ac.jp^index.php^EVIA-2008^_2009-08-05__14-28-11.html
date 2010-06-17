@@ -1,0 +1,674 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^ntcir.nii.ac.jp^index.php^EVIA-2008^_2009-08-05__14-28-11.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^ntcir.nii.ac.jp^index.php^EVIA-2008^_2009-08-05__14-28-11.yaml created on Wed Aug 05 17:31:25 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<meta http-equiv="Content-Type" content="text/html;>charset=iso-8859-1" />
+<title>NTCIR-7 Information Retrieval Evaluation Site - EVIA</title>
+<meta name="description" content="NTCIR-7 Information Retrieval Evaluation Workshop in Tokyo, Japan" />
+<meta name="keywords" content="NTCIR, IR, Information Retrieval, Opinion Analysis, Cross Lingual Information Retrieval, CLIR, Question Answering, Evaluation" />
+<meta name="Generator" content="Joomla! - Copyright (C) 2005 - 2006 Open Source Matters. All rights reserved." />
+<meta name="robots" content="index, follow" />
+<base href="http://ntcir.nii.ac.jp/" />
+	<link rel="shortcut icon" href="http://ntcir.nii.ac.jp/images/favicon.ico" />
+	<link rel="stylesheet" href="http://ntcir.nii.ac.jp/templates/ntcir/css/template_css.css" type="text/css"/><link rel="shortcut icon" href="http://ntcir.nii.ac.jp/images/favicon.ico" /></head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<div class="all">
+  <div align="center">
+    <div id="wrapper">
+      <div id="headertop"></div>
+      <div id="header">
+      <div id="logo">
+        <span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp">
+          <img onmousedown="imd(this)" src="templates/freshgreenv2/images/ntcir_logo.gif" alt="NTCIR" border="0" align="left" /></span>
+      </div>
+      <div id="searchbox">
+        		<div class="moduletable">
+			
+<form action="index.php?option=com_search&amp;Itemid=5" method="get">
+	<div class="search">
+		<input name="searchword" id="mod_search_searchword" maxlength="20" alt="search" class="inputbox" type="text" size="20" value="search..."  onblur="if(this.value=='') this.value='search...';" onfocus="if(this.value=='search...') this.value='';" />	</div>
+
+	<input type="hidden" name="option" value="com_search" />
+	<input type="hidden" name="Itemid" value="5" />	
+</form>		</div>
+		        <br clear="all"/>
+      </div>
+      </div> <!-- id header -->
+      <div id="path">
+        <div id="patha">
+          <span class="pathway"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/" class="pathway"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >HOME</span></span> <img onmousedown="imd(this)" src="http://ntcir.nii.ac.jp/images/M_images/arrow.png" alt="arrow" />   <span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >EVIA</span> </span>        </div> <!-- id patha -->
+      </div> <!-- id path -->
+	  
+<div id="content">
+      
+<table width="100%" border="0" cellspacing="0" cellpadding="0">
+  <tr>
+       <td width="180" align="left" valign="top"><div id="left">
+      		<div class="moduletable">
+							<h3>
+					<span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Main Menu</span>				</h3>
+				
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/" class="mainlevel" ><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >HOME</span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.nii.ac.jp/ntcir/" class="mainlevel" ><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >NTCIR</span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.nii.ac.jp/ntcir/ntcir-ws7/ws-en.html" class="mainlevel" ><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >NTCIR-7</span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.nii.ac.jp/ntcir/ntcir-ws7/meeting/index.html" class="mainlevel" ><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >NTCIR-7 Meeting</span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/Blog.html" class="mainlevel" ><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Blog</span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.nii.ac.jp/ntcir/cgi-bin/ntc7Registration.cgi" class="mainlevel" ><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Online Registration</span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/EVIA-2008/" class="mainlevel" id="active_menu"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >EVIA</span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.nii.ac.jp/ntcir/outline/prop-en.html" class="mainlevel" ><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >NTCIR Project Overview</span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.nii.ac.jp/ntcir/publication1-en.html" class="mainlevel" ><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Online Proceedings</span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/Contact-Us/" class="mainlevel" ><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Contact Us</span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/Search.html" class="mainlevel" ><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Search</span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/File-Repository/" class="mainlevel" ><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >File Repository</span></span></td></tr>
+</table>		</div>
+				<div class="moduletable">
+							<h3>
+					<span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Participation</span>				</h3>
+				
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/How-to-Participate.html" class="mainlevel" ><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >How to Participate</span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/User-Agreement-Forms.html" class="mainlevel" ><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >User Agreements</span></span></td></tr>
+</table>		</div>
+				<div class="moduletable">
+							<h3>
+					<span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >NTCIR-7 Clusters</span>				</h3>
+				
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr align="left"><td><span class="mainlevel" ><span onclick="return false" style="text-decoration:underline; color:blue" href="http://aclia.lti.cs.cmu.edu/wiki/moin.cgi/Home"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Advanced CLIA</span></span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://aclia.lti.cs.cmu.edu/wiki/moin.cgi/Home" class="mainlevel" ><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >CCLQA</span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://aclia.lti.cs.cmu.edu/wiki/moin.cgi/Home" class="mainlevel" ><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >IR for QA</span></span></td></tr>
+<tr align="left"><td><span class="mainlevel" ><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >User Generated Contents</span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/Table/MOAT/" class="mainlevel" ><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >MOAT</span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/CLIRB/" class="mainlevel" ><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >CLIRB</span></span></td></tr>
+<tr align="left"><td><span class="mainlevel" ><span onclick="return false" style="text-decoration:underline; color:blue" href="http://if-lab.slis.tsukuba.ac.jp/fujii/ntcfd/index-en.html"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Focused Domains</span></span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://if-lab.slis.tsukuba.ac.jp/fujii/ntc7patmt/index-en.html" class="mainlevel" ><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Patent Translation</span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.nlp.its.hiroshima-cu.ac.jp/~nanba/ntcir-7/cfp-en.html" class="mainlevel" ><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Patent Mining</span></span></td></tr>
+<tr align="left"><td><span class="mainlevel" ><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Cluster Independent</span></span></td></tr>
+<tr align="left"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/MuST/" class="mainlevel" ><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >MuST</span></span></td></tr>
+</table>		</div>
+				<div class="moduletable">
+							<h3>
+					<span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Syndicate</span>				</h3>
+				<div class="syndicate">
+			<div align="center">
+			<span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/component/option,com_rss/feed,RSS2.0/no_html,1/">
+				<img onmousedown="imd(this)" src="http://ntcir.nii.ac.jp/images/M_images/rss20.gif"  alt="RSS 2.0" name="RSS20" align="middle" border="0" /></span>
+		</div>
+		</div>		</div>
+		      </div> <!-- id left -->
+    </td>
+	    <td align="left" valign="top"><div id="maincontent">
+      <div class="componentheading"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >EVIA</span></div><table class="blog" cellpadding="0" cellspacing="0"><tr><td valign="top"><h1 align="center"><strong style="color: #000000"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >The Second International Workshop on Evaluating Information Access (EVIA 2008)</span></strong> </h1><div align="center"><h2><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >A Satellite Workshop of NTCIR-7</span></h2></div><p align="center"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Date: December 16, 2008 (Day 1 of the NTCIR-7 Meeting)</span><br /><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Venue: National Institute of Informatics, Tokyo, Japan.</span></p><p align="center"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p align="center"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><hr /><h2><h1><p><span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.nii.ac.jp/ntcir/workshop/OnlineProceedings7/toc_evia.html"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >EVIA 2008 ONLINE PROCEEDINGS (PAPERS&nbsp;AND SLIDES)</span></span></p></h1></h2><hr /><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span> <p><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><h1><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >EVIA 2008 WORKSHOP PROGRAM (revised Nov 11)</span></h1><p><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><h2><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >13:00-13:25 ASIAN TEST COLLECTIONS</span></h2><p><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >13:00-13:15</span><br /><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >1. A First Investigation on Mongolian Information Retrieval (SHORT)</span></p><p><em><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Guanglai Gao and Hongxu Hou</span></em></p><p><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >13:15-13:20</span></p><p><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >2. A&nbsp; Political News Corpus in Chinese for Opinion Analysis (VERY SHORT - UNREFEREED)</span></p><p><em><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Benjamin K. Tsou and Bin Lu</span></em></p><p><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >13:20-13:25</span></p><p><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >3. Are Popular Documents More Likely To Be Relevant? A Dive into the ACLIA IR4QA Pools (VERY SHORT - UNREFEREED)</span></p><p><em><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Tetsuya Sakai and Noriko Kando</span></em></p><p><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><h2><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >13:25-14:10 QUESTION ANSWERING</span></h2><p><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >13:25-13:40</span><br /><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >4. Component Analysis of a Chinese Factoid Question-Answering System (SHORT)</span></p><p><em><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Kui-Lam Kwok</span></em></p><p><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >13:40-14:10</span><br /><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >5. Evaluating Answer Validation in Multi-stream Question Answering (REGULAR)</span></p><p><em><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Alvaro Rodrigo, Anselmo Penas and Felisa Verdejo</span></em></p><h2><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span></h2><h2><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >14:20-15:20 EVALUATION METRICS</span></h2><p><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >14:20-14:50</span><br /><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >6. Stability of INEX 2007 Evaluation Measures (REGULAR)</span></p><p><em><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Sukomal Pal, Mandar Mitra and Arnab Chakraborty</span></em></p><p><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >14:50-15:20</span><br /><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >7. Modelling A User Population for Designing Information Retrieval Metrics (REGULAR)</span></p><p><em><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Tetsuya Sakai and Stephen Robertson</span></em></p><p><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><h2><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >15:20-16:00 USERS</span></h2><p><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >15:20-15:30</span><br /><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >8. Visualization of User Eye Movements for Search Result Pages (SHORT)</span></p><p><em><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Yuka Egusa, Masao Takaku, Hitoshi Terai, Hitomi Saito, Noriko Kando and Makiko Miwa</span></em></p><p><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >15:30-16:00</span><br /><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >9. Measuring User Relevance Criteria (REGULAR)</span></p><p><em><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Falk Scholer, Andrew Turpin and Mingfang Wu</span></em></p><p><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><h2><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >16:10-16:50 PATENT SEARCH</span></h2><p><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >16:10-16:20</span><br /><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >10. Relevance Levels for Patent Mining (SHORT)</span></p><p><em><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Fredric Gey and Ray Larson</span></em></p><p><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >16:20-16:50</span><br /><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >11. A methodology for building a patent test collection for prior art search (REGULAR)</span></p><p><em><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Erik Graf and Leif Azzopardi</span></em></p><p><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><h2><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >16:50-17:30 MULTIMEDIA</span></h2><p><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >16:50-17:00</span><br /><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >12. The CHORUS gap analysis on User-centered methodology for design and</span> <br /><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >evaluation of multi-media information access systems (SHORT)</span></p><p><em><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Jussi Karlgren</span></em></p><p><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >17:00-17:30</span><br /><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >13.&nbsp;Information Access Tasks and Evaluation for Personal Lifelogs (REGULAR)</span></p><p><em><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Gareth Jones, Cathal Gurrin, Liadh Kelly, Daragh Byrne and Yi Chen</span></em></p><p><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><h2><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >17:30-17:45 OPEN DISCUSSIONS AND CLOSING REMARKS</span></h2><p><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><hr /><p align="center"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p align="center"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p align="center"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><h2><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >CALL FOR NONREFEREED &quot;VERY SHORT&quot; PAPERS AT EVIA 2008</span></h2><p><br /><br /><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >The Second International Workshop on Evaluating Information Access</span><br /><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >(EVIA 2008) will take place on Day 1 of the NTCIR-7 Meeting (Dec 16)</span><br /><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >at NII, Tokyo. Six regular papers and five short papers have been accepted</span><br /><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >and will be presented at the workshop (SEE BELOW).</span><br /><br /><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >In addition, we would like to organise a session</span><br /><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >consisting of</span> <font color="#ff0000"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >five-minute talks</span></font><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >, to provide an opportunity for:</span><br /><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >(a) NTCIR participants who would like to discuss some specific evaluation</span><br /><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >issues</span><br /><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >(metrics, data, methods);</span><br /><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >(b) ANYONE (including non-NTCIR participants) who would like to</span><br /><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >discuss possible future NTCIR tasks, evaluation issues in general,</span><br /><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >and/or present late-breaking results on evaluation.</span><br /><br /><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >All NTCIR participants are expected to describe their</span> <font color="#ff0000"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >systems</span></font><br /><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >at the main NTCIR sessions. Whereas the focus of EVIA</span><br /><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >is on</span> <font color="#ff0000"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >how to evaluate</span></font> <span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >those systems.</span><br /><br /><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >If you would like to contribute to this session,</span><br /><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >please submit a &quot;very short&quot; paper (up to TWO pages)</span><br /><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >to</span><br /><span onclick="return false" style="text-decoration:underline; color:blue" href="https://www.softconf.com/s08/EVIA2008/"><font color="#800080"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >https://www.softconf.com/s08/EVIA2008/</span></font></span><br /><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >by</span> <font color="#ff0000"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >November 2</span></font><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >.</span><br /><br /><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Please use latex8.sty (link provided below&nbsp;in this webpage)</span></p><p><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >or the word template available at</span> <br /><span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.nii.ac.jp/ntcir/ntcir-ws7/meeting/proceedings.html"><font color="#800080"><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >http://research.nii.ac.jp/ntcir/ntcir-ws7/meeting/proceedings.html</span></font></span><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;.</span></p><p><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Unlike the regular and short papers,</span><br /><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >these &quot;very-short&quot; papers will NOT be reviewed.</span><br /><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >However, we will NOT accept papers that</span><br /><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >do not match either of Categories (a) and (b) shown above.</span><br /><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Late submissions, as well as those that do not conform to</span><br /><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >the style guidelines and the page limit, will not be accepted either.</span><br /><br /><br /><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >For further questions, please contact the EVIA chairs:</span><br /><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Mark Sanderson</span> </p><p><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >and</span><br /><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Tetsuya Sakai</span></p><hr /><br /><p><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Evaluation of Information Retrieval, Question Answering and Text Summarisation systems has been central to Information Access research for decades. As retrieval becomes more pervasive and diverse, the need for effective and efficient evaluation has never been more important. For example, at SIGIR 2007, three sessions on Evaluation were held, along with others that also cover evaluation-related topics. Recognising a need to provide a forum for discussing the evaluation issues intensively, The First International Workshop on Evaluating Information Access (EVIA 2007) was held on May 15, 2007 &ndash; Day 1 of the NTCIR-6 Workshop Meeting &ndash; at the National Institute of Informatics, Tokyo, Japan. The EVIA 2007 Workshop consisted of invited paper sessions, a regular paper session and a poster session, and attracted participants from Asia, Europe and America. All the papers are available online:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.nii.ac.jp/ntcir/workshop/OnlineProceedings6/EVIA/"><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >http://research.nii.ac.jp/ntcir/workshop/OnlineProceedings6/EVIA/</span></span> </p><p><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Following the success of EVIA 2007, The SECOND International Workshop on Evaluating Information Access</span><br /><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >(EVIA 2008) will be held on December 16, 2008 - Day 1 of the NTCIR-7 Workshop Meeting. We will welcome</span><br /><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >papers addressing one or more of the following topics:</span></p><p><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >&bull; Test collections, their formation, evaluation metrics and evaluation environments</span><br /><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >&bull; Cross-conference comparison: NTCIR, CLEF, TREC, DUC and others</span><br /><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >&bull; Evaluation of specific information access tasks, e.g., for education and training</span><br /><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >&bull; Evaluation of query-specific approaches</span><br /><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >&bull; Evaluation of multilingual, multimedia and/or mobile information access</span><br /><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >&bull; Real-world search topics and/or evaluation in vivo</span><br /><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >&bull; Novel information access tasks and their evaluation</span></p><p><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><h2><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >IMPORTANT DATES</span></h2><p><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><font color="#ff0000"><p><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >September 14, 2008 Submissions due</span></p><p><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >October13, 2008 Notification of acceptance&nbsp;</span></p><p><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >November 2,&nbsp;2008 Nonrefereed very&nbsp;short papers due</span></p><p><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >November 10, 2008 Camera-ready regular/short papers due</span></p></font><p><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >December 16, 2008 EVIA 2008</span></p><p><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><div align="left"><h2><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >SUBMISSION INSTRUCTIONS&nbsp;</span></h2><p><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >We welcome two types of papers. Both types will go through a double-blind reviewing process.</span></p><p><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Regular papers: 6-12 pages.</span><br /><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Short papers: 1-5 pages.</span></p><p><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >We allow up to 12 pages for the regular papers because</span><br /><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >work on evaluation involves lots of results and analyses.</span><br /><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Depending on the number of submissions we receive,</span><br /><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >we may possibly ask the authors of short papers to present their work</span><br /><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >at a poster session rather than an oral presentation session.</span></p><p><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Please use</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://conferences.computer.org/RE/proceedings/latex8.sty"><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >latex8.sty</span></span> <span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >and the sample tex source file</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.nii.ac.jp/ntcir-ws5/author/ntcir_author.tex"><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >ntcir_author.tex</span></span><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >.</span><br /><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >To facilitate blind reviewing, do NOT include the author names in your manuscript,</span> <br /><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >and &quot;anonymize&quot; your own citations to the best of your ability.</span></p><p><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Submit your PDF file&nbsp;HERE by September 14, 2008 (EST).</span></p><p><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Note: Duplicate submissions, if detected, will be rejected unconditionally.</span> <br /><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >That is, submitting the same paper to EVIA 2008 and to another conference simultaneously</span> <br /><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >is strictly prohibited.</span></p><p><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p></div><h2><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >EVIA 2008 PROGRAM COMMITTEE</span></h2><p><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Iadh Ounis, Diane Kelly, Norbert Fuhr, James Allan, Nicholas Belkin, Noriko Kando, Akiko Aizawa, Javed Aslam, Jaana Kekalainen, Maarten de Rijke, Djoerd Hiemstra, Gareth Jones, Gary Geunbae Lee, Mun-Kew Leong, Ian Ruthven, Ian Soboroff, Andrew Turpin, Ross Wilkinson, Carol Peters, Fred Gey, Mounia Lalmas, Donna Harman, Ben Carterette, Leif Azzopardi, Mark Sanderson, Tetsuya Sakai</span></p><p><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><h2><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >EVIA 2008 CO-CHAIRS</span></h2><p><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Mark Sanderson (University of Sheffield, UK) and Tetsuya Sakai (NewsWatch, Inc.)</span></p><p><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >If you have any questions, please contact</span><br /><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >m.sanderson at sheffield.ac.uk and</span><br /><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >tetsuyasakai at acm.org</span></p><p><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >(Last updated 2009-01-28)</span> </p><br/><br/></td></tr><tr><td valign="top"><div>				<table class="contentpaneopen">
+			<tr>
+								<td class="contentheading" width="100%">
+					<span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/EVIA-2008/EVIA-2008-CFP-updated.html" class="contentpagetitle">
+						<span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >EVIA 2008 CFP updated</span></span>
+									</td>
+							<td align="right" width="100%" class="buttonheading">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index2.php?option=com_content&amp;do_pdf=1&amp;id=52" target="_blank" onclick="window.open('http://ntcir.nii.ac.jp/index2.php?option=com_content&amp;do_pdf=1&amp;id=52','win2','status=no,toolbar=no,scrollbars=yes,titlebar=no,menubar=no,resizable=yes,width=640,height=480,directories=no,location=no'); return false;" title="PDF">
+					<img onmousedown="imd(this)" src="http://ntcir.nii.ac.jp/images/M_images/pdf_button.png"  alt="PDF" name="PDF" align="middle" border="0" /></span>
+			</td>
+							<td align="right" width="100%" class="buttonheading">
+					<span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index2.php?option=com_content&amp;task=view&amp;id=52&amp;pop=1&amp;page=0&amp;Itemid=62" target="_blank" onclick="window.open('http://ntcir.nii.ac.jp/index2.php?option=com_content&amp;task=view&amp;id=52&amp;pop=1&amp;page=0&amp;Itemid=62','win2','status=no,toolbar=no,scrollbars=yes,titlebar=no,menubar=no,resizable=yes,width=640,height=480,directories=no,location=no'); return false;" title="Print">
+						<img onmousedown="imd(this)" src="http://ntcir.nii.ac.jp/images/M_images/printButton.png"  alt="Print" name="Print" align="middle" border="0" /></span>
+				</td>
+							<td align="right" width="100%" class="buttonheading">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index2.php?option=com_content&amp;task=emailform&amp;id=52" target="_blank" onclick="window.open('http://ntcir.nii.ac.jp/index2.php?option=com_content&amp;task=emailform&amp;id=52','win2','status=no,toolbar=no,scrollbars=yes,titlebar=no,menubar=no,resizable=yes,width=400,height=250,directories=no,location=no'); return false;" title="E-mail">
+					<img onmousedown="imd(this)" src="http://ntcir.nii.ac.jp/images/M_images/emailButton.png"  alt="E-mail" name="E-mail" align="middle" border="0" /></span>
+			</td>
+						</tr>
+			</table>
+			
+		<table class="contentpaneopen">
+					<tr>
+				<td>
+						<span>
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/EVIA-2008/"><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >The Second International Workshop on Evaluating Information Access</span></span>			</span>
+							</td>
+			</tr>
+					<tr>
+				<td width="70%" align="left" valign="top" colspan="2">
+					<span class="small">
+						 <span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Written by David Evans</span>					</span>
+					<span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span>
+				</td>
+			</tr>
+						<tr>
+				<td valign="top" colspan="2" class="createdate">
+					<span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Friday, 02 May 2008</span>				</td>
+			</tr>
+					<tr>
+			<td valign="top" colspan="2">
+				<p><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >The EVIA 2008 Call for Papers has been updated.&nbsp;</span> </p><p><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Please see</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/images/files/ev08cfp.pdf" title="EVIA 2008 Call for Papers"><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >the updated PDF file</span></span> <span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >for details.</span></p><p><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >Also, the program committee list has been updated.&nbsp;</span></p>			</td>
+		</tr>
+				</table>
+
+		<span class="article_seperator"><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span>
+
+		</div></td></tr><tr><td valign="top"><table width="100%"  cellpadding="0" cellspacing="0"><tr><td valign="top" width="100%">			<table class="contentpaneopen">
+			<tr>
+								<td class="contentheading" width="100%">
+					<span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/EVIA-2008/EVIA-2008-Call-For-Papers-Released.html" class="contentpagetitle">
+						<span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >EVIA 2008 Call For Papers Released</span></span>
+									</td>
+							<td align="right" width="100%" class="buttonheading">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index2.php?option=com_content&amp;do_pdf=1&amp;id=51" target="_blank" onclick="window.open('http://ntcir.nii.ac.jp/index2.php?option=com_content&amp;do_pdf=1&amp;id=51','win2','status=no,toolbar=no,scrollbars=yes,titlebar=no,menubar=no,resizable=yes,width=640,height=480,directories=no,location=no'); return false;" title="PDF">
+					<img onmousedown="imd(this)" src="http://ntcir.nii.ac.jp/images/M_images/pdf_button.png"  alt="PDF" name="PDF" align="middle" border="0" /></span>
+			</td>
+							<td align="right" width="100%" class="buttonheading">
+					<span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index2.php?option=com_content&amp;task=view&amp;id=51&amp;pop=1&amp;page=0&amp;Itemid=62" target="_blank" onclick="window.open('http://ntcir.nii.ac.jp/index2.php?option=com_content&amp;task=view&amp;id=51&amp;pop=1&amp;page=0&amp;Itemid=62','win2','status=no,toolbar=no,scrollbars=yes,titlebar=no,menubar=no,resizable=yes,width=640,height=480,directories=no,location=no'); return false;" title="Print">
+						<img onmousedown="imd(this)" src="http://ntcir.nii.ac.jp/images/M_images/printButton.png"  alt="Print" name="Print" align="middle" border="0" /></span>
+				</td>
+							<td align="right" width="100%" class="buttonheading">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index2.php?option=com_content&amp;task=emailform&amp;id=51" target="_blank" onclick="window.open('http://ntcir.nii.ac.jp/index2.php?option=com_content&amp;task=emailform&amp;id=51','win2','status=no,toolbar=no,scrollbars=yes,titlebar=no,menubar=no,resizable=yes,width=400,height=250,directories=no,location=no'); return false;" title="E-mail">
+					<img onmousedown="imd(this)" src="http://ntcir.nii.ac.jp/images/M_images/emailButton.png"  alt="E-mail" name="E-mail" align="middle" border="0" /></span>
+			</td>
+						</tr>
+			</table>
+			
+		<table class="contentpaneopen">
+					<tr>
+				<td>
+						<span>
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/EVIA-2008/"><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >The Second International Workshop on Evaluating Information Access</span></span>			</span>
+							</td>
+			</tr>
+					<tr>
+				<td width="70%" align="left" valign="top" colspan="2">
+					<span class="small">
+						 <span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >Written by David Evans</span>					</span>
+					<span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span>
+				</td>
+			</tr>
+						<tr>
+				<td valign="top" colspan="2" class="createdate">
+					<span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >Saturday, 15 March 2008</span>				</td>
+			</tr>
+					<tr>
+			<td valign="top" colspan="2">
+				<p><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >EVIA 2008 Call for Papers (with updated IMPORTANT DATES section) has been released.&nbsp;</span> </p><p><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Please see</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="images/files/ev08cfp.pdf"><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >the updated PDF for details</span></span><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >.</span></p>			</td>
+		</tr>
+					<tr>
+				<td colspan="2" align="left" class="modifydate">
+					<span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Last Updated ( Saturday, 15 March 2008 )</span>
+				</td>
+			</tr>
+					</table>
+
+		<span class="article_seperator"><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span>
+
+		</td></tr><tr><td valign="top" width="100%">			<table class="contentpaneopen">
+			<tr>
+								<td class="contentheading" width="100%">
+					<span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/EVIA-2008/EVIA-2008-Preliminary-Call-for-Participation-Released.html" class="contentpagetitle">
+						<span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >EVIA 2008 Preliminary Call for Participation Released</span></span>
+									</td>
+							<td align="right" width="100%" class="buttonheading">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index2.php?option=com_content&amp;do_pdf=1&amp;id=38" target="_blank" onclick="window.open('http://ntcir.nii.ac.jp/index2.php?option=com_content&amp;do_pdf=1&amp;id=38','win2','status=no,toolbar=no,scrollbars=yes,titlebar=no,menubar=no,resizable=yes,width=640,height=480,directories=no,location=no'); return false;" title="PDF">
+					<img onmousedown="imd(this)" src="http://ntcir.nii.ac.jp/images/M_images/pdf_button.png"  alt="PDF" name="PDF" align="middle" border="0" /></span>
+			</td>
+							<td align="right" width="100%" class="buttonheading">
+					<span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index2.php?option=com_content&amp;task=view&amp;id=38&amp;pop=1&amp;page=0&amp;Itemid=62" target="_blank" onclick="window.open('http://ntcir.nii.ac.jp/index2.php?option=com_content&amp;task=view&amp;id=38&amp;pop=1&amp;page=0&amp;Itemid=62','win2','status=no,toolbar=no,scrollbars=yes,titlebar=no,menubar=no,resizable=yes,width=640,height=480,directories=no,location=no'); return false;" title="Print">
+						<img onmousedown="imd(this)" src="http://ntcir.nii.ac.jp/images/M_images/printButton.png"  alt="Print" name="Print" align="middle" border="0" /></span>
+				</td>
+							<td align="right" width="100%" class="buttonheading">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index2.php?option=com_content&amp;task=emailform&amp;id=38" target="_blank" onclick="window.open('http://ntcir.nii.ac.jp/index2.php?option=com_content&amp;task=emailform&amp;id=38','win2','status=no,toolbar=no,scrollbars=yes,titlebar=no,menubar=no,resizable=yes,width=400,height=250,directories=no,location=no'); return false;" title="E-mail">
+					<img onmousedown="imd(this)" src="http://ntcir.nii.ac.jp/images/M_images/emailButton.png"  alt="E-mail" name="E-mail" align="middle" border="0" /></span>
+			</td>
+						</tr>
+			</table>
+			
+		<table class="contentpaneopen">
+					<tr>
+				<td>
+						<span>
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/EVIA-2008/"><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >The Second International Workshop on Evaluating Information Access</span></span>			</span>
+							</td>
+			</tr>
+					<tr>
+				<td width="70%" align="left" valign="top" colspan="2">
+					<span class="small">
+						 <span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Written by David Evans</span>					</span>
+					<span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;</span>
+				</td>
+			</tr>
+						<tr>
+				<td valign="top" colspan="2" class="createdate">
+					<span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, 04 October 2007</span>				</td>
+			</tr>
+					<tr>
+			<td valign="top" colspan="2">
+				<p><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >The EVIA 2008 Preliminary Call for Participation has been released.&nbsp;</span> </p><p><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >See</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="images/files/evia2008_precfp.pdf"><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >the PDF for details</span></span> <span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >.&nbsp;</span> </p><p><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p><p><span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >2008-03-17 Update: Note that this has been supersceded by the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="images/files/ev08cfp.pdf"><span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >EVIA 2008 Call for Participation</span></span><span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >.</span> </p>			</td>
+		</tr>
+					<tr>
+				<td colspan="2" align="left" class="modifydate">
+					<span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >Last Updated ( Monday, 17 March 2008 )</span>
+				</td>
+			</tr>
+					</table>
+
+		<span class="article_seperator"><span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span>
+
+		</td></tr></table></td></tr></table>			<div class="back_button">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href='javascript:history.go(-1)'>
+					<span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >[ Back ]</span></span>
+			</div>
+			      </div> <!-- maincontent -->
+    </td>
+        <td width="180" align="left" valign="top"><div id="right">
+      		<div class="moduletable">
+							<h3>
+					<span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >Login Form</span>				</h3>
+					<form action="http://ntcir.nii.ac.jp/" method="post" name="login" >
+		
+	<table width="100%" border="0" cellspacing="0" cellpadding="0" align="center">
+	<tr>
+		<td>
+			<label for="mod_login_username">
+				<span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >Username</span>			</label>
+			<br />
+			<input name="username" id="mod_login_username" type="text" class="inputbox" alt="username" size="10" />
+			<br />
+			<label for="mod_login_password">
+				<span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >Password</span>			</label>
+			<br />
+			<input type="password" id="mod_login_password" name="passwd" class="inputbox" size="10" alt="password" />
+			<br />
+			<input type="checkbox" name="remember" id="mod_login_remember" class="inputbox" value="yes" alt="Remember Me" />
+			<label for="mod_login_remember">
+				<span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >Remember me</span>			</label>
+			<br />
+			<input type="submit" name="Submit" class="button" value="Login" />
+		</td>
+	</tr>
+	<tr>
+		<td>
+			<span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/Lost-password.html">
+				<span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >Lost Password?</span></span>
+		</td>
+	</tr>
+			<tr>
+			<td>
+				<span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >No account yet?</span>				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/Create-an-account.html">
+					<span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >Register</span></span>
+			</td>
+		</tr>
+			</table>
+	
+	<input type="hidden" name="option" value="login" />
+	<input type="hidden" name="op2" value="login" />
+	<input type="hidden" name="lang" value="english" />
+	<input type="hidden" name="return" value="http://ntcir.nii.ac.jp/index.php/EVIA-2008/" />
+	<input type="hidden" name="message" value="0" />
+	<input type="hidden" name="force_session" value="1" />
+	<input type="hidden" name="j9c6ff591e6cc3ce227bdfdd612a868ed" value="1" />
+	</form>
+			</div>
+				<div class="moduletable">
+							<h3>
+					<span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >Language</span>				</h3>
+				<link href="http://ntcir.nii.ac.jp/modules/mod_shJoomfish.css" rel="stylesheet" type="text/css"/>
+	<ul class="jflanguageselection"><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/EVIA-2008/"><span lang="en" xml:lang="en"><span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >English</span></span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/ja/EVIA-2008/"><span lang="ja" xml:lang="ja"><span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >Japanese</span></span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/zh/EVIA-2008/"><span lang="zh" xml:lang="zh"><span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >Simplified Chinese</span></span></span></li><li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://ntcir.nii.ac.jp/index.php/zh_tw/EVIA-2008/"><span lang="zh_tw" xml:lang="zh_tw"><span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >Traditional Chinese</span></span></span></li></ul>		</div>
+		      </div> <!-- id right -->
+    </td>
+  </tr>
+</table>
+</div> <!-- content -->
+
+<div id="footer">
+    <p><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >Powered by</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.joomla.org"><span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >Joomla!</span>

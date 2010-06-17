@@ -1,0 +1,1010 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.enase.org^ENASE2008^abstracts.htm_2009-08-05__14-35-49.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.enase.org^ENASE2008^abstracts.htm_2009-08-05__14-35-49.yaml created on Wed Aug 05 17:31:53 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<title>ENASE 2008 - 3rd International Working Conference on Evaluation of Novel Approaches to Software Engineering</title>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+<meta name="Keywords" content="">
+<meta name="Description" content="">
+<link rel="stylesheet" href="style.css" type="text/css" />
+
+<SCRIPT language=JavaScript>
+<!--
+function SymError()
+{
+  return true;
+}
+
+window.onerror = SymError;
+
+var SymRealWinOpen = window.open;
+
+function SymWinOpen(url, name, attributes)
+{
+  return (new Object());
+}
+
+window.open = SymWinOpen;
+
+function MM_swapImgRestore() { //v3.0
+  var i,x,a=document.MM_sr; for(i=0;a&&i<a.length&&(x=a[i])&&x.oSrc;i++) x.src=x.oSrc;
+}
+
+function MM_preloadImages() { //v3.0
+  var d=document; if(d.images){ if(!d.MM_p) d.MM_p=new Array();
+    var i,j=d.MM_p.length,a=MM_preloadImages.arguments; for(i=0; i<a.length; i++)
+    if (a[i].indexOf("#")!=0){ d.MM_p[j]=new Image; d.MM_p[j++].src=a[i];}}
+}
+
+function MM_findObj(n, d) { //v4.01
+  var p,i,x;  if(!d) d=document; if((p=n.indexOf("?"))>0&&parent.frames.length) {
+    d=parent.frames[n.substring(p+1)].document; n=n.substring(0,p);}
+  if(!(x=d[n])&&d.all) x=d.all[n]; for (i=0;!x&&i<d.forms.length;i++) x=d.forms[i][n];
+  for(i=0;!x&&d.layers&&i<d.layers.length;i++) x=MM_findObj(n,d.layers[i].document);
+  if(!x && d.getElementById) x=d.getElementById(n); return x;
+}
+
+function MM_swapImage() { //v3.0
+  var i,j=0,x,a=MM_swapImage.arguments; document.MM_sr=new Array; for(i=0;i<(a.length-2);i+=3)
+   if ((x=MM_findObj(a[i]))!=null){document.MM_sr[j++]=x; if(!x.oSrc) x.oSrc=x.src; x.src=a[i+2];}
+}
+//-->
+</SCRIPT>
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)" leftmargin="0" topmargin="17" rightmargin="0"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<div align="center"> 
+  <table width="970" border="0" cellpadding="0" cellspacing="0" bgcolor="ffffff" height="914">
+    <!--DWLayoutTable-->
+    <tr>
+      <td height="130" colspan="3" valign="top"><img onmousedown="imd(this)" src="Images/up.jpg" width="970" height="130"></td>
+    </tr>
+	<tr>
+      <td width="209" height="20"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+      <td width="20"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+      <td width="741"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+	</tr>
+	<tr>
+	  <td height="6344" valign="top">
+	    <table width="100%" border="0" cellpadding="0" cellspacing="0">
+	      <!--DWLayoutTable-->
+	      
+	      <tr> 
+	        <td height="32" valign="middle" background="Images/menu.jpg" class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.htm" class="menu"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;Home</span></span></td>
+          </tr>
+	      
+	      
+	      
+	      <tr> 
+	        <td height="17"></td>
+          </tr>
+	      
+	      <tr>
+	        <td height="32" valign="middle" background="Images/menu.jpg" class="menu">
+            <span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="Call_for_Papers.htm"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;Call for Papers</span>			</span></td>
+          </tr>
+	      <tr>
+	        <td height="15"></td>
+          </tr>
+	      
+	      <tr>
+	        <td height="32" valign="middle" background="Images/menu.jpg" class="menu">
+            <span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="Committees.htm"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;Committees</span></span></td>
+          </tr>         <tr>
+            <td height="15"></td>
+              </tr>
+	      
+	      
+	      
+	      <tr>
+	        <td height="32" valign="middle" background="Images/menu.jpg" class="menu">
+            <span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="Goals_Motivation.htm"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;Goals and Motivation</span>			</span></td>
+          </tr>
+	      <tr>
+	        <td height="15"></td>
+          </tr>
+	      
+	      <tr>
+	        <td height="32" valign="middle" background="Images/menu.jpg" class="menu">
+            <span onclick="return false" style="text-decoration:underline; color:blue" class="menu" href="Topics_Interest.htm"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;Topics of Interest</span></span></td>
+          </tr>
+	      
+	      
+	      
+	      <tr>
+	        <td height="15"></td>
+          </tr>
+	      
+	      <tr>
+	        <td height="32" valign="middle" background="Images/menu.jpg" class="menu"><span onclick="return false" style="text-decoration:underline; color:blue" href="keynotes.htm" class="menu"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;Keynote Lectures</span></span></td>
+          </tr>
+	      <tr>
+	        <td height="6075"></td>
+          </tr>
+          </table></td>
+      <td><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+	  <td rowspan="2" valign="top">
+		<table width="741" border="0" cellpadding="0" cellspacing="0" height="675">
+		  <!--DWLayoutTable-->
+		  <tr>
+		    <td width="741" height="36" valign="top" class="menuTitles"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Abstracts</span></td>
+          </tr>
+		  <tr>
+		    <td height="19" valign="top"><!--DWLayoutEmptyCell--><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          </tr>
+		  <tr>
+		    <td height="114" valign="top">            <table width="100%" border="0" cellspacing="10">
+		      <!--DWLayoutTable-->
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >7</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >TOWARDS A SEMIFORMAL DEVELOPMENT METHODOLOGY FOR EMBEDDED SYSTEMS</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Lucas Cordeiro, Raimundo Barreto and Meuse Oliveira</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >In recent years, discrete control systems play an important role in the development and advancement of modern civilization and technology. This kind of system maybe classified as an embedded real-time system and requires rigorous methodologies to develop the software that is under stringent hardware constraints. Therefore, the proposed development methodology adapts agile principles and patterns in order to build embedded control systems focusing on the issues related to the system's constraints and safety. Moreover, platform-based design approach is used to balance costs and time-to-market in view of performance and functionality constraints. We conclude that the proposed methodology reduces significantly design time and cost as well as leads to better software modularity and reliability.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >10</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >METRICS FOR A MODEL DRIVEN DEVELOPMENT CONTEXT</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Motoshi Saeki and Haruhiko Kaiya</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >In a Model Driven Development context, in addition to the metrics of models themselves, the metrics of model transformation should be considered in order to measure its various characteristics such as quality.
+        In this paper, we propose the technique to define the metrics of model transformation using a meta-modeling technique and a graph rewriting techniques. The meta-modeling technique is used for defining model-specific metrics, while graph rewriting rules formalize transformation.
+        The values of model-specific metrics to be calculated are attached to graph rewriting rules, and can be evaluated and propagated between the models during the 
+        transformation.
+        The evaluation and propagation methods can be defined within the graph rewriting 
+        rules, and their evaluation and propagation result in the metric values of the transformation.
+        Furthermore the paper includes the example of transforming object models into relational DB models in order to show the usefulness of our approach.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >13</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >PROGRAMMING IN PROTOCOLS - A Paradigm of Behavioral Programming</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Ashley McNeile and Ella Roubtsova</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >We present work in the creation of a programming paradigm based on the event protocols of objects. Our claim is this results in a high level executable language that bridges the gap between behavioral models and code for a large class of systems. The language is based on the idea of composing partial behavioral descriptions using process algebraic techniques.
+        We show that the concepts forming the basis of this language shed light on questions relating to the description of behavior in object models, particularly in the areas of reuse, abstraction, and behavioral conformance.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >21</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >MODELING QUALITY ATTRIBUTE VARIABILITY</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Eila Niemelä, Antti Evesti and Pekka Savolainen</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Due to the emerging service orientation, the importance of quality aspects and the ability to manage the changing quality requirements of a service have raised the question of how to explicitly define quality requirements and how to assure that quality requirements are handled in the same way by all service developers. Variation related to evolution qualities is managed by applying appropriate styles and patterns at design time but there is no solution for describing variation of execution qualities, such as reliability and security, in architecture models. The contribution of this paper is a novel approach, which enhances quality-driven architecture design by ontology orientation and allows 1) to define metrics for quality attributes as quality ontologies, 2) to specify execution qualities as quality profiles according to a quality variability model and quality ontologies defined, and 3) to model quality properties as an integrated part of software architecture. The use of Unified Modeling Language (UML) and its extension mechanisms guarantees that the quality profiles are specified in a uniform, understandable and sharable way and that the design specifications can be used as service descriptions exploited in run-time service adaptation. The new approach is supported by an integrated tool chain developed on top of the Eclipse platform.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >28</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >CASE STUDY: RUNNING TEST CASES FOR SEQUENTIAL PROGRAMS IN PARALLEL IN A CLUSTER ENVIRONMENT</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >P. Kroha and V. Vychegzhanin</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Testing a software system consists of a test case construction and of running and evaluating them, i.e. comparing expected results with obtained results. Because the set of test cases is usually very large, some methods of automation may be used to run them. Usually, test cases run on the same machine where the tested software system should run later. In our case, we run the test cases of a software system for a sequential computer on a cluster in parallel. The goal is to accelerate the process of running and evaluating tests. In this paper we describe the architecture of our test execution tool, experiments, and obtained results concerning performance and efficiency of test automation of sequential programs in a cluster environment.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >47</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >AUTOMATING WORKFLOWS IN MEDIA PRODUCTION - Building an Infrastructure for a Service Oriented Architecture with a Business Process Management System</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Steven Van Assche, Dietrich Van der Weken, Bjorn Muylaert, Stein Desmet and Bruno Volckaert</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >This paper describes our experiences with building an infrastructure for automating workflows in media production based on service oriented architecture (SOA). An SOA deals with distributed software services that interact with each other. By adopting an SOA in cooperation with a Business Process Management System (BPMS) we aimed at increased efficiency and control, shorter setup times, and increased flexibility. We used open source or free products where possible, and the end result is a professional architecture suitable for small-scale to medium-scale media enterprises. Key concepts are the use of JMS as messaging layer for asynchronous, long-running service interactions (which are typical in a media production environment), the orchestration of services leading to processes with more business meaning, the graphical description of these business processes followed by the automatic generation of executable code (BPEL), support for human interactions in the processes and compliance with the WS-I Basic Profile 1.1. Our architecture is illustrated with a use case in which we automated a process that deals with the intake, review, transcoding and publishing of user-generated content.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >52</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >WORKFLOW AUTOMATION FOR SYSTEM ARCHITECTING</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Markku Turunen, Kari Leppänen and Sari Leppänen</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Managing the ever-growing complexity of even 
+        mass-market products, such as mobile phones, is becoming increasingly hard
+        without the adoption of improved system development 
+        methods, such as model-based development. To allow industrial use of such
+        methods, tools that are able automate development tasks as far
+        as possible are needed. In this paper, we present a partly automated system design
+        flow based on the Lyra method with UML 2.0 language and Telelogic Tau G2 modeling tool. We discuss
+        how the tool was extended to support automation of some central tasks
+        in Lyra and show a running example of the design flow. In the example,
+        a telephony functionality of a mobile device is modeled producing an
+        executable specification for the system. The efficiency gains from the automation are promising.</span>
+  </div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >54</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >SEMANTIC APPLICATION DESIGN</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Philippe Larvet</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >This paper presents a process to determine the design of an application by optimizing the network of semantic components that compose the application. An application has to implement a given specification. We consider this specification is made of atomic requirements, logically linked together. On one hand, each requirement is expressed in natural language; this expression is seen as the semantic description of the requirement. On the other hand, the off-the-shelf components from which we want to build the application can also be described through a semantic description, which we call a "semantic card". Within this context, we consider the a component implements a requirement if the "semantic distance" between their two semantic descriptions is minimal. Consequently, building an application consists in building and optimizing the logical network of all the semantic optimal couples "requirement-component". The paper presents such a building and optimization automatic process, of which one of the main advantages is to derive systematically the finding and assembly of components from the written specification of the application.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >58</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >EVALUATION OF BPMN MODELS QUALITY - A Family of Experiments</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Elvira Rolón, Félix García, Francisco Ruiz, Mario Piattini, Corrado Aaron Visaggio and Gerardo Canfora</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >The design phase is of special importance in the development of a business process. This phase refers to the modeling, handling and redesigning of processes, but when maintenance tasks have to be performed, this stage can be rather complicated. It implies a heavy investment of time and resources, since it involves both technical developers and business analysts. Moreover, process modeling should permit not only the production of models which are understandable to the users, but also the early detection and correction of errors. All of this adds to the overall quality of the model. We therefore propose a set of measures with which to assess the structural complexity of conceptual business process models. Our aim is to obtain useful indicators for when we are carrying out maintenance tasks on these models. Another goal is to make it possible to carry out an early evaluation of given quality properties of the model. With the development of a family of experiments, it has been possible to discover a set of measures which may be useful in assessing the usability and maintainability of conceptual business process models.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >63</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >IMPLEMENTING ORGANIC COMPUTING SYSTEMS WITH AGENTSERVICE</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Florian Nafz, Frank Ortmeier, Hella Seebach, Jan-Phillip Steghöfer and Wolfgang Reif</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Designing and implementing Organic Computing systems is typically a difficult task. To
+        facilitate the construction a design pattern for Organic Computing systems has been
+        developed. This organic design pattern (ODP) helps in modeling and designing a broad
+        class of Organic Computing systems.
+        
+        This paper focuses on the implementation of Organic Computing systems with the help of
+        this pattern. The core idea is to provide a generic implementation by mapping ODP
+        artifacts to artifacts of a multi-agent framework. The used framework -- AgentService --
+        is one of the few C# multi-agent frameworks. In this paper a possible implementation as
+        well as benefits and limitations are described.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >64</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >ON-THE-FLY INTERPRETATION OF TEST CASES IN AN AUTOMATICALLY GENERATED TTCN-3 TEST SUITE</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Winfried Dulz</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >The TestUS framework (Statistical Testing based on use case scenarios), developed at the University of Erlangen-Nuremberg, offers unique techniques and tools to obtain a TTCN-3 test suite starting from UML 2.0 requirement definitions. Use case diagrams that contain functional and non-functional requirements are transformed to a Markov Chain usage model (MCUM) in a completely automatic approach. The annotation of outgoing MCUM transitions by probabilities in the derived UML2 protocol state machine enables the generation of TTCN-3 test cases according to the expected occurrence frequencies of the specified usage pattern. One drawback in our previous approach resulted from the fact that there exist numerous test cases for a realistic SUT (System under Test). Creating and in particular compiling the TTCN-3 test suite took a long time. Consequently, we decided for the TestUS framework to map the MCUM directly into the executable test suite. Thus, the previous generation of test cases to derive the test suite is no longer necessary. Test cases and the evaluation of test verdicts are now interpreted on-the-fly in an executable TTCN-3 test suite that represents the MCUM. We also proved the new concept by means of a realistic case study for testing a DECT communication system. The previous compilation time for the dedicated DECT test suite in the order of 20 hours was reduced to only 15 minutes and we got a TTCN-3 test suite at the end that interprets as many test cases as one likes for the DECT system on-the-fly.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >65</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >AGILE METHODS AND REQUIREMENTS ENGINEERING IN CHANGE INTENSIVE PROJECTS</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Martin Fritzsche</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >In this paper we discuss how well agile methods can deal with requirements related issues in change intensive projects. Five agile methods are considered: eXtreme Programming, Scrum, Crystal, Dynamic Systems Development Method and Adaptive Software Development. We analyze how well these methods implement the basic goals of requirements engineering, how they counteract or support the occurrence of requirements changes and how they cope with problems arising from changing requirements. We show that agile methods provide a valid approach for requirements related issues, but also identify their weaknesses.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >68</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >EVALUATING MAS ENGINEERING TOOLS</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Emilia Garcia, Adriana Giret and Vicente Botti</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Recently a great number of methods and frameworks to develop multiagent systems have appeared. Nowadays there no an established framework to evaluate environments to develop multiagent system and choosing between one framework or another is a difficult task. The main contributions of this paper are: (1) an analysis of the state of the art in the evaluation of MAS engineering; (2) a complete list of criteria that allows the evaluation of multiagent system development environments;(3) a quantitative evaluation technique;(4) an evaluation of the methodology Ingenias and its development environment using this evaluation framework.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >70</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >PROCESS-CENTRIC ENTERPRISE MODELING & MANAGEMENT (ProCEM®)</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Erich Ortner</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >The shortage of skilled IT-staff as well as the technological possibilities offered by Service-oriented Architectures (SOA) and Web 2.0 applications, leads us to the following consequences: working processes, job engineering and labor organization are going to be modeled and therefore made digital in the sense of IT-support. This goes along with modeling working processes being independent from the individual employee in areas to be rationalized resp. not to be staffed by qualified specialists. Hence, there will be a worldwide net based selection of those who are able and skilled to fulfill modeled work like e.g. “handling a damage event” or “creating an optimized data structure for master data” by means of the Unified Modeling Language (UML) in the most effective and efficient way. An enterprise will therefore neutrally manage its IT-services (application programs) taking place as computer supported work equipment in any working process being located anywhere in the world without assigning it first to a specific performer. By doing so it is possible to control and dynamically execute working processes globally based on the division of labor, and on a data base supported administration of “bills of activities” by means of the World Wide Web. All that requires new and dynamic – in the sense of component based – job descriptions exceeding today’s established skill and task management by far.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >71</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >CHALLENGES FOR AGILE DEVELOPMENT OF COTS COMPONENTS AND COTS-BASED SYSTEMS - A Theoretical Examination</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Iva Krasteva, Per Branger and Rikard Land</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Component-based software engineering has had great impact in the desktop and server domain and is spreading to other domains as well, such as embedded systems. Agile methods is another approach which have gained much attention in recent years, mainly for smaller-scale, not so critical development on commission. Both promise to increase system quality, development speed and flexibility, but so far little or nothing has been published on the combination of the two approaches. This paper presents a comprehensive analysis of the applicability of the agile approach in the development processes of COTS and COTS-based systems. The study method is a systematic theoretical examination and comparison of the fundamental concepts and characteristics of these approaches. The findings are: first, an enumeration of identified contradictions between the approaches, and solution suggestions how to bridge these incompatibilities to some extent. Second, the paper provides some more general comments, considerations, and application guidelines concerning the introduction of agile principles into the development of components or component-based systems. This study thus forms a framework which will guide further empirical studies.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >72</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >SOFTWARE SEMANTIC PROVISIONING - Actually Reusing Software</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Savino Sguera, Philippe Ombredanne, Armando Stellato and Maria Teresa Pazienza</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Delivering component-oriented architectures is a well-established trend in software engineering and development. Assessing software reuse scenarios goes much beyond the usual “build vs buy” dilemma that so often occurs in early stages of a software process: scouting, comparing, choosing and integrating the right set of components meeting project’s requirements is still an ad-hoc and error-prone task, performed by developers with little or no frameworks and tools to support them. This paper describes the SSP (Semantics-Driven Software Provisioning) project, funded in its early stages by GoogleTM Inc., developed during the Google Summer of CodeTM 2007 program, and incubated by the Eclipse Software Foundation; the project aims to provide an ontological description of the software domain to underlie a semantic web framework for supporting developers in scouting and provisioning software components. A prototypical RESTful semantic repository, and an Eclipse plug-in consuming the repository services have been implemented and will be discussed.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >77</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >BALANCED GOALCARDS - Combining Goal Analysis and Balanced Scorecards</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Alberto Siena, Alessio Bonetti and Paolo Giorgini</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Today's Information Systems are complex systems that have to deal with a variety of different and potentially conflicting needs.
+        Capturing their strategic requirements is a critical activity, as it must answer at the same time to software and corporate goals.
+        In this paper, we introduce the economic foundations of strategic requirements. We propose a novel conceptual framework for requirements modeling and validation, based on economic and business strategy theory.
+        The soundness of the framework is also evaluated, by presenting the result of its application to a real case study.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >84</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >RANDOM VS. SCENARIO-BASED VS. FAULT-BASED TESTING - An Industrial Evaluation of Formal Black-Box Testing Methods</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Martin Weiglhofer and Franz Wotawa</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Given a formal model of a system under test there are different strategies in order to systematically derive test cases from such a model. These strategies are based on different underlying testing objectives and concepts. Obviously, their usage has impact on the generated test cases. In this paper we evaluate random, scenario-based and fault-based test case generation strategies in the context of an industrial application and assess the advantages and disadvantages of these three strategies. The derived test cases are evaluated in terms of coverage and in terms of the detected errors on a commercial and on an open source implementation of the Voice-Over-IP Session Initiation Protocol.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >85</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >ON THE PERFORMANCE OF FAULT SCREENERS IN SOFTWARE DEVELOPMENT AND DEPLOYMENT¤</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Rui Abreu, Alberto González, Peter Zoeteweij and Arjan J. C. van Gemund</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Fault screeners are simple software (or hardware) constructs that detect variable value errors based on unary invariant checking. In this paper we evaluate and compare the performance of two low-cost screeners (Bloom filter, and range screener) that can be automatically integrated within a program, while being automatically trained during the testing phase. While the Bloom filter has the capacity of retaining virtually all variable values associated with proper program execution, this property comes with a much higher false positive rate per unit training effort, compared to the more simple range screener, that compresses all value information in terms of a single lower and upper bound. We present a novel analytic model that predicts the false positive and false negative rate for both type of screeners. We show that the model agrees with our empirical findings. Furthermore, we describe the application of both screeners, where the screener output is used as input to a fault localization process that provides automatic feedback on the location of residual program defects during deployment in the field.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >88</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >VISUAL COMPOSITION OF COMPONENT SYSTEMS</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Hans Albrecht Schmid and Christian Martin Baranowski</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Component composition has been over a decade a concept that supplements classical reference-based programming, but does not replace it to a larger extent. Though a new generation of component languages like ArchJava has pushed forwards composition from subcomponents, these languages fall back into class-based programming of methods when Java program code is to be written e.g. as a filter among subcomponents. To allow for a seamless composition process, we have developed the component language CompJava that introduces component fragments and plugs as means for composing a component both from subcomponents and structured units of code. In parallel, we have extended UML 2 component diagrams by the newly introduced concepts. This allows visualizing the compositional structure of components in order to better understand and communicate it. A graphical editor, called CompJava Designer, allows constructing relatively complex and distributed component systems by a seamless visual composition process.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >94</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >MODELING OF SERVICE ORIENTED ARCHITECTURE - From Business Process to Service Realisation</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Marek Rychlý and Petr Weiss</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >This paper deals with modeling of Service-Oriented Architecture (SOA). SOA is an architectural style for analysis, design, maintaining and integration of enterprise applications that are based on services. Services are autonomous platform-independent entities that enable access to one or more capabilities, which are accessible by a provided interface. The goal of SOA is to align business and IT architectures. Hence, a new designed service has to meet business requirements that are traditionally specified by a business process diagram. The approach, presented in this paper, helps to bridge the semantic gap between business requirements and IT architecture by using a method for transformation of business processes diagrams into services diagrams. In particular, the method deals with process realisation based on services, and it describes choreographing of services towards fulfilling business goals.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >115</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >BUSINESS PROCESS MODELING AWARE TO THE  ENVIRONMENT CHANGES - A Pattern Driven Approach</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Nicola Boffoli, Daniela Castelluccia, Fabrizio Maria Maggi and Roberto Rutilo</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Nowadays enterprises perform in an extremely competitive business environment, therefore business processes, although complex, must be highly flexible to react to the new demands. This purpose implies that these processes should be continuously maintained through a flexible modeling. This paper addresses this problem and provides a process modeling approach able to govern the high variability of the environment parameters affecting the processes in use, through the well known pattern paradigm and the decision tables formalism. Furthermore, the authors discuss the experience of the proposed approach in a real case. Results are encouraging and drive further investigations in such a way.</span> </div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  <tr> 
+    <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Paper Nr.:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >119</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td width="73" height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Title:</span></div></td>
+      <td width="703" valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >TYPED ABSTRACTIONS FOR CLIENT-SERVICE INTERACTIONS IN OSGI</span></div>      </td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Author(s):</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Sven De Labey and Eric Steegmans</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="21" class="textoNormalBold"><div align="right"><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></div></td>
+      <td valign="middle" class="textoNormal"><div align="justify"><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >The Open Services Gateway initiative (OSGi) is a successful attempt to bridge the gap between Java and Service Oriented Computing. OSGi provides an LDAP-based query language for fine-tuning service retrieval and offers an eventing mechanism that signals changes to a service’s lifecyle to all clients depending on that service. Nonetheless, a number of challenges remain unsolved. OSGi’s service query language, for instance, bypasses important compile-time guarantees on the syntactical correctness of queries and the language works only for properties that never change during the lifetime of a service. What programmers need, however, is a statically type-checked, robust query language that takes into account dynamically evolving, volatile service characteristics. A second problem is that the lifecycle management system requires programmers to write a considerable amount of boilerplate logic for reacting to service events. This obfuscates the business logic, which in turn decreases code comprehension and increases the odds for introducings bugs when implementing client-service interactions.
+        
+        This paper evaluates OSGi as a platform for programming client-service interactions in Java. After focusing on a number of shortcomings of OSGi’s integrated service query language and its lifecycle management system, we propose a solution based on a programming language extension. After the conceptual definition of these new language concepts, we show how they can be transformed to regular Java code without losing interoperability with the OSGi standard.</span></div></td>
+    </tr>
+		      <tr> 
+		        <td height="23" colspan="2" valign="top"><hr></td>
+    </tr>
+		      
+  </table>          </td>
+          </tr>
+		  <tr>
+		    <td height="17"></td>
+	      </tr>
+        </table></td>
+    </tr>
+	<tr>
+	  <td height="50"><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+	  <td><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+    </tr>
+	
+	
+
+	<tr>
+      <td height="89" colspan="3" valign="top"><table width="100%" border="0" cellpadding="0" cellspacing="0">
+          <!--DWLayoutTable-->
+          <tr> 
+            <td width="970" height="19" valign="top"><!--DWLayoutEmptyCell--><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          </tr>
+          <tr> 
+            <td height="17" valign="middle" class="textoNormal"><div align="center"><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >....................................................................................................................................................................................................................................................</span></div></td>
+          </tr>
+          <tr> 
+            <td height="52" valign="top" class="smallText"><div align="center"><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >The ENASE web site is developed and maintained by:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.insticc.org" class="smallText" target="_blank"><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >INSTICC</span></span> <br>
+                <span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Copyright &copy; 2006-2007</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.insticc.org" class="smallText" target="_blank"><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >INSTICC</span></span><br>
+                <br>
+                <em><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Page updated on 
+                <!-- #BeginDate format:Fr1 -->2/04/09</span>

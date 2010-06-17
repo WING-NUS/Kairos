@@ -1,0 +1,708 @@
+<HTML>
+
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.hicomb.org^_2009-08-05__14-36-36.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.hicomb.org^_2009-08-05__14-36-36.yaml created on Wed Aug 05 17:31:57 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<TITLE>HiCOMB 2009</TITLE>
+<!doctype html public "-//w3c//dtd html 4.0 transitional//en">
+<META content="text/html; charset=iso-8859-1" http-equiv=Content-Type>
+<LINK REL="SHORTCUT ICON" HREF="http://www.hicomb.org/favicon.ico">
+</HEAD>
+
+<body onload="on_load()" onkeyup="on_key_up(event)" background="helix.gif"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<center>
+<b><font size=+2><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>
+<font color="#000080"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >HiCOMB 2009</span><br>
+<span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Eighth IEEE International Workshop on High Performance Computational Biology</span></font>
+</font></b> 
+
+<p>
+<font color="#000080">
+<b><font size=+2><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Monday, May 25, 2009</span></font></b> <br>
+</font>
+
+<font size=+2>
+<font color="#000080">
+<b><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Rome, Italy</span></b> <br>
+<img onmousedown="imd(this)" src="ipdps2009.jpg"><br>
+<b><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >(Held in conjunction with the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ipdps.org/"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >International Parallel and 
+Distributed Processing Symposium</span></span><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >)</span></b> 
+</font> 
+</font> 
+</center>
+
+<hr>
+
+<p>
+<font color="#000080">
+<h2><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings.html" target="_blank"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >HiCOMB Online Proceedings</span></span></h2>
+<p> 
+<h2> <span onclick="return false" style="text-decoration:underline; color:blue" href="./HiCOMB2009-SCHEDULE.txt" target="_blank"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Advance Program for HiCOMB 2009</span></span></H2>
+<p>
+<h2> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ipdps.org/ipdps2009/2009_registration_details.html" target="_blank"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Register Online</span></span></h2>
+<span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >(Please note that the IPDPS 2009 registration includes access to this workshop, and that there is no separate workshop registration).</span>
+
+<hr>
+
+<font color="#000080">
+<h2><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >HiCOMB 2009 Keynote Talk</span></h2>
+<p>
+
+<h3><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >De Novo Modeling of GPCR Class A Structures</span></h3>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://brooks.chem.lsa.umich.edu"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Charles L. Brooks III</span></span><br>
+  <span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >University of Michigan, Ann Arbor</span> <br>
+
+<p>
+<b><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Abstract</span></b><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >:</span> <br>
+
+<span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >In this talk I will describe recent work to develop novel methods to
+model GPCR structures from their sequence information and
+statistically significant side chain contacts within a "template"
+structure. Our approach utilizes methods of bioinformatics to identify
+likely high confidence side chain side chain TM helical contacts and
+then reconstitutes the seven TM helical domain through a simulated
+annealing protocol with refinement using replica exchange and an
+implicit solvent/implicit membrane sampling scheme. Results will be
+presented for de novo prediction of the b2 adenergic receptor, the
+adenine receptor and a number of other amine receptors.</span>
+
+<p>
+<b><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Speaker Biography</span></b><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >:</span> <br>
+
+<span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Charles L. Brooks III is the Warner-Lambert Professor of Chemistry and
+Professor of Biophysics at the University of Michigan. Prior to moving
+to Michigan in 2008, Professor Brooks was professor of Molecular
+Biology at The Scripps Research Institute since 1994 and professor of
+Chemistry at Carnegie Mellon University until 1993, where he began as
+an assistant professor in 1985. Professor Brooks received his
+undergraduate training in chemistry, physics and mathematics from Alma
+College. He studied chemical physics at Purdue University, where he
+received his Ph.D. in 1982, and was a postdoctoral fellow at Harvard
+University from 1982-85. Professor Brooks' research focuses on the
+applications of statistical mechanics, quantum chemistry, and
+computational methods to solve chemically and physically oriented
+problems in biology.</span>
+
+</font>
+
+<hr>
+<font color="#000080">
+<H2><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Papers to be presented at HiCOMB 2009:</span></H2>
+<P>
+
+<ul>
+   <li><i><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Parallel Reconstruction of Neighbor-Joining Trees for Large Multiple Sequence Alignments using CUDA</span> </i>
+   <br><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Yongchao Liu, Bertil Schmidt, and Douglas Maskell</span> 
+   </li>
+   <li><i><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Accelerating Error Correction in High-Throughput Short-Read DNA Sequencing Data with CUDA</span> </i>
+   <br><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Haixiang Shi, Bertil Schmidt, Weiguo Liu, and Wolfgang Mueller-Wittig</span> 
+   </li>
+   <li><i><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Parallel Monte Carlo Study on Caffeine-DNA Interaction in Aqueous Solution</span> </i>
+   <br><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Michael Kalugin and Alexandr Teplukhin</span> 
+   </li>
+   <li><i><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Dynamic Parallelization for RNA Structure Comparison</span> </i>
+   <br><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Eric Aubanel, Patricia Evans, and Eric Snow</span> 
+   </li>
+   <li><i><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >HMMer Acceleration Using Systolic Array Based Reconfigurable Architecture</span> </i>
+   <br><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Yanteng Sun, Peng Li, Guochang Gu, Yuan Wen, Yuan Liu, and Dong Liu</span> 
+   </li>
+   <li><i><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >A Resource-Efficient Computing Paradigm for Computational Protein Modeling Applications</span> </i>
+   <br><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Yaohang Li, Dougalas Wardell, and Vincent Freeh</span> 
+   </li> 
+   <li><i><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Exploring FPGAs for Accelerating the Phylogenetic Likelihood Function</span> </i>
+   <br><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Nikolaos Alachiotis, Euripides Sotiriades, Apostolos Dollas, and Alexandros Stamatakis</span> 
+   </li>
+   <li><i><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Long Time-scale Simulations of in vivo Diffusion using GPU Hardware</span> </i>
+   <br><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Elijah Roberts, John Stone, Leonardo Sepulveda, Wen-Mei Hwu, and Zaida Luthey-Schulten</span> 
+   </li>
+   <li><i><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >An Efficient Implementation Smith Waterman Algorithm on GPU using CUDA, for Massively Parallel Scanning of Sequence Databases</span> </i>
+   <br><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Lukasz Ligowski and Witold Rudnicki</span> 
+   </li> 
+   <li><i><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >A Novel Framework for Modeling Ion Channels</span> </i>
+   <br><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >May Siksik and Vikram Krishnamurthy</span> 
+   </li>
+   <li><i><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >High-throughput Protein Structure Determination using Grid Computing</span> </i>
+   <br><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Jason W. Schmidberger, Blair Bethwaite, Colin Enticott, Mark A. Bate, Steve G. Androulakis, Noel Faux, Cyril F. Reboul, Jennifer M. N. Phan, James C. Whisstock, Wojtek J. Goscinski, Slavisa Garic, David Abramson, and Ashley M. Buckle</span> 
+   </li>
+   <li><i><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Folding@home: Lessons From Eight Years of Volunteer Distributed Computing</span> </i>
+   <br> <span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Adam L. Beberg, Guha Jayachandran, Siraj Khaliq, Vijay S. Pande</span>  </li
+</ul>
+
+<hr>
+
+<h2><font color="#000080"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >HiCOMB 2009 Call For Papers</span></font></h2>
+
+<p>
+<font color="#000080">
+<span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Computational Biology is fast emerging as an important discipline for
+academic research and industrial application. The large size of
+biological data sets, inherent complexity of biological problems and
+the ability to deal with error-prone data all result in large run-time
+and memory requirements. The goal of this workshop is to provide a
+forum for discussion of latest research in developing high-performance
+computing solutions to problems arising from molecular biology. We are
+especially interested in parallel algorithms, memory-efficient
+algorithms, large scale data mining techniques, and design of
+high-performance software. The workshop will feature contributed
+papers as well as invited talks from reputed researchers in the field.</span>
+</font> 
+
+<p>
+<font color="#000080"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Topics of interest include but are not limited to:</span> <br>
+</font> 
+
+<ul>
+  <li><font color="#000080"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Bioinformatic databases</span></font> 
+  <li><font color="#000080"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Computational genomics</span></font> 
+  <li><font color="#000080"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Computational proteomics</span></font> 
+  <li><font color="#000080"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >DNA assembly, clustering, and mapping</span></font> 
+  <li><font color="#000080"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Gene expression and microarrays</span></font> 
+  <li><font color="#000080"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Gene identification and annotation</span></font> 
+  <li><font color="#000080"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Parallel algorithms for biological analysis</span></font> 
+  <li><font color="#000080"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Parallel architectures for biological applications</span></font> 
+  <li><font color="#000080"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Molecular evolution</span></font> 
+  <li><font color="#000080"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Molecular sequence analysis</span></font> 
+  <li><font color="#000080"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Phylogeny reconstruction algorithms</span></font> 
+  <li><font color="#000080"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Protein structure prediction and modeling</span></font> 
+  <li><font color="#000080"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >String data structures and algorithms</span></font> 
+</ul>
+
+<h2><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Submission guidelines:</span></h2> 
+
+<p>
+<font color="#000080">
+<span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Papers reporting on original research (both theoretical and
+experimental) in all areas of bioinformatics and computational biology
+are sought. Surveys of important recent results and directions are
+also welcome.</span> <b><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >To submit a paper, upload a postscript or PDF copy of
+the
+paper</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://edas.info/newPaper.php?c=7001&submit=0&"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >here</span></span><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >.</span></b>
+<span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >The paper should not exceed 12 single-spaced pages (US Letter or A4
+size) in 11pt font or larger. All papers will be reviewed. IEEE CS
+Press will publish the IPDPS symposium and workshop abstracts as a
+printed volume. The complete symposium and workshop proceedings will
+also be published by IEEE CS Press on CD-ROM and will also be
+available in the IEEE Digital Library.</span>
+
+<!--
+<p>
+Authors of selected papers from the workshop will be invited to
+submit extended versions of their papers for publication in a
+special issue of 
+a reputed journal. 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.computer.org/tpds/">
+<i>IEEE Transactions on Parallel and Distributed Systems</i>
+</span>
+on High-Performance Computational Biology.
+-->
+
+</font>
+
+<h2><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></h2>
+
+<table cols=2 border=1 width=500>
+  <tbody>
+  <tr>
+    <TD><font color="#000080"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Paper Due:</span> </font></TD>
+    <TD><font color="#000080"><b><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >November 30, 2008 (Extended Deadline)</span></b></font></TD>
+  </tr>
+  <tr>
+    <TD><font color="#000080"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Author Notification:</span></font></TD>
+    <TD><font color="#000080"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >December 25, 2008</span></font></TD>
+  </tr>
+  <tr>
+    <TD><font color="#000080"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Camera-ready Paper Due:</span></font></TD>
+    <TD><font color="#000080"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >February 15, 2009</span></font></TD>
+  </tr>
+  </tbody>
+</table>
+
+<hr>
+
+<h2><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Co-Chairs</span></h2>
+
+<table cols=2 width=677>
+  <tbody>
+  <tr>
+    <td valign=top><font color="#000080">
+      <span onclick="return false" style="text-decoration:underline; color:blue" href="http://vulcan.ee.iastate.edu/~aluru/home.html"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Srinivas Aluru</span></span> <br>
+      <span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Dept. of Electrical &amp; Computer Engg. and</span> <br>
+      <span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Lawrence H. Baker Center for Bioinformatics</span> <br>
+      <span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &amp; Biological Statistics</span> <br>
+      <span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Iowa State University</span> <br>
+      <span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >3227 Coover Hall</span> <br>
+      <span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Ames, IA 50011, USA</span> <br>
+      <span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Phone: +1.515.294.3539</span><br>
+      <span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Email:</span>
+      <script type="text/javascript">
+      <!-- 
+	          varE=('iastate.edu')
+		         varE=('aluru' + '@' + varE)
+			        document.write('<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:' + varE + '">' + varE + '</span>')
+      //-->
+      </script> 
+      </font>
+    </td>
+    <td valign=top><font color="#000080">
+      <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cc.gatech.edu/~bader"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >David A. Bader</span></span><br>
+      <span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >College of Computing</span> <br>
+      <span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Georgia Institute of Technology</span> <br>
+      <span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Atlanta, GA 30332  USA</span> <br>
+      <span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Phone: +1.404.894.3152</span> <br>
+      <span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Email:</span> 
+      <script type="text/javascript">
+      <!-- 
+	          varE=('cc.gatech.edu')
+		         varE=('bader' + '@' + varE)
+			        document.write('<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:' + varE + '">' + varE + '</span>')
+      //-->
+      </script> 
+      </font>
+     </td>
+  </tr>
+  </tbody>
+</table>
+
+<h2><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Program Chair</span></h2>
+
+<table cols=1 width=677>
+  <tbody>
+  <tr>
+  <td valign=top><font color="#000080">
+  <b><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cis.udel.edu/~taufer"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Michela Taufer</span></span></b><br>
+  <span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Dept. of Computer and Information Sciences</span> <br>
+  <span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >University of Delaware</span> <br>
+  <span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >103 Smith Hall</span> <br>
+  <span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Newark, DE 19716 USA</span>  <br>
+  <span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Phone: +1.302.831.0071</span> <br>
+  <span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Email:</span>
+      <script type="text/javascript">
+      <!-- 
+	          varE=('acm.org')
+		         varE=('taufer' + '@' + varE)
+			        document.write('<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:' + varE + '">' + varE + '</span>')
+      //-->
+      </script> 
+  </font>
+  </td>
+  </tr>
+  </tbody>
+</table>
+
+<h2><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></h2>
+<ul>
+<li><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Dmitry A. Afonnikov, Institute of Cytology and Genetics SB RAS,</span> 
+<br><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Novosibirsk and Novosibirsk State University (Russia)</span>
+<li><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Pratul K. Agarwal, Oak Ridge National Laboratory (USA)</span>
+<li><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Nancy Amato, Texas A&M University (USA)</span>
+<li><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Roger Armen, University of Michigan at Ann Arbor (USA)</span>
+<li><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Georg Fuellen, Ernst-Moritz-Arndt-University Greifswald (Germany)</span>
+<li><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Concettina Guerra, Georgia Tech (USA) and University of Padova (Italy)</span>
+<li><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Ming-Ying Leung, University of Texas at El Paso (USA)</span>
+<li><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Mark Miller, San Diego Supercomputer Center (USA)</span>
+<li><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Aiichiro Nakano, University of South California (USA)</span>
+<li><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Sandeep Patel, University of Delaware (USA)</span>
+<li><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Geppino Pucci, University of Padova (Italy)</span>
+<li><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Jacques Rougemont, EPFL (Switzerland)</span>
+<li><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Alexandros Stamatakis, Ludwig-Maximilians-University Munich (Germany)</span>
+<li><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Bertil Schmidt, Nanyang Technological University (Singapore)</span>
+<li><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Heiko Schroder, RMIT University (Australia)</span>
+<li><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >John Stone, University of Illinois at Urbana-Champaign (USA)</span>
+<li><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Wing-Kin Sung, National University of Singapore (Singapore)</span>
+<li><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Jim Tisdall, DuPont (USA)</span>
+<li><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Chau-Wen Tseng, University of Maryland, College Park (USA)</span>
+</ul>
+
+<p>
+<font color="#000080"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >For up-to-date information about this workshop, please visit</span>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hicomb.org/"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >http://www.hicomb.org/</span></span><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >.</span> <br>
+</font> 
+</p>
+
+<hr>
+
+<h2>
+<span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers for HiCOMB 2009:</span> </h2>
+<ul>
+<li> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hicomb.org/HiCOMB2009/HiCOMB2009-CFP.txt"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >ASCII Format</span></span>
+<li> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hicomb.org/HiCOMB2009/HiCOMB2009-CFP.pdf"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >PDF Format</span></span>
+</ul>
+
+<hr>
+
+<h2>
+<span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Previous meetings</span>
+</h2>
+<ul>
+<li> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hicomb.org/HiCOMB2008/">
+     <span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >7th International Workshop on High Performance Computational Biology (HiCOMB 2008)</span>
+     </span>
+<li> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hicomb.org/HiCOMB2007/">
+     <span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >6th International Workshop on High Performance Computational Biology (HiCOMB 2007)</span>
+     </span>
+<li> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hicomb.org/HiCOMB2006/">
+     <span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >5th International Workshop on High Performance Computational Biology (HiCOMB 2006)</span>
+     </span>
+<li> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hicomb.org/HiCOMB2005/">
+     <span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >4th International Workshop on High Performance Computational Biology (HiCOMB 2005)</span>
+     </span>
+<li> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hicomb.org/HiCOMB2004/">
+     <span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >3rd International Workshop on High Performance Computational Biology (HiCOMB 2004)</span>
+     </span>
+<li> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hicomb.org/HiCOMB2003/">
+     <span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >2nd International Workshop on High Performance Computational Biology (HiCOMB 2003)</span>
+     </span>
+<li> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hicomb.org/HiCOMB2002/">
+     <span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >1st International Workshop on High Performance Computational Biology (HiCOMB 2002)</span>

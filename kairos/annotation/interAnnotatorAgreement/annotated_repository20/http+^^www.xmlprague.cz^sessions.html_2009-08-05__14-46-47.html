@@ -1,0 +1,867 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns:x="http://www.w3.org/1999/xhtml" xmlns="http://www.w3.org/1999/xhtml">
+  <head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/12/annotation/annotated_repository/http+^^www.xmlprague.cz^sessions.html_2009-08-05__14-46-47.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/12/annotation/annotated_repository/http+^^www.xmlprague.cz^sessions.html_2009-08-05__14-46-47.yaml created on Thu Aug 13 13:59:26 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+    <title>XML Prague 2009</title>
+    <link rel="Stylesheet" href="/images/style.css" type="text/css" />
+    <link rel="alternate" type="application/rss+xml" title="XMLPrague 2009" href="http://twitter.com/statuses/user_timeline/15942706.rss" />
+    <meta http-equiv="Content-Type" content="charset=utf-8" />
+    <meta name="description" content="XML Prague is a conference on XML for developers, markup geeks, information managers, and students. In its 4th year, XML Prague focuses on emerging trends in core XML technologies and their application in the real world. XML Prague conference will take place 21-22 March 2009 at Charles University in the beautiful city of Prague, Czech Republic." />
+    <meta name="keywords" content="xml,prague,data model, xslt, xquery, markup, europe" />
+  </head>
+  <body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+    <p class="top">
+      <span onclick="return false" style="text-decoration:underline; color:blue" href="/index.html"><img onmousedown="imd(this)" style="border: 0px;" src="images/xmlprague_355x62.png" width="355" height="62" alt="XMLPrague Logo" /></span>
+      <br /><span style="font-family:trebuchet ms; padding-left: 44px;"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >21. - 22. March 2009</span></span></p>
+    <p class="menu">
+      <span onclick="return false" style="text-decoration:underline; color:blue" href="index.html"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >home</span></span> <span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+	  <span onclick="return false" style="text-decoration:underline; color:blue" href="program.html"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >program</span></span> <span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+          <span onclick="return false" style="text-decoration:underline; color:blue" href="sessions.html"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >sessions</span></span> <span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+          <span onclick="return false" style="text-decoration:underline; color:blue" href="posters.html"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >posters</span></span> <span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+	  <span onclick="return false" style="text-decoration:underline; color:blue" href="register.html"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >registration</span></span> <span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+	  <span onclick="return false" style="text-decoration:underline; color:blue" href="venue-hotels.html"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >venue and hotels</span></span> <span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+          <span onclick="return false" style="text-decoration:underline; color:blue" href="leaflets.html"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >leaflets</span></span> <span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+	  <span onclick="return false" style="text-decoration:underline; color:blue" href="past.html"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >past events</span></span> <span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >|</span>
+	  <span onclick="return false" style="text-decoration:underline; color:blue" href="author-instructions.html"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >instruction for authors</span></span>
+    </p>
+    <div class="main">
+      <div class="sideblockwrap">
+        <div class="sideblock">
+          <p><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Gold Sponsors:</span><br />
+            <span onclick="return false" style="text-decoration:underline; color:blue" target="syntea" href="http://www.syntea.cz/"><img onmousedown="imd(this)" src="images/syntea-logo.png" width="155" height="155" border="0" alt="Syntea" title="Syntea CZ home" /></span>
+          </p>
+          <p><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors:</span><br />
+            <span onclick="return false" style="text-decoration:underline; color:blue" target="oXygen" href="http://www.oxygenxml.com/"><img onmousedown="imd(this)" src="images/oxygen.png" width="155" height="45" border="0" alt="oXygen" title="oXygen XML Editor" /></span>
+            <br />
+            <span onclick="return false" style="text-decoration:underline; color:blue" target="fgeorges" href="http://www.fgeorges.org/"><img onmousedown="imd(this)" src="images/fgeorges.png" border="0" alt="Florent Georges - fgeorges.org" title="Florent Georges - fgeorges.org" /></span><span style="padding-left: 18px"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" > </span></span><span onclick="return false" style="text-decoration:underline; color:blue" target="xcruciate" href="http://www.xcruciate.co.uk/"><img onmousedown="imd(this)" src="images/xcruciate-logo.png" border="0" alt="Xcruciate logo" title="Xcruciate - Realtime XSLT for cross-media social networking" /></span>
+          </p>
+        </div>
+        <p></p>
+        <div class="sideblock">
+          <p><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Main Media Partner:</span><br />
+            <span onclick="return false" style="text-decoration:underline; color:blue" target="root" href="http://www.root.cz/"><img onmousedown="imd(this)" src="images/root-logo.png" width="155" height="45" border="0" alt="Root.cz" title="Root.cz - linux, open source a free software" /></span>
+          </p>
+          <p><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Media Partners:</span><br />
+            <span onclick="return false" style="text-decoration:underline; color:blue" href="http://xmlfr.org/"><img onmousedown="imd(this)" src="images/xmlfr_141x43.png" width="141" height="43" border="0" alt="XMLfr" title="XMLfr" /></span>
+            <br />
+            <span onclick="return false" style="text-decoration:underline; color:blue" target="zdrojak" href="http://zdrojak.root.cz/"><img onmousedown="imd(this)" src="images/zdrojak_logo.png" width="155" height="45" border="0" alt="Zdrojak" title="Zdroják – tvorba webových stránek a aplikací" /></span>
+          </p>
+        </div>
+        <p></p>
+        <div class="sideblock">
+          <p><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Sister Conference:</span><br />
+            <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.balisage.net/" target="balisage"><img onmousedown="imd(this)" src="/images/balisage-logo.png" border="0" alt="Balisage - The Markup Conference" title="Balisage - The Markup Conference" /></span>
+          </p>
+        </div>
+        <p></p>
+        <div class="sideblock">
+          <p><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Partner for Accommodation:</span><br />
+            <span onclick="return false" style="text-decoration:underline; color:blue" href="http://marys.cz"><img onmousedown="imd(this)" src="/images/marys.jpg" border="0" alt="Mary's" title="Mary's" /></span>
+          </p>
+        </div>
+        <p></p>
+        <div class="sideblock">
+          <p><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Video services sponsored by:</span> <br />
+            <span onclick="return false" style="text-decoration:underline; color:blue" target="rivervalley" href="http://www.river-valley.tv"><img onmousedown="imd(this)" src="images/rvt-logo-small.jpg" border="0" alt="River Valley Technologies" title="River Valley Technologies" /></span>
+          </p>
+        </div>
+        <p></p>
+        <div class="sideblock">
+          <p><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Produced by:</span><br />
+	      <span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >XMLPrague.cz &amp;</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://iti.mff.cuni.cz/"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Institute for Theoretical Computer Science</span></span>
+          </p>
+        </div>
+      </div>
+      <div xmlns="" class="field"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Sessions</span></div>
+      <div xmlns="" class="content">
+
+    <table class="container">
+      <tr>
+        <td class="main">
+          <p><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Here are the sessions for XML Prague 2009.</span></p>
+          <ul>
+			<li>
+			  <span onclick="return false" style="text-decoration:underline; color:blue" href="#common_xml_mistakes"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Designing XML/Web Languages: A Review of Common Mistakes</span></span><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >, Robin Berjon</span>
+			</li>
+<li>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="#cool_mobile_apps"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Cool mobile apps with SVG and other Web technologies</span></span><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >, Robin Berjon</span>
+</li>
+			<li>
+			  <span onclick="return false" style="text-decoration:underline; color:blue" href="#xml_editor"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >oXygen XML Editor demo</span></span><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >, George Cristian Bina</span> 
+			</li>
+
+			<li>
+			  <span onclick="return false" style="text-decoration:underline; color:blue" href="#high_performance_xml"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >High-performance XML: theory and practice</span></span><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >, Alex Brown</span> 
+			</li>
+
+			<li>
+			  <span onclick="return false" style="text-decoration:underline; color:blue" href="#exslt"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >A practical introduction to EXSLT 2.0</span></span><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >, Florent Georges</span> 
+			</li>
+
+			<li>
+			  <span onclick="return false" style="text-decoration:underline; color:blue" href="#testing_xslt"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Testing XSLT</span></span><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >, Tony Graham</span> 
+			</li>
+
+			<li>
+			  <span onclick="return false" style="text-decoration:underline; color:blue" href="#introduction_code_lists"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Introduction to Code List Implementation</span></span><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >, G. Ken Holman</span> 
+			</li>
+
+			<li>
+			  <span onclick="return false" style="text-decoration:underline; color:blue" href="#xcruciate"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Imagining, building and using an XSLT virtual machine</span></span><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >, Mark Howe</span> 
+			</li>
+
+			<li>
+			  <span onclick="return false" style="text-decoration:underline; color:blue" href="#xml_schema_1_1"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >XML Schema moves forward</span></span><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >, Michael Kay</span> 
+			</li>
+
+			<li>
+			  <span onclick="return false" style="text-decoration:underline; color:blue" href="#validation_atom_feeds_with_nvdl"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Full validation of Atom feeds containing extensions using NVDL</span></span><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >, Murata Makoto</span> 
+			</li>
+
+			<li>
+			  <span onclick="return false" style="text-decoration:underline; color:blue" href="#advanced_xml_authoring"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Advanced Automated Authoring with XML</span></span><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >, Petr Nálevka</span> 
+			</li>
+
+			<li>
+			  <span onclick="return false" style="text-decoration:underline; color:blue" href="#practical_reuse_xml"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Practical Reuse in XML</span></span><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >, Ari Nordström</span> 
+			</li>
+
+			<li>
+			  <span onclick="return false" style="text-decoration:underline; color:blue" href="#test_xslt_with_xspec"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Testing XSLT with XSpec</span></span><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >, Jeni Tennison</span> 
+			</li>
+
+			<li>
+			  <span onclick="return false" style="text-decoration:underline; color:blue" href="#optimizing_xml_content_with_xproc"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Optimizing XML Content Delivery with XProc</span></span><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >, Vojtěch Toman</span> 
+			</li>
+
+			<li>
+			  <span onclick="return false" style="text-decoration:underline; color:blue" href="#xdefinition"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Xdefinition 2.1</span></span><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >, Václav Trojan</span> 
+			</li>
+
+			<li>
+			  <span onclick="return false" style="text-decoration:underline; color:blue" href="#functx_end_to_end_processing_case_study"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >FunctX: A case study in end-to-end processing of XML</span></span><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >, Priscilla Walmsley</span> 
+			</li>
+
+			<li>
+			  <span onclick="return false" style="text-decoration:underline; color:blue" href="#exploring_xproc"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Exploring XProc</span></span><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >, Norman Walsh</span> 
+			</li>
+          </ul>
+          <p><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" > </span></p>
+ 
+		<!-- talk //-->
+         <p class="head">
+ 			<span onclick="return false" style="text-decoration:underline; color:blue" name="common_xml_mistakes"></span>
+                <b><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Designing XML/Web Languages: A Review of Common Mistakes</span></b>
+            <br />
+            <i><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Robin Berjon</span></i>
+            <br /><span class="affiliation">
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.robineko.com/"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Robineko</span></span>
+                </span>
+              </p>
+        	<p class="abstract"> <span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >The tremendous uptake that XML benefited from a decade ago led to a great many XML vocabularies being defined, notably in the area of Web technology. But unfortunately there was not enough markup experience around to help so many projects avoid pitfalls.</span>
+			</p>
+        	<p class="abstract">
+			<span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >This talk will look at a number of examples of vocabulary design failures in the area of Web languages, and discuss why they are problematic and how to avoid them.</span>			
+    		</p>
+          <p><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" > </span></p>
+
+		<!-- talk //-->
+         <p class="head">
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="cool_mobile_apps"></span>
+            <b><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Cool mobile apps with SVG and other Web technologies</span>
+    		</b>
+            <br />
+            <i><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Robin Berjon</span></i>
+            <br /><span class="affiliation">
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.robineko.com/"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Robineko</span></span>
+                </span>
+              </p>
+        	<p class="abstract"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >The capabilities of mobile devices increase ceaselessly, and on occasion they are even useful. That is the case of Web technologies that have been becoming mature and gradually more important in mobile devices.</span>
+			</p>
+        	<p class="abstract">
+			<span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >This talk will look at the state of current implementations, at where mobile Web technology stands today notably concerning the recent release of SVG Tiny 1.2 and the improvement in support for WICD documents, and will show demos to give an idea of what can be done.</span>
+    		</p>
+          <p><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" > </span></p>
+
+
+		<!-- talk //-->
+         <p class="head">
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="xml_editor"></span>
+            <b><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >oXygen XML Editor demo</span>
+    		</b>
+            <br />
+            <i><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >George Cristian Bina</span></i>
+            <br /><span class="affiliation">
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.oxygenxml.com/"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >oXygenXML</span></span>
+                </span>
+              </p>
+        	<p class="abstract"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >A live demo of oXygen presented by two of the oXygen team members.
+			The demo will cover some of the important XML authoring and development features like:</span>
+			<ul>
+				<li><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >visual authoring (DocBook, DITA, etc.)</span></li>
+				<li><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >schema development</span></li>
+				<li><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >XSLT development and debugging</span></li>
+				<li><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >working with XQuery and XML Databases</span></li>
+			</ul>
+              </p>
+			<p class="abstract">
+			<span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Questions are welcome at any time!</span>
+    		</p>
+          <p><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" > </span></p>
+
+		<!-- talk //-->
+         <p class="head">
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="high_performance_xml"></span>
+            <b><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >High-performance XML: theory and practice</span>
+    		</b>
+            <br />
+            <i><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Alex Brown</span></i>
+            <br /><span class="affiliation">
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.adjb.net/"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >http://www.adjb.net/</span></span>
+                </span>
+              </p>
+        	<p class="abstract"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >At the 2006 Extreme Markup conference in Montreal I presented a paper outlining a method of XML processing based around "frozen streams" which seemed to promise better memory usage and execution time for common XML processing operations.</span>
+			</p>
+			<p class="abstract">
+			<span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >This paper briefly revisits the theory, presents the results of implementing it, enumerates the lessons learned and suggests new ways forward.</span>
+    		</p>
+          <p><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" > </span></p>
+
+		<!-- talk //-->
+         <p class="head">
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="exslt"></span>
+            <b><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >A practical introduction to EXSLT 2.0</span>
+    		</b>
+            <br />
+            <i><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Florent Georges</span></i>
+            <br /><span class="affiliation">
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.fgeorges.org/"><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >fgeorges.org</span></span>
+                </span>
+              </p>
+        	<p class="abstract"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Back eight years ago, XSLT had just been released and yet,
+			missing features began to be missing. A few features were
+			identified as possible extensions to and within the context
+			of the standard recommendation, and were gathered under one
+			single project: EXSLT.</span>
+		</p>
+		<p class="abstract">
+			<span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >EXSLT helped a lot writing XSLT 1.0 stylesheets that are
+			portable across several processors, and showed the way for some
+			features of what was going to become XSLT 2.0.</span>
+		</p>
+		<p class="abstract">
+			<span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Now, XSLT 2.0 is just two years old. And yet, missing features
+			begin to be missing. It is now time for EXSLT 2.0! As EXSLT
+			has been launched soon after XSLT 1.0 was released, it is
+			time to define what EXSLT 2.0 should provide in the next few
+			years.</span>
+		</p>
+		<p class="abstract">
+			<span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >This introduction presents the EXSLT 2.0 initiative, some of its
+			goals, and ideas about useful extensions. It will introduce a
+			proposal of HTTP client extension, and show possible usages by
+			example. Eventually, it will provide a description of the
+			potential extensions landscape and possible applications.</span>
+    		</p>
+          <p><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" > </span></p>
+
+		<!-- talk //-->
+         <p class="head">
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="testing_xslt"></span>
+            <b><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Testing XSLT</span>
+    		</b>
+            <br />
+            <i><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Tony Graham</span></i>
+            <br /><span class="affiliation">
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.menteithconsulting.com/"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Menteith Consulting Limited</span></span>
+                </span>
+              </p>
+        	<p class="abstract"> <span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Creating a working stylesheet may seem like an end in itself, but once it’s written you may want it to run faster or you may not be sure that the output is correct (And if you are sure, how sure are you?).</span>
+			</p>
+			<p class="abstract">
+			<span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Profilers, unit test frameworks, and other tools of conventional programming are similarly available for XSLT but are not widely used. This presentation surveys the available tools for ensuring the quality of your XSLT.</span>
+		</p>
+		<p class="abstract">
+			<span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >There is no one-size-fits-all solution when looking for tools. For example, if you are using Saxon and Ant, then you are looking for a different set of tools than if you are using libXSLT and Makefiles.</span>
+		</p>
+		<p class="abstract">
+			<span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >This presentation covers XSLT-specific tools and techniques. It does not at this point propose to cover general XML tools and techniques such as schema validation or Schematron: they are of course useful, and could be added, but XSLT tools provide plenty to cover in a single timeslot.</span>
+		</p>
+          <p><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" > </span></p>
+
+		<!-- talk //-->
+         <p class="head">
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="introduction_code_lists"></span>
+            <b><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Introduction to Code List Implementation</span>
+    		</b>
+            <br />
+            <i><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >G. Ken Holman</span> </i>
+            <br /><span class="affiliation">
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cranesoftwrights.com/bio/gkholman.htm"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Crane Softwrights Ltd.</span></span>
+                </span>
+              </p>
+        	<p class="abstract"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >"Introduction to Code List Implementation" overviews the use of Genericode and Context/Value Association files for the representation and validation of controlled vocabularies such as code lists and identifier lists for XML documents of any XML vocabulary. The OASIS genericode format http://docs.oasis-open.org/codelist/genericode is used for the representation of values, and the OASIS context/value association using genericode specification http://www.oasis-open.org/committees/document.php?document_id=29990 (a work item of the OASIS Code List Representation Technical Committee http://www.oasis-open.org/committees/codelist/) is used for the data entry or the validation of instances of any XML document model with controlled values.</span>
+    		</p>
+          <p><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" > </span></p>
+
+		<!-- talk //-->
+         <p class="head">
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="xcruciate"></span>
+            <b><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Imagining, building and using an XSLT virtual machine</span>
+    		</b>
+            <br />
+            <i><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Mark Howe</span></i>
+            <br /><span class="affiliation">
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.xcruciate.co.uk/"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Xcruciate</span></span>
+                </span>
+              </p>
+        	<p class="abstract"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >XSLT is the canonical XML vocabulary for transforming XML, but the creators of realtime server applications such as chatrooms and virtual worlds have tended to rely on lower-level technologies such as SAX and DOM for manipulating XML client-server protocols. The goal of the open-source Xcruciate project is to develop a generic server solution based around XSLT, with I/O, data storage and application code in XML.</span>
+			</p>
+			<p class="abstract">
+			<span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Theorists have discussed the extent to which XSLT is Turing-complete, with Dimitre Novatchev's FXSL showing what is possible within a single transformation. The Xcruciate team has taken a less pure and more pragmatic approach, using a LibXSLT-based virtual machine to perform successive transformations on state data and to handle I/O to multiple clients via socket connections.</span>
+		</p>
+		<p class="abstract">
+			<span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >An all-XML server implementation offers a number of advantages compared to bespoke OOP code, notably by enabling snapshots of the entire environment through serialisation. The main challenge has been balancing the conceptual elegance of pure XSLT with the need for rapid throughput and relatively concise application code.</span>
+		</p>
+		<p class="abstract">
+			<span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >The talk will focus on the design decisions made in the course of Xcruciate's development and the challenges encountered during implementation, as well as giving a taste of server application development within an all-XML environment.</span>
+    		</p>
+          <p><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" > </span></p>
+
+		<!-- talk //-->
+         <p class="head">
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="xml_schema_1_1"></span>
+            <b><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >XML Schema moves forward</span>
+    		</b>
+            <br />
+            <i><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Michael Kay</span></i>
+            <br /><span class="affiliation">
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.saxonica.com/"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Saxonica</span></span>
+                </span>
+              </p>
+        	<p class="abstract">
+			<span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >The XML Schema (XSD) specification from W3C is a paradox: it is one of the
+			most heavily criticised specifications to come out of the organisation, but
+			at the same time it has been widely adopted and implemented, and it can be
+			said to have met all its design objectives.</span></p>
+			<p class="abstract">
+			<span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >For some time the responsible working group has been developing a new
+			version, XSD 1.1, which is starting to get close to the finish line. Many of
+			the difficulties with the specification (such as its immense complexity)
+			will still be there, but some of the criticisms, notably those concerned
+			with the limited functionality of the spec, are met head on with some
+			powerful new features. This talk will give a quick overview of what's new,
+			while concentrating in particular on the way in which Assertions are likely
+			to change the way in which XSD is used. Assertions, borrowed from
+			Schematron, supplement the ability to define constraints using grammar and
+			datatypes by a general predicate mechanism based on XPath. Already
+			implemented in Saxon, they offer far more than the obvious ability to define
+			boolean constraints: the talk will explain how they can be used as a
+			powerful mechanism for tailoring and specializing schemas for use in
+			different environments within an industry community.</span></p>
+			<p class="abstract">
+			<span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >The speaker, Dr Michael Kay, is founder of Saxonica Limited which develops
+			the popular Saxon XSLT, XQuery, and XML Schema engine. He is a member of the
+			W3C working groups for all three languages, and author of XSLT 2.0
+			Programmer's Reference, the definitive Wrox guide to the language, recently
+			republished in a fourth edition.</span>
+    		</p>
+          <p><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" > </span></p>
+
+		<!-- talk //-->
+         <p class="head">
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="validation_atom_feeds_with_nvdl"></span>
+            <b><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Full validation of Atom feeds containing extensions using NVDL</span>
+    		</b>
+            <br />
+            <i><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Murata Makoto</span></i>
+            <br /><span class="affiliation">
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="#"></span>
+                </span>
+              </p>
+        	<p class="abstract"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >The RELAX NG schema in RFC 4287 (The Atom Syndication Format) does not
+			provide full validation of Atom feeds containing extensions. Rather,
+			this schema skips extension elements and attributes, even when
+			extension elements further contain Atom feeds or entries. This
+			document shows that ISO/IEC 19757-4 Namespace-based Validation
+			Dispatching Language (NVDL for short) allows full validation of atom
+			feeds containing extensions. NVDL decomposes atom feeds containing
+			extensions into (1) extension-free atom and (2) extensions so that (1)
+			and (2) are validated separately. As an example, an NVDL script for
+			Google Calendar is presented.</span>
+    		</p>
+          <p><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" > </span></p>
+
+		<!-- talk //-->
+         <p class="head">
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="advanced_xml_authoring"></span>
+            <b><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Advanced Automated Authoring with XML</span>
+    		</b>
+            <br />
+            <i><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Petr Nálevka</span></i>
+            <br /><span class="affiliation">
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="#"></span>
+                </span>
+              </p>
+        	<p class="abstract"><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >This article proposes a set of powerful XML technologies (e. g. DocBook, SVG...) to automate authoring of large, detailed and highly visual documentation which would be difficult and error prone to reproduce manually. The author further proposes best-practices for XML authoring and introduces a simple yet powerful framework which supports tasks typically related to document publishing and integration of information from various sources.</span></p>
+			<p class="abstract">
+			<span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Rather than building a complex theoretical background this article focuses on being very practical. It demonstrates the use of various technologies on a case study taken from the networking industry.</span>
+    		</p>
+          <p><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" > </span></p>
+
+		<!-- talk //-->
+         <p class="head">
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="practical_reuse_xml"></span>
+            <b><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Practical Reuse in XML</span>
+    		</b>
+            <br />
+            <i><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Ari Nordström</span></i>
+            <br /><span class="affiliation">
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="#"></span>
+                </span>
+              </p>
+        	<p class="abstract"><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Reuse is often the key selling point for XML authoring systems. This presentation examines reuse from various points of view, from the author's to the developer's, offering practical strategies for reuse of content. Markup design is discussed, as are necessary prerequisites for making such a system work. What should be reused, and when? How do you uniquely identify a resource, and what, exactly, is a resource anyway? How do you design a user interface that helps the author instead of hindering her? From a practical point of view, how do you design a publishing process that works?</span></p>
+			<p class="abstract">
+			<span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >A demonstration of such a system illustrates the points made.</span>
+    		</p>
+          <p><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" > </span></p>
+
+		<!-- talk //-->
+         <p class="head">
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="test_xslt_with_xspec"></span>
+            <b><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Test XSLT with XSpec</span>
+    		</b>
+            <br />
+            <i><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Jeni Tennison</span></i>
+            <br /><span class="affiliation">
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.jenitennison.com"><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Jeni Tennison Consulting</span></span>
+                </span>
+              </p>
+        	<p class="abstract"><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Test-driven development is one of the corner stones of Agile development, providing quick feedback about mistakes in code and freeing developers to refactor safe in the knowledge that any errors they introduce will be caught by the tests. There have been several test harnesses developed for XSLT, of which XSpec is one of the latest. XSpec draws inspiration from the behaviour-driven development framework for Ruby, called RSpec, and focuses on helping developers express the desired behaviour of their XSLT code. This talk will discuss the XSpec language, its implementation in XSLT 2.0, and experience with using XSpec on complex, large-scale projects.</span>
+    		</p>
+          <p><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" > </span></p>
+
+		<!-- talk //-->
+         <p class="head">
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="optimizing_xml_content_with_xproc"></span>
+            <b><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Optimizing XML Content Delivery with XProc</span>
+    		</b>
+            <br />
+            <i><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Vojtěch Toman</span></i>
+            <br /><span class="affiliation">
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.emc.com"><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >EMC Corporation</span></span>
+                </span>
+              </p>
+        	<p class="abstract"><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >XProc, or the XML Pipeline Language, has every potential to become one of the most useful new XML technologies around. The language has recently become a W3C Candidate Recommendation and is gathering growing interest in the XML community, both from the users and implementers.</span></p>
+			<p class="abstract">
+			<span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Following the progress of the specification, and the evolution of the language to its present form, XProc has been successfully deployed in a dynamic content delivery platform, where it has quickly proved its strengths and established itself as the primary technology for XML data manipulations.</span></p>
+			<p class="abstract">
+			<span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >In this paper, we will briefly discuss the design principles behind XProc implementation and then proceed by illustrating how XProc can be leveraged in the XML content delivery context. We will present a number of use cases and show some XProc pipelines that can be used for implementing the relevant functionality. For each use case, we will start by formulating a relatively simple introductory scenario (usually with equally simple solution) to get the reader familiar with the problem – and to show that even the simplest XProc pipelines can provide us with enough power for our needs. After that, we move on to a more challenging scenario, which will require us to use more complex XProc pipelines.</span>
+    		</p>
+          <p><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" > </span></p>
+
+		<!-- talk //-->
+         <p class="head">
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="xdefinition"></span>
+            <b><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Xdefinition 2.1</span>
+    		</b>
+            <br />
+            <i><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Václav Trojan</span></i>
+            <br /><span class="affiliation">
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.syntea.cz"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Syntea</span></span>
+                </span>
+              </p>
+				<p class="abstract"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >The paper describes Xdefinition 2.1 as an integral instrument for the design and development of projects with XML objects. In our development of Xdefinitions we concentrated on their application in the process of XML documents throughout the life cycle of the information system creation. This cycle typically includes discussions and negotiations with partners, analysts and implementators. We emphasized comprehensibility for all participants of the individual stages of IS formation as well as the binding character. The description of XML objects structures by means of Xdefinitions is easy to understand not only for informatics experts but also for a wider spectrum of participants who inevitably take part in the project implementation. By the binding character we mean the usability of the description for machine processing (description of data structures includes also processing code). Compared to the previous versions the Xdefinitions 2.1 thus allow also to define links of the objects to different situations in the course of their processing.</span></p>
+          <p><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" > </span></p>
+
+		<!-- talk //-->
+         <p class="head">
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="functx_end_to_end_processing_case_study"></span>
+            <b><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >FunctX: A case study in end-to-end processing of XML</span>
+    		</b>
+            <br />
+            <i><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Priscilla Walmsley</span></i>
+            <br /><span class="affiliation">
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.datypic.com"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Datypic</span></span>
+                </span>
+              </p>
+        	<p class="abstract"><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >The FunctX XQuery/XSLT 2.0 function library is a set of reusable functions for XQuery 1.0 and XSLT 2.0. The project itself is an open source application and framework for developers to create function libraries. This talk will present an overview of FunctX from the perspectives of using the library and as an example of how one would build reusable XSLT and XQuery modules.</span>
+    		</p>
+          <p><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" > </span></p>
+
+		<!-- talk //-->
+         <p class="head">
+            <span onclick="return false" style="text-decoration:underline; color:blue" name="exploring_xproc"></span>
+            <b><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Exploring XProc</span>
+    		</b>
+            <br />
+            <i><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Norman Walsh</span></i>
+            <br /><span class="affiliation">
+                  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.marklogic.com"><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >MarkLogic</span></span>
+                </span>
+              </p>
+        	<p class="abstract"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >This presentation will explore the current state of XProc: An XML Pipeline Language through a combination of slides and live demos. Particular attention will be paid to demonstrating pipelines that are, or could be, useful to solve real world problems.</span></p>
+          <p><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" > </span></p>
+
+        </td>
+      </tr>
+    </table>
+
+</div>
+    </div>
+    <p class="footer">
+	  <span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >©  2005-2009 XMLPrague.cz &amp; Institute for Theoretical Computer Science</span>

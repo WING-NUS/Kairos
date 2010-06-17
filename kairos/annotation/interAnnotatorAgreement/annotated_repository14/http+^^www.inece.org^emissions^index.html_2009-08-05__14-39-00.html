@@ -1,0 +1,671 @@
+<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/6/annotation/annotated_repository/http+^^www.inece.org^emissions^index.html_2009-08-05__14-39-00.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/6/annotation/annotated_repository/http+^^www.inece.org^emissions^index.html_2009-08-05__14-39-00.yaml created on Thu Aug 13 13:56:39 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<title>INECE - Emissions Trading Conference</title>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+<link rel="stylesheet" href="../inece.css" type="text/css">
+<style type="text/css">
+<!--
+.style31 {
+	font-family: "Trebuchet MS";
+	font-weight: bold;
+	color: #FFFFFF;
+}
+-->
+</style>
+</head>
+<style type="text/css">
+<!--
+a:link { font-style: normal; color: #0000CC; text-decoration: none }
+a:visited { font-style: normal ; color: #0000CC; text-decoration: none }
+a:active { font-style: normal ; color: #042F23; text-decoration: underline }
+a:hover { font-style: normal ; color: #042F23; text-decoration: underline }
+.style6 {font-style: italic}
+.style30 {font-size: 14px}
+-->
+</style>
+<body onload="on_load()" onkeyup="on_key_up(event)" bgcolor="#FFFFFF" text="0000033" leftmargin="0" topmargin="0" marginwidth="0" marginheight="0"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<table cellspacing=0 cellpadding=0 width="100%" border=0 align="center">
+  <tbody> 
+  <tr valign=center align=middle> 
+    <td background="../images/topBanbkg2.gif" colspan=8 height=78> 
+      <div align="center"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.inece.org"><img onmousedown="imd(this)" 
+      height=80 alt="INECE Home" width=597 
+      border=0 src="../images/TopBanner2.gif"></span></div>
+    </td>
+  </tr>
+  </tbody> 
+</table>
+<table width="100%" border="0" cellspacing="0" cellpadding="0" height="66">
+  <tr valign="top"> 
+    <td bgcolor="000066"> 
+      <table width="85" border="0" cellspacing="2" cellpadding="4">
+        <tr> 
+          <td width="85"> 
+            <div align="right"><font color="EEEEEE" face="Arial, Helvetica, sans-serif" size="3"><b><span onclick="return false" style="text-decoration:underline; color:blue" href="../index.html"><font color="FFFFFF"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></font></span></b></font></div>
+          </td>
+        </tr>
+        <tr> 
+          <td width="85"> 
+            <div align="right"><font color="EEEEEE" face="Arial, Helvetica, sans-serif" size="3"><b><b><span onclick="return false" style="text-decoration:underline; color:blue" href="../overview.html"><font color="FFFFFF"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Overview</span></font></span></b></b></font></div>
+          </td>
+        </tr>
+        <tr> 
+          <td width="85"> 
+            <div align="right"><font color="EEEEEE" face="Arial, Helvetica, sans-serif" size="3"><b><span onclick="return false" style="text-decoration:underline; color:blue" href="../forums.html"><font color="FFFFFF"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Forums</span></font></span></b></font></div>
+          </td>
+        </tr>
+        <tr> 
+          <td width="85"> 
+            <div align="right"><font color="EEEEEE" face="Arial, Helvetica, sans-serif" size="3"><b><span onclick="return false" style="text-decoration:underline; color:blue" href="../library2.html"><font color="FFFFFF"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Libraries</span></font></span></b></font></div>
+          </td>
+        </tr>
+        <tr> 
+          <td width="85"> 
+            <div align="right"><font color="EEEEEE" face="Arial, Helvetica, sans-serif" size="3"><b><span onclick="return false" style="text-decoration:underline; color:blue" href="../regions.html"><font color="FFFFFF"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Regions</span></font></span></b></font></div>
+          </td>
+        </tr>
+        <tr> 
+          <td width="85"> 
+            <div align="right"><font color="EEEEEE" face="Arial, Helvetica, sans-serif" size="3"><b><span onclick="return false" style="text-decoration:underline; color:blue" href="../news.html"><font color="FFFFFF"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >News</span></font></span></b></font></div>
+          </td>
+        </tr>
+        <tr> 
+          <td width="85"> 
+            <div align="right"><font color="EEEEEE" face="Arial, Helvetica, sans-serif" size="3"><b><span onclick="return false" style="text-decoration:underline; color:blue" href="../calendar.html"><font color="FFFFFF"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Calendar</span></font></span></b></font></div>
+          </td>
+        </tr>
+      </table>
+      <p align="right"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+      <p><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+    </td>
+    <td width="100%"> 
+      <table width="100%" border="0" cellpadding="4" cellspacing="0" class="brdcrmb">
+        <tr> 
+          <td><span onclick="return false" style="text-decoration:underline; color:blue" href="../index.html"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span> <span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >&gt;</span> <span class="subsitetext"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Improving Efficiency, Effectiveness, &amp; Harmonization of Compliance Activities in Emissions Trading</span></span></td>
+        </tr>
+      </table>
+      <table width="100%"  border="0" cellspacing="0" cellpadding="4">
+        <tr>
+          <td width="78%">
+<table width="98%"  border="4" align="center" cellpadding="8" cellspacing="4" bordercolor="#000066">
+            <tr>
+              <td>                  <p align="center" class="subsitered3"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Improving Efficiency, Effectiveness, &amp; International Harmonization of</span> <br>
+                <span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Compliance Activities in Emissions Trading</span> </p>
+                <p align="center" class="subsiteblue3"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >8-9 March 2007, Dublin, Ireland</span> </p>
+                <table width="100%"  border="0" cellspacing="2" cellpadding="0">
+                  <tr>
+                    <td width="33%"><div align="right"><span class="subsitetext"><img onmousedown="imd(this)" src="../images/logo_enviroagency.gif" alt="Environment Agency" width="182" height="60"></span></div></td>
+                    <td width="33%"><div align="center"><span class="subsitetext"><img onmousedown="imd(this)" src="images/logo_epaie.gif" alt="Irish Environmental Protection Agency" width="100" height="70"></span></div></td>
+                    <td width="33%"><div align="left"><span class="subsitetext"><img onmousedown="imd(this)" src="images/logo_deptehlg.gif" alt="Ireland&rsquo;s Department of Environment, Heritage, and Local Government" width="150" height="76" hspace="5"><br>
+                    </span></div></td>
+                  </tr>
+                  <tr>
+                    <td width="33%"><div align="center"><span class="subsitetext"><img onmousedown="imd(this)" src="../images/logolink6b.jpg" alt="INECE" width="140" height="30"></span></div></td>
+                    <td width="33%"><div align="center"><span class="subsitetext"><span onclick="return false" style="text-decoration:underline; color:blue" target=_blank href="http://www.epa.gov/"></span><span onclick="return false" style="text-decoration:underline; color:blue" target=_blank href="http://www.epa.gov/"><img onmousedown="imd(this)" 
+            height=74 src="../images/epaseal.gif" width=86 align=absMiddle 
+            border=0 alt="US EPA logo"></span></span></div></td>
+                    <td width="33%"><div align="center"><span class="subsitetext"><img onmousedown="imd(this)" src="../images/vromlogoNew.gif" alt="VROM" width="200" height="30"></span></div></td>
+                  </tr>
+                </table>                
+                <p align="justify" class="subsitetext"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >The</span> <em><strong><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Improving Efficiency, Effectiveness, &amp; International Harmonization of 
+Compliance Activities in Emissions Trading</span> </strong></em><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >workshop focused on discussing practical issues needed for different emissions trading systems to cooperate.</span>                 
+                <p align="justify" class="subsitetext"><strong class="subsitehead5"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Proceedings Now Available:</span></strong> <span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >The full Proceedings of the</span> <strong><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/WorkshopReport_final.pdf"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Improving Efficiency, Effectiveness, &amp; International Harmonization of Compliance Activities in Emissions Trading</span> </span></strong><img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="pdf icon" width="16" height="16"> <span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >workshop can be downloaded here.</span>
+                <div align="justify">
+                  <table width="100%"  border="1" cellpadding="0" cellspacing="0" bordercolor="#356734" class="tablespace">
+                    <tr>
+                      <td bgcolor="#356734"><div align="center" class="style31"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Agenda,  Presentations, &amp; Background Documents</span> </div></td>
+                    </tr>
+                    <tr>
+                      <td>                        <table width="98%"  border="0" align="center" cellpadding="3" cellspacing="0" class="subsitetext">
+                          <tr class="topictable">
+                            <td valign="top" class="topictable"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td class="topictable"><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/agenda_12march07.pdf"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Final Agenda</span> </span><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >(12 March 2007)</span> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"></td>
+                          </tr>
+                          <tr>
+                            <td colspan="2" valign="top" class="subsitehead5"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Opening Keynote Address</span></td>
+                          </tr>
+                          <tr>
+                            <td valign="top" class="topictable"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td valign="top" class="topictable"><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/session01_kelly.pdf"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Emissions Trading: Ensuring Compliance and Environmental Integrity in Climate Markets</span></span> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"><br>
+                              <em><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Dr. Mary Kelly, Director General, Ireland's Environmental Protection Agency</span> </em></td>
+                          </tr>
+                          <tr>
+                            <td colspan="2" valign="top" class="topictable"><div align="left" class="subsitehead5">
+                              <div align="left"><strong><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Panel 1: 
+      
+
+      Applying Lessons Learned from the Financial Community to the Carbon Markets Regulators</span>
+      
+                            </strong></div>
+                            </div></td>
+                            </tr>
+                          <tr>
+                            <td valign="top"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/session02_gortemaker.pdf"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Building Trust in Corporate Reporting: Improving the compliance &amp; enforcement of
+                              emissions reporting by drawing parallels</span></span> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"><br>                              
+                              <em><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Hans Gortemaker, 
+
+
+Erasmus University Rotterdam</span></em></td>
+                          </tr>
+                          <tr>
+                            <td valign="top"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/session02_smale.pdf"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Institutions, Investors, 
+                              and 
+                              Consumers</span></span> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"><br>
+                              <em><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Robin Smale, 
+
+
+VividEconomics</span></em></td>
+                          </tr>
+                          <tr>
+                            <td valign="top" class="topictable"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td class="topictable"><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/session02_wang.pdf"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Project Based Carbon Market 
+                              Lessons</span></span> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"><br>
+                              <em><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Xueman Wang, 
+
+
+World Bank Carbon Finance Unit</span></em></td>
+                          </tr>
+                          <tr>
+                            <td colspan="2" valign="top" class="topictable"><p align="left" class="subsitehead5"><strong> <span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Special Topic Discussion</span></strong></p></td>
+                            </tr>
+                          <tr>
+                            <td valign="top" class="topictable"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td class="topictable"><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/session03_kruger.pdf"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Update on U.S. Climate Legislation</span></span> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"><br>
+                              <em><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Joe Kruger, National Commission on Energy Policy</span> </em></td>
+                          </tr>
+                          <tr>
+                            <td colspan="2" valign="top" class="topictable"><p align="left"><strong> <span class="subsitehead5"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Plenary Panel 2:</span></span></strong> <span class="subsitehead5"><strong><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Critical Issues, Practical Aspects and Minimum Compliance Issues Needed to Allow Different Emission Trading Systems to Cooperate</span> </strong></span></p></td>
+                            </tr>
+                          <tr>
+                            <td valign="top"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/session04_broekhoff.pdf"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Linking Carbon Offset Markets</span></span> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"><br> 
+                              <em><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Derik Broekhoff, World Resources Institute</span> </em></td>
+                          </tr>
+                          <tr>
+                            <td valign="top"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/session04_duggan.pdf"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Practical issues for linking &ndash; an EU Perspective</span></span> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"><br> 
+                              <em><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Jill Duggan, DEFRA</span> </em></td>
+                          </tr>
+                          <tr>
+                            <td valign="top"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/session04_litz.pdf"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Emerging U.S. Mandatory Carbon Markets: Potential for Cooperation</span></span> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"><br> 
+                              <em><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Franz Litz, New York, Regional Greenhouse Gas Initiative</span> </em></td>
+                          </tr>
+                          <tr>
+                            <td valign="top" class="topictable"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td class="topictable"><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/session04_mcmahon.pdf"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Linking: Critical Issues &amp; Practical Aspects</span></span> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"><br> 
+                              <em><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Michael McMahon, BP</span> </em></td>
+                          </tr>
+                          <tr class="subsitehead5">
+                            <td colspan="2" valign="top" class="topictable"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Technical Working Groups on Best Practices</span></td>
+                          </tr>
+                          <tr>
+                            <td valign="top"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td valign="top"><p:colorscheme
+ colors="#000000,#FFFFFF,#808080,#FFFF00,#00CC99,#3333CC,#CCCCFF,#B2B2B2"/>  <span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/session05_wang.pdf"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Emissions Trading and the Compliance Regime under the Kyoto Protocol</span></span><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >&#13;</span><img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"><br>
+                              <em><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Xueman Wang, World Bank Carbon Finance Unit</span></em>                              <div style='text-align:center;mso-line-spacing:"100 50 0"'></div></td>
+                          </tr>
+                          <tr>
+                            <td valign="top" class="topictable"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td valign="top"  class="topictable"><p:colorscheme
+ colors="#FFFFFF,#000000,#808080,#000000,#BBE0E3,#333399,#009999,#99CC00"/> <span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/session05_boileau.pdf"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >The Benefits for Emission Trading of Using Voluntary, Consensus-based Standards</span></span> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"><br>
+                            <em><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Pierre Boileau, Canadian Standards Association</span></em></td></tr>
+                          <tr class="subsitehead5">
+                            <td colspan="2" valign="top" class="topictable"><p align="left"> <span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Address: Laying the Foundation for Trading Systems to Cooperate</span></p></td>
+                          </tr>
+                          <tr>
+                            <td valign="top" class="topictable"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td valign="top" class="topictable"><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/session09_ellerman.pdf"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Where Are We Headed?</span> </span><img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"><br>
+                              <em><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Denny Ellerman, Massachusetts Institute of Technology</span> </em></td>
+                          </tr>
+                          <tr>
+                            <td colspan="2" valign="top" class="topictable"><p align="left"><strong> <span class="subsitehead5"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Plenary Panel 3:</span></span></strong> <span class="subsitehead5"><strong><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Integration of Compliance Mechanisms in CDM and JI Projects, and Other Markets</span></strong></span></p></td>
+                            </tr>
+                          <tr>
+                            <td valign="top" class="topictable"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td class="topictable"><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/session10_shults.pdf"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Certification of Attributes: Advancing Integration of Carbon Markets</span></span> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"><br>
+                               
+                              <span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Bob Shults, APX Inc.</span> </td>
+                          </tr>
+                          <tr>
+                            <td colspan="2" valign="top" class="topictable"><div align="left"><strong class="subsitehead5"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Background Papers</span> </strong></div></td>
+                            </tr>
+                          <tr class="topictable">
+                            <td valign="top"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.pwc.com/extweb/pwcpublications.nsf/docid/8DF4237F6B2F7FCF8525728300503B70" target="_blank"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Building Trust in Emissions Trading: Global Trends in Emissions Trading Schemes</span></span><br>
+                              <em><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >PricewaterhouseCoopers</span> </em></td>
+                          </tr>
+                          <tr class="topictable">
+                            <td width="4%" valign="top"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td width="96%"><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/jennische.pdf"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Swedish Experiences with Non-compliance Response</span></span> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"><br>
+                              <em><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Helena Rudin and Ulla Jennische</span></em></td>
+                          </tr>
+                          <tr class="topictable">
+                            <td valign="top"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/ChangLeentvaar.pdf"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Enforcement Improvement on Transboundary Water Management Using SEEA-W and Tradeable Permit Systems</span></span> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"><br>
+                              <em><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Chiung-Ting Chang and Jan Leentvaar</span></em></td>
+                          </tr>
+                          <tr class="topictable">
+                            <td valign="top"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/schakenbach.pdf"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Fundamentals of Successful Monitoring, Reporting, and Verification under a Cap-and-Trade Program</span></span> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"><br>
+                              <em><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >John Schakenbach, Robert Vollaro, and Reynaldo Forte</span></em></td>
+                          </tr>
+                          <tr class="topictable">
+                            <td valign="top"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td><p><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/Banea.doc"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >The Status Of Implementation Of Greenhouse Gas Emission Trading In Romania</span></span><em> <img onmousedown="imd(this)" src="../images/icon_doc.gif" alt="MS Word Document" width="12" height="12"><br>
+        <span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Adrian Banea</span> </em></p></td>
+                          </tr>
+                          <tr class="topictable">
+                            <td valign="top"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td><p> <span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/Boileau.doc"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >A Comparison of the Requirements and Guidance of the CDM/JI with Those of the ISO 14064 Standard</span></span> <em><img onmousedown="imd(this)" src="../images/icon_doc.gif" alt="MS Word Document" width="12" height="12"></em> <br>
+                                  <em><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Pierre Boileau</span> </em></p></td>
+                          </tr>
+                          <tr class="topictable">
+                            <td valign="top"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/Broekhoff.pdf"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Linking Markets for GHG Reductions: Can it be Done?</span></span> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"> <br>
+                              <i><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Derik Broekhoff</span></i></td>
+                          </tr>
+                          <tr>
+                            <td valign="top"><div align="center"><img onmousedown="imd(this)" src="../newsletter/images/button.gif" width="8" height="7" vspace="5"></div></td>
+                            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="dublin/Ellerman.pdf"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Where Are We Headed?</span></span> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="PDF icon" width="12" height="12"><br>
+                                <i><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >A. Denny Ellerman</span></i></td>
+                          </tr>
+                        </table></td>
+                    </tr>
+                  </table>
+                </div>                <p align="justify" class="subsitetext">                
+                <p align="justify" class="subsitetext"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >The workshop was hosted by INECE, in cooperation with the Ireland Environmental Protection Agency, the Netherlands&rsquo; Ministry for Housing, Spatial Planning and the Environment, the United States Environmental Protection Agency, the Environment Agency for England and Wales, and Ireland&rsquo;s Department of Environment, Heritage, and Local Government.</span></p>
+                <p align="center" class="subsitetext"><em><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Please contact the INECE Secretariat at</span> </em><span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:inece@inece.org"><em><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >inece@inece.org</span></em></span><em> <span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >with any questions.</span><br>
+                </em></p></td>
+            </tr>
+          </table>
+            <p align="center"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+          </td>
+          <td width="22%" valign="top">
+<table width="100%"  border="1" align="center" cellpadding="0" cellspacing="0" bordercolor="#000066" class="bdtext">
+            <tr>
+              <td bgcolor="#000066" ><div align="center" class="subsitehead2 style30"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Previous Meetings</span> </div></td>
+            </tr>
+            <tr>
+              <td><div align="center">
+                <table width="100%"  border="0" cellpadding="2" cellspacing="2" class="subsitetext">
+                  <tr>
+                    <td class="topictable"><span onclick="return false" style="text-decoration:underline; color:blue" href="IETApresentation.pdf"><strong><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >6th IETA Forum on the State of the Greenhouse Gas Market</span></strong></span> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="pdf icon " width="16" height="16"><br>
+                      <em class="smallverdana"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >6-8 December 2006, Berlin&nbsp;</span></em></td>
+                  </tr>
+                  <tr>
+                    <td class="topictable"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="itworkshops.html"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >One Step Further Towards Compliance</span></span><span class="style8"><br>
+                    </span></strong><span class="smallverdana"><em><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >29 May 2006, Brussels</span></em></span><em> </em></td>
+                  </tr>
+                  <tr>
+                    <td class="topictable"><span class="style6"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="itworkshops.html#it"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >IT Platform for Consistent, Transparent, and Efficient Monitoring, Reporting, and Verification</span></span><br>
+                    </strong></span><span class="smallverdana"><em><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >24 February 2006, Brussels</span> </em></span></td>
+                  </tr>
+                  <tr>
+                    <td class="topictable"><strong><span onclick="return false" style="text-decoration:underline; color:blue" href="confidence.html"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Confidence Through Compliance in Emissions Trading Markets</span></span></strong><br>
+                      <span class="smallverdana"><em><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >17-18 November 2005, Washington, DC</span> </em></span></td>
+                  </tr>
+                  <tr>
+                    <td class="topictable"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.inece.org/conference/7/vol2/42_Wkshop3E.pdf"><strong><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Enforcement of Emissions Trading Programs</span></strong></span><em> <img onmousedown="imd(this)" src="../images/icon_pdf.gif" alt="pdf icon" width="13" height="13"><br>
+                        <span class="smallverdana"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >14 April 2005, Marrakech, Morocco</span></span></em></td>
+                  </tr>
+                  <tr>
+                    <td><span onclick="return false" style="text-decoration:underline; color:blue" href="workshop.html"><strong><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Int'l Conference on Compliance and Enforcement of Trading Schemes in Environmental Protection</span></strong></span><br>
+                      <em class="smallverdana"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >16-18 March 2004, London, England</span>

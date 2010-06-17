@@ -1,0 +1,631 @@
+<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.graphicshardware.org^program.html_2009-08-05__14-36-20.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.graphicshardware.org^program.html_2009-08-05__14-36-20.yaml created on Wed Aug 05 17:31:56 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+<meta name="description" content="2008 Graphics Hardware Workshop  Sarajevo, Bosnia-Herzegovina June 20-21">
+<meta name="keywords" content="graphics, hardware, graphics hardware, SIGGRAPH">
+<title>Graphics Hardware 2008</title>
+<link href="styles.css" rel="stylesheet" type="text/css" />
+<SCRIPT LANGUAGE="JavaScript">
+function setVariables() {
+object="document.getElementById('menu')";
+sD=".style";
+v=".top=";
+if (navigator.appName == "Microsoft Internet Explorer") {
+y="document.body.scrollTop";
+}
+else {
+y="window.pageYOffset";
+   }
+}
+function checkLocation() {
+yy=eval(y);
+eval(object+sD+v+yy);
+setTimeout("checkLocation()",10);
+}
+</script>
+<script type="text/JavaScript">
+<!--
+function MM_preloadImages() { //v3.0
+  var d=document; if(d.images){ if(!d.MM_p) d.MM_p=new Array();
+    var i,j=d.MM_p.length,a=MM_preloadImages.arguments; for(i=0; i<a.length; i++)
+    if (a[i].indexOf("#")!=0){ d.MM_p[j]=new Image; d.MM_p[j++].src=a[i];}}
+}
+
+function MM_swapImgRestore() { //v3.0
+  var i,x,a=document.MM_sr; for(i=0;a&&i<a.length&&(x=a[i])&&x.oSrc;i++) x.src=x.oSrc;
+}
+
+function MM_findObj(n, d) { //v4.01
+  var p,i,x;  if(!d) d=document; if((p=n.indexOf("?"))>0&&parent.frames.length) {
+    d=parent.frames[n.substring(p+1)].document; n=n.substring(0,p);}
+  if(!(x=d[n])&&d.all) x=d.all[n]; for (i=0;!x&&i<d.forms.length;i++) x=d.forms[i][n];
+  for(i=0;!x&&d.layers&&i<d.layers.length;i++) x=MM_findObj(n,d.layers[i].document);
+  if(!x && d.getElementById) x=d.getElementById(n); return x;
+}
+
+function MM_swapImage() { //v3.0
+  var i,j=0,x,a=MM_swapImage.arguments; document.MM_sr=new Array; for(i=0;i<(a.length-2);i+=3)
+   if ((x=MM_findObj(a[i]))!=null){document.MM_sr[j++]=x; if(!x.oSrc) x.oSrc=x.src; x.src=a[i+2];}
+}
+//-->
+</script>
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)" heighht="100.01%" onLoad="setVariables();checkLocation();MM_preloadImages('img/logo_o.gif')"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<center>
+  <table width="784" border="0" align="center" cellpadding="0" cellspacing="0" bgcolor="333333">
+    <tr>
+      <td colspan="3" align="left"><img onmousedown="imd(this)" src="img/citybanner2.jpg" width="784" height="38"></td>
+    </tr>
+    <tr>
+      <td colspan="3" align="left" valign="top" bgcolor="#FFCC00"><img onmousedown="imd(this)" src="img/spacer.gif" width="10" height="1" align="top"></td>
+    </tr>
+    <tr>
+      <td rowspan="2" align="left" valign="top"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html"></span><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html"><img onmousedown="imd(this)" src="img/logo2.gif" alt="Graphics Hardware Home Page" name="logo" width="194" height="157" border="0" id="logo" onMouseOver="MM_swapImage('logo','','img/logo_o.gif',1)" onMouseOut="MM_swapImgRestore()"></span></td>
+      <td align="left" valign="top"><span class="mainmenu"><img onmousedown="imd(this)" src="img/spacer.gif" width="88" height="20"><img onmousedown="imd(this)" src="img/name.gif" width="497" height="28"></span></td>
+      <td rowspan="2" align="left" valign="top"><img onmousedown="imd(this)" src="img/spacer.gif" width="5" height="1"></td>
+    </tr>
+    <tr>
+      <td align="right" valign="top"><span onclick="return false" style="text-decoration:underline; color:blue" href="cfp.html" class="mainmenu" ><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >call&nbsp;for&nbsp;participation/</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="registration.html" class="mainmenu"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >registration/</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="submissions.html" class="mainmenu"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >submissions/</span></span><br>
+        <span onclick="return false" style="text-decoration:underline; color:blue" href="venue.html" class="mainmenu"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >venue/</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="program.html" class="mainmenu_wht"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >program+presentations/</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="accommodations.html" class="mainmenu"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >accommodations/</span></span><br>
+        <span onclick="return false" style="text-decoration:underline; color:blue" href="support.html" class="mainmenu"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >supporting&nbsp;us/</span></span> <span onclick="return false" style="text-decoration:underline; color:blue" href="bestpaper.html" class="mainmenu"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >best&nbsp;paper</span></span></td>
+    </tr>
+    <tr>
+      <td valign="top"><div id="menu" style="position: relative; visibility:show; left:0; z-index: 2; top: 0;"> 
+        <table border="0" cellpadding="0" cellspacing="0" class="nav">
+          <tr>
+            <td><img onmousedown="imd(this)" src="img/spacer.gif" width="15" height="20"></td>
+              <td><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Page Contents</span></td>
+              <td><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+          <tr>
+            <td colspan="2" background="img/ring_line.gif"></td>
+              <td><img onmousedown="imd(this)" src="img/ringleft.gif" width="12" height="12"></td>
+            </tr>
+          <tr id="pnav2">
+            <td><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#1" class="lnav"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >friday</span></span></td>
+              <td><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+          <tr id="pnav2">
+            <td><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#2" class="lnav"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >saturday</span></span></td>
+              <td><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+          <tr id="pnav4">
+            <td><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#top" class="lnav"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >top 
+              of page</span></span></td>
+              <td><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+          <tr id="pnav5">
+            <td><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+              <td><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html" class="lnav"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >gh08
+              home</span></span></td>
+              <td><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            </tr>
+        </table>
+      </div></td>
+      <td colspan="2" valign="top">        <table border="0" cellpadding="0" cellspacing="0">
+          <tr>
+            <td><img onmousedown="imd(this)" src="img/spacer.gif" width="15" height="20"></td>
+            <td class="style1"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Program &amp; Presentations</span> </td>
+            <td><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          </tr>
+          <tr>
+            <td colspan="3" valign="top" background="img/ring_line.gif"><img onmousedown="imd(this)" src="img/ring.gif" width="12" height="12"></td>
+          </tr>
+          <tr>
+            <td height="20" valign="top"><p class="subtitle"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p></td>
+            <td valign="top"><p><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >As they are made available, presentations will be linked after the paper titles.</span> </p></td>
+            <td valign="top"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          </tr>
+          <tr>
+            <td valign="top"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            <td valign="top" class="style1"><br>
+              <span onclick="return false" style="text-decoration:underline; color:blue" name="1" class="style1" id="1"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Friday, 20 June 2008</span></span></td>
+            <td valign="top"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          </tr>
+          <tr>
+            <td colspan="3" valign="top" background="img/ring_line.gif"><img onmousedown="imd(this)" src="img/ring.gif" width="12" height="12" hspace="0" vspace="0"></td>
+          </tr>
+          <tr>
+            <td valign="top"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            <td valign="top"><p><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >8:30-9:15: Registration</span></p>
+                <p><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >9:15-9:30: Welcome and Opening</span></p>
+              <p><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >9:30-10:30: Keynote: Henry Fuchs, University of North Carolina at Chapel Hill</span></p>
+              <UL>
+                  <LI>
+                    <p><em><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Evolution of Graphics Hardware: 40 years since Sutherland's Head-mounted 3D Display</span></em> <span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="presentations/fuchs-evolution_of_graphics_hardware.ppt"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+                     <p><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Three years after his seminal "ultimate display" address, Ivan Sutherland demonstrated in 1968 what many considered a first approximation to that ideal: a stereo, head-tracked, head-mounted 3D display system.  This talk revisits that system as a touchstone for reflecting on how far we've come in various aspects of graphics hardware: image generation, display design, head tracking, interaction, and 3D model creation. In each area, we examine the state of the art 40 years ago, recall the outlook at that time, mark a few developments in the intervening decades, assess the current state of the art, and give an informal grade to the amount of progress in that sector in the past 40 years. (These grades range from A+ to C- to Incomplete.) The talk concludes with a few remarks on possible directions for future research, and a plea for embracing graphics hardware of all kinds.</span></p>
+                     <p><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Henry Fuchs is the Federico Gil Professor of Computer Science and Adjunct Professor of Biomedical Engineering at UNC Chapel Hill.</span>
+<br>
+<span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >He has been active in computer graphics since the early 1970s, with rendering algorithms (BSP Trees), hardware (Pixel-Planes and PixelFlow), virtual environments, tele-immersion systems and medical applications. He received a Ph.D. in 1975 from the University of Utah. He was a member of the faculty of the University of Texas at Dallas from 1975 to 1978. He joined the faculty at the University of North Carolina at Chapel Hill in 1978.</span>
+<br>
+<span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >He is a member of the National Academy of Engineering, a fellow of the American Academy of Arts and Sciences, the recipient of the 1992 ACM-SIGGRAPH Achievement Award, the 1992 Academic Award of the National Computer Graphics Association, and the 1997 Satava Award of the Medicine Meets Virtual Reality Conference.</span></p>
+                  </LI>
+              </UL>
+              <p><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >10:30-11:00: Coffee Break</span></p>
+              <p><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >11:00-11:50: Papers: Debugging</span></p>
+              <UL>
+                  <LI>
+                    <p><em><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Tracy: A Debugger and System Analyzer for Cross-Platform</span></em> <span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="presentations/kyotila-tracy.ppt"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >)</span><BR>
+                      <span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Sami Ky&ouml;til&auml;, Kari Pulli, and Kari Kangas</span></p>
+                  <LI>
+                    <p><em><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Total Recall: A Debugging Framework for GPUs</span></em> <span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="presentations/sharif-total_recall.pdf"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >)</span><BR>
+                      <span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Ahmad Sharif, Hsien-Hsin S. Lee</span></p>
+                  </LI>
+              </UL>
+              <p><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >11:50-13:20: Lunch Break</span></p>
+              <p><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >13:20-14:35: Papers: Hardware and Algorithms</span></p>
+              <UL>
+                  <LI>
+                    <p><em><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >A Hardware Processing Unit for Point Sets</span></em> <span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >(</span><b><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >best paper</span></b><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="presentations/heinzle-hardware_point_sets.ppt"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >)</span><br>
+		    <span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Simon Heinzle, Gael Guennebaud, Mario Botsch, and Markus Gross</span></p>
+                  <LI>
+                    <p><em><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Coherent Layer Peeling for Transparent High-Depth-Complexity Scenes</span></em><BR>
+                      <span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Nathan Carr, Radomir Mech, and Gavin Miller</span></p>
+                  <LI>
+                    <p><em><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Non-Uniform Fractional Tessellation</span></em> <span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="presentations/munkberg-non-uniform_fractional_tessellation.pdf"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >)</span><BR>
+                      <span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Jacob Munkberg, Jon Hasselgren, and Tomas Akenine-M&ouml;ller</span></p>
+                  </LI>
+              </UL>
+              <p><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >14:35-15:00: Coffee Break</span></p>
+              <p><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >15:00-17:00: Panel:</span> <em><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >GPUs vs. Multicore CPUs:  On a Converging Course or Fundamentally Different?</span></em><BR>
+<!--                 Moderator: Mark Segal (Google)<BR> -->
+              <UL>
+                  <LI>
+                 <span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Panelists: John Danskin (NVIDIA), Bill Mark (Intel,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="presentations/mark-panel.pdf"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >), and Michael Mantor (AMD,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="presentations/mantor-panel.pdf"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >)</span>
+</li>
+<li><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Moderator: John Owens (UC Davis)</span></li>
+</ul>
+<!--               <UL> -->
+<!--                   <LI> -->
+<!--                     <p>Once again, the graphics hardware landscape is changing. In the last couple   of years, we have seen, among other things, a resurgent interest in hardware   ray-tracing, lower-level and non-graphics-centric APIs for computation on GPUs,   use of GPUs for non-graphics computation in commercial applications, dedicated   3D graphics hardware in cell phones, and the announcement by at least one vendor   of a CPU and GPU on the same die. In addition, the recent evolution of CPUs   (namely, multicore) promises to affect the design and application of graphics   hardware. Our panelists will discuss these trends, and what they portend for the   future.</p> -->
+<!--                     <p>As graphics hardware evolves, so must the Graphics Hardware conference.   Besides debating the opportunities presented by the technology trends, the   panelists will also debate and solicit ideas from the audience on what changes   might be appropriate for Graphics Hardware to better reflect the changing   landscape and attract a wider audience.</p> -->
+<!--                     <p>We expect the discussion to be a lively one, with plenty of opportunity for   audience participation.</p> -->
+<!--                   </LI> -->
+<!--               </UL> -->
+              <p><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >17:00-17:55: Free Time</span></p>
+              <p><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >17:55-19:30: Bus to Sarajevo Tunnel</span></p>
+              <p><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >17:55-19:30: Buss to Banquet</span></p>
+              <p><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >17:55-19:30: Banquet - Blue Prism Restaurant/Radon Plaza</span></p></td>
+            <td valign="top"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          </tr>
+          <tr>
+            <td valign="top"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            <td valign="top"class="style1"><br>
+                <p class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" id="2" name="2"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Saturday, 21 June 2008</span></span></p></td>
+            <td valign="top"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          </tr>
+          <tr>
+            <td colspan="3" valign="top" background="img/ring_line.gif"><img onmousedown="imd(this)" src="img/ring.gif" width="12" height="12" hspace="0" vspace="0"></td>
+          </tr>
+          <tr>
+            <td valign="top"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+            <td valign="top"><p><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >9:00-10:00: Keynote: Johan Andersson, DICE</span></p>
+                <UL>
+                  <LI>
+                    <p><em><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >The Intersection of Game Engines and GPUs--Current &amp; Future</span></em> <span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="presentations/andersson-game_engines_and_GPUs.pptx"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >)</span></p>
+                     <p><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Game engines have long been in the forefront of real-time graphics working in symbiosis with GPU hardware. Both are evolving in a fast pace in all areas with increased performance, flexibility and complexity. This talk is about the intersection of the two and what the continued development gives us as new concrete opportunities, challenges and requirements of graphics hardware and software for game engines, such as DICE's Frostbite Engine, in both the future as well as the current.</span></p>
+                     <p><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Johan is a self-taught senior software engineer/architect in the central technology group at DICE. For the past 8 years he has been working with rendering, performance and core engine systems for games in the Battlefield and Rallisport series. He now drives the rendering &amp; performance side of the Frostbite Engine for the just shipped pilot game</span> <i><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Battlefield: Bad Company</span></i> <span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >(Xbox 360, PS3) and future unannounced games.</span></p>
+                  </LI>
+                </UL>
+              <p><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >10:00-10:30: Coffee Break</span></p>
+              <p><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >10:30-11:45: Papers: GPU Computing</span></p>
+              <UL>
+                  <LI>
+                    <p><em><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >All-Pairs Shortest-Paths for Large Graphs on the GPU</span></em><BR>
+                      <span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Gary J. Katz, Joseph T. Kider Jr.</span></p>
+                  <LI>
+                    <p><em><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >On Dynamic Load-Balancing on Graphics Processors</span></em> <span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="presentations/cederman-on_dynamic_loadbalancing_on_graphics_processors.pptx"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >)</span><BR>
+                      <span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Cederman, Philippas Tsigas</span></p>
+                  <LI>
+                    <p><em><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >GPU Accelerated Pathfinding</span></em> <span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="presentations/bleiweiss-GPU_accelerated_pathfinding.pdf"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >)</span><BR>
+                      <span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Avi Bleiweiss</span></p>
+                  </LI>
+              </UL>
+              <p><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >11:45-13:30: Lunch Break</span></p>
+              <p><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >13:30-14:45: Papers: Shading, Texturing, and Compression</span></p>
+              <UL>
+                  <LI>
+                    <p><em><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Floating-Point Buffer Compression in a Unified Codec Architecture</span></em> <span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="presentations/strom-floating-point_buffer_compression.zip"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >)</span><BR>
+                      <span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Jacob Strom, Per Wennersten, Jim Rasmusson, Jon Hasselgren, Jacob Munkberg, Petrik Clarberg, and Tomas Akenine-M&ouml;ller</span></p>
+                  <LI>
+                    <p><em><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >DHTC: An Effective DXTC-based HDR Texture Compression Scheme</span></em> <span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="presentations/yanlu-DHTC_hdr_texture_compression.pdf"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >)</span><BR>
+                      <span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Wen Sun, Yan Lu, Wu Feng, and Shipeng Li</span></p>
+                  <LI>
+                    <p><em><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >An Improved Shading Cache for Modern GPUs</span></em> <span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >(</span><span onclick="return false" style="text-decoration:underline; color:blue" href="presentations/sitthi-amorn-improved_shading_cache.pdf"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >)</span><BR>
+                      <span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Pitchaya Sitthi-amorn, Jason Lawrence, Lei Yang, Pedro V. Sander, and Diego Nehab</span></p>
+                  </LI>
+              </UL>
+              <p><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >14:45-15:15: Coffee Break</span></p>
+              <p><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >15:15-16:10: Hot3D session</span></p>
+              <UL>
+                  <LI>
+<p><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Michael Toksvig (NVIDIA) will present and demo the APX2500, NVIDIA's new smartphone application processor.  This device is capable of real-time encode and decode of 720p HD video and 3D graphics acceleration on a low power budget.</span></p>
+</li>
+<!--                     <p>John Nickolls, Lead Architect, NVIDIA Compute. <em>NVIDIA Tesla and the GPU   Parallel Computing Architecture</em> (<span onclick="return false" style="text-decoration:underline; color:blue" href="presentations/nickolls-tesla-gh07.pdf">slides</span>)</p> -->
+<!--                     <p>The talk will describe NVIDIA's new Tesla GPU Computing processor   architecture and hardware for high performance parallel computing. The Tesla   C870 is a massively multithreaded architecture with 128 processor cores and over   500 GFLOPS peak floating point performance. It is programmable in C with the   CUDA software development environment.</p> -->
+<!--                     <p>John Nickolls is director of architecture at NVIDIA for GPU computing. He was   previously at Broadcom, Silicon Spice, Sun, and was a co-founder of MasPar   Computer. His interests include parallel systems and parallel processor   architecture. Nickolls has a BS in electrical engineering and computer science   from the University of Illinois, and MS and PhD degrees in electrical   engineering from Stanford University.</p> -->
+<!--                   <LI> -->
+<!--                     <p>Michael Doggett, AMD. <em>AMD's Radeon HD 2900</em> (<span onclick="return false" style="text-decoration:underline; color:blue" href="presentations/doggett-radeon2900-gh07.pdf">slides</span>)</p> -->
+<!--                     <p>The ATI Radeon HD 2900 developed by AMD is a Graphics Processing Unit (GPU)   capable of massively parallel computation for high performance 3D graphics and   general purpose algorithms. The unified shader architecture consists of a   combination of MIMD and SIMD architectures of 5 way scalar arithmetic units   running in parallel. The shader uses multi-threading to hide latency of memory   access so that compute units are keep busy. The threads consist of vertex,   geometry and pixel threads that represent different programmable stages of a   traditional 3D graphics pipeline mapped onto a single scheduled shader unit.   Varied distributed and unified caches are used for data, instructions, read only   texture reads and vertex data. A ring based memory subsystem allows multiple   clients to access multiple memory channels. </p> -->
+<!--                     <p>Michael Doggett is a Principal Member of Technical Staff within AMD's   Graphics Product Group. He has worked on the Radeon2900 and previously the   XBOX360 GPU and continues to work on upcomping high end GPUs. He worked as a   Post-Doc at the University of Tuebingen, Germany on displacement mapping and   volume rendering hardware. He has a B.E, B.Sc and PhD from the University of New   South Wales, Sydney, Australia. </p> -->
+              </UL>
+              <p><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >16:10-16:30: Special Session: The Siege of Sarajevo, Selma Rizvic (</span><span onclick="return false" style="text-decoration:underline; color:blue" href="presentations/rizvic-the_siege_of_sarajevo.ppt"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >)</span><br><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Selma has also shared some</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://picasaweb.google.hr/srizvicSA/GH2008Sarajevo"><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >pictures from the conference</span></span></p>              <p><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >16:30-17:00: Best Paper presentation and closing</span></p>
+<!--               <p>A <span onclick="return false" style="text-decoration:underline; color:blue" href="presentations/GH07Template1600x1200.ppt">PowerPoint template</span> for presentations is now available. </p> -->
+</td>
+            <td valign="top"><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          </tr>
+      </table></td>
+    </tr>
+    <tr>
+      <td valign="top"><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+      <td colspan="2" valign="top"><table width="100%" border="0" cellpadding="0" cellspacing="0">
+          <tr>
+            <td valign="top"><img onmousedown="imd(this)" src="img/spacer.gif" width="1" height="10"></td>
+            <td valign="top"><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+          </tr>
+          <tr>
+            <td colspan="2" valign="top" background="img/ring_line.gif"><img onmousedown="imd(this)" src="img/ring.gif" width="12" height="12"></td>
+          </tr>
+          <tr>
+            <td valign="top"><img onmousedown="imd(this)" src="img/spacer.gif" width="15" height="20"></td>
+            <td width="100%" valign="top"><script language="JavaScript" type="text/javascript">
+<!-- 
+
+// -->
+      </script>
+              <span class="footer"> <span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >For additional information send mail to</span>

@@ -1,0 +1,1144 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "DTD/xhtml1-transitional.dtd">
+<html><head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/13/annotation/annotated_repository/http+^^cbms2008.it.jyu.fi^cbms08_prg.htm_2009-08-05__14-22-18.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/13/annotation/annotated_repository/http+^^cbms2008.it.jyu.fi^cbms08_prg.htm_2009-08-05__14-22-18.yaml created on Thu Aug 13 13:59:17 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+<title>CBMS 2008: The 21th IEEE International Symposium on Computer-Based Medical Systems</title>
+
+
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<link href="css/cbms2008.css" rel="stylesheet" type="text/css">
+	  <style type="text/css" media="all">@import url('css/2col.css');</style>
+</head><body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<div id="frame" class="divcenter">
+
+        <div class="topheader">
+        <table width=100%>
+        <tr>
+        <td align="left">
+	<span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp; June 17-19 2008, Jyv&auml;skyl&auml;, Finland</span>
+	</td>
+        <td align="right">
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://cbms2008.it.jyu.fi"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >cbms2008.it.jyu.fi</span></span> <span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>
+	</td>
+	</tr>
+	</table>
+        </div>
+
+	<div class="pictcenter"
+        ><img onmousedown="imd(this)" src="pics/www_header_3.jpg" alt="title" width="800"
+        ></div>
+
+        <div class="path">
+                <table width=100%>
+        <tr>
+        <td align="left" width=70%>
+        <span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="http://cbms2008.it.jyu.fi"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >CBMS2008 Home</span></span> <span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >::</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="cbms08_prg.htm"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Conference Program</span></span>
+	</td>
+	</tr>
+	</table>
+        </div>
+
+       	<div id="contentleft">
+	<ul class="navmain">
+  <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://cbms2008.it.jyu.fi"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >CBMS 2008 Home</span></span></li>
+  <li><span onclick="return false" style="text-decoration:underline; color:blue" href="cbms08_new.htm"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >News and Highlights</span></span></li>
+  <li><span onclick="return false" style="text-decoration:underline; color:blue" href="cbms08_cfp.htm"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span> </li>
+  <li><b><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Call for Special Tracks</span></b> </li>
+  <li><span onclick="return false" style="text-decoration:underline; color:blue" href="cbms08_tps.htm"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Relevant Topics</span></span></li>
+  <li><span onclick="return false" style="text-decoration:underline; color:blue" href="cbms08_dat.htm"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></li>
+  <li><span onclick="return false" style="text-decoration:underline; color:blue" href="cbms08_com.htm"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></span></li>
+  <li><span onclick="return false" style="text-decoration:underline; color:blue" href="cbms08_trk.htm"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Special Tracks</span></span> </li>
+  <li><span onclick="return false" style="text-decoration:underline; color:blue" href="cbms08_sbm.htm"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Paper Submission</span></span></li>
+  <li><span onclick="return false" style="text-decoration:underline; color:blue" href="cbms08_reg.htm"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></li>
+  <li><span onclick="return false" style="text-decoration:underline; color:blue" href="cbms08_key.htm"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Invited Keynotes</span></span></li>
+  <li><span onclick="return false" style="text-decoration:underline; color:blue" href="cbms08_acp.htm"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Accepted Papers</span></span></li>
+  <li><span onclick="return false" style="text-decoration:underline; color:blue" href="cbms08_prg.htm"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Scientific Program</span></span></li>
+  <li><span onclick="return false" style="text-decoration:underline; color:blue" href="cbms08_soc.htm"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Social Events</span></span></li>
+  <li><span onclick="return false" style="text-decoration:underline; color:blue" href="cbms08_trl.htm"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Venue and Travel</span></span></li>
+  <li><span onclick="return false" style="text-decoration:underline; color:blue" href="cbms08_utk.htm"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Useful to Know</span></span></li>
+        </ul>
+        </div>
+
+        <div id="contentcenter">
+
+        <h1><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Scientific Program</span></h1>
+
+        <p>
+        <span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >The scientific program of CBMS 2008 will consist of invited keynote talks given by leading scientists in the field, general tracks (GT), special tracks (SPT), and special sessions (SS) that cover a broad array of issues which relate computing to medicine. The program overview and the detailed program are provided below:</span>
+        </p>
+
+        <h2><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Program Overview</span></h2>
+
+        <h3><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday, 17 June</span></h3>
+
+        <table class="program">
+        <tr>
+            <td><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >09:00-10:00</span></td>
+            <td colspan="3"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Registration and morning coffee</span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >10:00-10:15</span></td>
+            <td colspan="3"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Opening of the symposium</span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >10:20-11:40</span></td>
+            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt6"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >SPT-6 Personalisation for e-health</span></span></td>
+            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt2-1"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >SPT-2 Knowledge discovery and knowledge-based techniques and systems in medicine I</span></span> </td>
+            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#ss3"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >SS-3 Data integration in biomedicine</span></span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >11:40-13:10</span></td>
+            <td colspan="3"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Lunch break</span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >13:10-13:55</span></td>
+            <td colspan="3"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Invited keynote: "Towards Pervasive Health and Wellbeing Services", Prof. Niilo Saranummi</span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >14:00-15:20</span></td>
+            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#gt2-1"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >GT-2 Biomedical signal processing I</span></span></td>
+            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt2-2"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >SPT-2 Knowledge discovery and knowledge-based techniques and systems in medicine II</span></span></td>
+            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt7-1"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >SPT-7 Health knowledge management I</span></span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >15:20-15:40</span></td>
+            <td colspan="3"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >15:40-17:00</span></td>
+            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#gt2-2"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >GT-2 Biomedical signal processing II</span></span> </td>
+            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#ss2"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >SS-2 Machine learning methods for  high dimensional data in bio-medicine</span></span></td>
+            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt7-2"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >SPT-7 Health knowledge management II</span></span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >18:00-19:30</span></td>
+            <td colspan="3"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Reception hosted by the city of Jyv&auml;skyl&auml;</span></td>
+        </tr>
+        </table>
+
+
+        <h3><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, 18 June</span></h3>
+
+        <table class="program">
+        <tr>
+            <td><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >09:00-10:20</span></td>
+            <td colspan="3"><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt1-1"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >SPT-1 Computational proteomics: Management and analysis of proteomics data I</span></span></td>
+            <td colspan="3"><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt9-1"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >SPT-9 Computer based decision systems in biomedicine I</span>  </span></td>
+            <td colspan="3"><span onclick="return false" style="text-decoration:underline; color:blue" href="#gt1-1"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >GT-1 Medical imaging I</span></span> </td>
+            <td colspan="3"><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt2-3"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >SPT-2 Knowledge discovery and knowledge- based techniques and systems in medicine III</span></span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >10:20-10:40</span></td>
+            <td colspan="12"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >10:40-12:00</span></td>
+            <td colspan="4"><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt1-2"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >SPT-1 Computational proteomics: Management and analysis of proteomics data II</span></span> </td>
+            <td colspan="4"><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt9-2"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >SPT-9 Computer based decision systems in biomedicine II</span></span></td>
+            <td colspan="4"><span onclick="return false" style="text-decoration:underline; color:blue" href="#gt1-2"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >GT-1 Medical imaging II</span></span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >12:00-13:30</span></td>
+            <td colspan="12"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Lunch break</span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >13:30-14:15</span></td>
+            <td colspan="12"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Invited keynote: "Bridging the Gap: Enabling CBIR in Medical Applications", Dr. Sameer Antani</span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >14:20-15:40</span></td>
+            <td colspan="4"><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt4-1"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >SPT-4 Healthgrid computing - applications to biomedical research and healthcare I</span></span> </td>
+            <td colspan="4"><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt8-1"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >SPT-8 Intelligent patient management I</span></span> </td>
+            <td colspan="4"><span onclick="return false" style="text-decoration:underline; color:blue" href="#gt5-1"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >GT-5 Software, systems, prototypes, architectures I</span></span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >15:40-16:00</span></td>
+            <td colspan="12"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >16:00-17:20</span></td>
+            <td colspan="4"><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt4-2"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >SPT-4 Healthgrid computing - applications to biomedical research and healthcare II</span></span> </td>
+            <td colspan="4"><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt8-2"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >SPT-8 Intelligent patient management II</span></span></td>
+            <td colspan="4"><span onclick="return false" style="text-decoration:underline; color:blue" href="#gt5-2"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >GT-5 Software, systems, prototypes, architectures II</span></span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >19:00-23:00</span></td>
+            <td colspan="12"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Symposium dinner</span></td>
+        </tr>
+        </table>
+
+
+        <h3><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, 19 June</span></h3>
+
+        <table class="program">
+        <tr>
+            <td><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >09:00-10:20</span></td>
+            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#ss1"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >SS-1 Bioinformatics and its medical applications</span></span></td>
+            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt3-1"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >SPT-3  Ontologies for biomedical systems I</span></span></td>
+            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt5-1"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >SPT-5 Technology enhanced learning in medical education I</span></span></td>
+        </tr>
+        <tr>
+            <td width><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >10:20-10:40</span></td>
+            <td colspan="3"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >10:40-11:25</span></td>
+            <td colspan="3"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Invited keynote: "Ontology Support for Biomedical Information Resources", Prof. Tharam Dillon</span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >11:25-13:40</span></td>
+            <td colspan="3"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Lunch break</span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >12:40-14:00</span></td>
+            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#gt4-1"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >GT-4 Medical information systems and case studies I</span></span></td>
+            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt3-2"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >SPT-3  Ontologies for biomedical systems II</span></span></td>
+            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt5-2"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >SPT-5 Technology enhanced learning in medical education II</span></span></td>
+        </tr>
+        <tr>
+            <td width><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >14:00-14:20</span></td>
+            <td colspan="3"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span></td>
+        </tr>
+        <tr>
+            <td><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >14:20-15:40</span></td>
+            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#gt4-2"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >GT-4 Medical information systems and case studies II</span></span></td>
+            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#gt3"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >GT-3 Network and telemedicine systems</span></span></td>
+            <td><span onclick="return false" style="text-decoration:underline; color:blue" href="#spt5-3"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >SPT-5 Technology enhanced learning in medical education III</span></span></td>
+        </tr>
+        </table>
+
+
+<h2><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Tracks and Sessions</span></h2>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="gt1-1"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >GT-1 Medical Imaging I</span></span></h3>
+
+<p class="pindent"><em><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >: Domenico Tegolo</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Automated Detection of Optic Disc Location in Retinal Images</span></em>
+	<br/><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Carmen Alina Lupa&#351;cu, Domenico Tegolo, and Luigi Di Rosa</span></li>
+
+<li><em><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Computerized Classification of Breast Tumors with Morphologic and Texture Features of Ultrasonic Images</span></em>
+	<br/><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Yuanyuan Wang, Jialin Shen, Yi Guo, and Weiqi Wang</span></li>
+
+<li><em><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Gradient Vector Flow Field and Mass Region Extraction in Digital Mammograms</span></em>
+	<br/><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Fengmei Zou, Yufeng Zheng, Zhengdong Zhou, and Kwabena Agyepong</span></li>
+
+<li><em><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >A Statistical Approach to Automatic Heart Segmentation and Modelling from Multiple Modalities</span></em>
+	<br/><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Pavel Krasnopevtsev, Dzmitry Hlindzich, Tudor Poerner, and Aleh Kryvanos</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="gt1-2"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >GT-1 Medical Imaging II</span></span></h3>
+
+<p class="pindent"><em><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >: Roberto Gallea</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Noise Filtering Using Edge-Driven Adaptive Anisotropic Diffusion</span></em>
+	<br/><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Roberto Gallea, Edoardo Ardizzone, Roberto Pirrone, and Orazio Gambino</span></li>
+
+<li><em><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Semi-automatic Segmentation and Volume Determination of Brain Mass-like Lesion</span></em>
+	<br/><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Soontharee Koompairojn, Antoniya Petkova, Kien Hua, and Pichest Metarugcheep</span></li>
+
+<li><em><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >MRI Reconstruction Using SVD in the Least Square Sense</span></em>
+	<br/><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Fadi Yaacoub, Antoine Abche, Elie Karam, and Yskandar Hamam</span></li>
+
+<li><em><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Toward a Robust System to Monitor Head Motions during PET Based on Facial Landmark Detection: A New Approach</span></em>
+	<br/><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Sergey Anischenko, Vladislav Osinov, Dmitry Shaposhnikov, Lubov Podlachikova, Richard Comley, and Xiaohong Gao</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="gt2-1"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >GT-2 Biomedical Signal Processing I</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >: Koji Ito</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Electroencephalogram (EEG) and Functional Electrical Stimulation (FES) System for Rehabilitation of Stroke Patients</span></em>
+	<br/><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Mitsuru Takahashi, Manabu Gouko, and Koji Ito</span></li>
+
+<li><em><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Extraction of the Mismatch Negativity on Two Paradigms Using Independent Component Analysis</span></em>
+	<br/><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Igor Kalyakin, Narciso Gonz&aacute;lez, and Heikki Lyytinen</span></li>
+
+<li><em><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Separation of ERP and Noise Subspaces in EEG Data without Whitening</span></em>
+	<br/><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Andriy Ivannikov, Tommi K&auml;rkk&auml;inen, Tapani Ristaniemi, and Heikki Lyytinen</span></li>
+
+<li><em><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Analysis of Doppler Ultrasound Blood Flow Signals of Wrist Radial Artery for Discriminating Healthy People from 3 Kinds of Patients</span></em>
+	<br/><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Kuanquan Wang, Chao Xu, Dongyu Zhang, and Naimin Li</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="gt2-2"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >GT-2 Biomedical Signal Processing II</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >: Laurent Giovangrandi</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Evaluating the Foot Electromyogram Signal as a Noise Reference for a Bathroom Scale Ballistocardiogram Recorder</span></em>
+	<br/><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Omer Inan, Mozziyar Etemadi, Richard Wiard, Laurent Giovangrandi, and Gregory Kovacs</span></li>
+
+<li><em><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Local H&ouml;lder Regularity-Based Modeling of RR Intervals</span></em>
+	<br/><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Jacques L&eacute;vy V&eacute;hel and Olivier Barri&egrave;re</span></li>
+
+<li><em><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >The Effect of the Shape and Location of the Light Source in Diffuse Reflectance Measurements</span></em>
+	<br/><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Petri V&auml;lisuo and Jarmo Alander</span></li>
+
+<li><em><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Periodic Motion Detection on Patient with Motion Disorders</span></em>
+	<br/><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Zdenka Uhr&iacute;kov&aacute; and V&aacute;clav Hlav&aacute;&#154;</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="gt3"><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >GT-3 Network and Telemedicine Systems</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >: Peter Gemmar</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >A Self-Test to Detect a Heart Attack Using a Mobile Phone and Wearable Sensors</span></em>
+	<br/><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Peter Leijdekkers and Val&eacute;rie Gay</span></li>
+
+<li><em><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Advanced Methods for Target Navigation using Microelectrode Recordings in Stereotactic Neurosurgery for Deep Brain Stimulation</span></em>
+	<br/><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Peter Gemmar, Oliver Gronz, Frank Hertel, and Thorsten Henrichs</span></li>
+
+<li><em><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >A Telemedicine Network Using Secure Techniques and Intelligent User Access Control</span></em>
+	<br/><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Jader Wallauer, Aldo von Wangenheim, Rafael Andrade, and Douglas de Macedo</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="gt4-1"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >GT-4 Medical Information Systems and Case Studies I</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >: Luca Pazzi</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >A State-Based Systemic View of Behaviour for Safe Medical Computer Applications</span></em>
+	<br/><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Luca Pazzi and Marco Pradelli</span></li>
+
+<li><em><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Verification of Clinical Guidelines by Model Checking</span></em>
+	<br/><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Beatriz P&eacute;rez and Ivan Porres</span></li>
+
+<li><em><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Easing the Formalization of Clinical Guidelines with a User-tailored, Extensible Agile Model Driven Development (AMDD)</span></em>
+	<br/><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Patrick Martini, Katharina Kaiser, and Silvia Miksch</span></li>
+
+<li><em> <span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Workflow Integration in VL-e Medical</span></em>
+	<br/><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Tristan Glatard, Kamel Boulebiar, and Silvia Olabarriaga</span></li>
+
+<li><em><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Integrating Biomedical Publications with Existing Metadata</span></em>
+	<br/><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Nikolay Nikolov and Peter Stoehr</span></li>
+</ol>
+
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="gt4-2"><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >GT-4 Medical Information Systems and Case Studies II</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >: Peter Kokol</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Behavior-Based Access Control for Distributed Healthcare Environment</span></em>
+	<br/><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Mohammad Hosein Yarmand, Kamran Sartipi, and Douglas Down</span></li>
+
+<li><em><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Restoring the Patient Control over Her Medical History</span></em>
+	<br/><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Nicolas Anciaux, Mehdi Benzine, Luc Bouganim, K&eacute;vin Jacquemin, Philippe Pucheral, and Shaoyi Yin</span></li>
+
+<li><em><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Sentiment in Science-A Case Study of CBMS Contributions in Years 2003 to 2007</span></em>
+	<br/><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Mateja Verlic, Gregor Stiglic, Simon Kocbek, and Peter Kokol</span></li>
+
+<li><em><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Fast Mechanical Properties Estimation for Finite Element Model of Bone Tissue</span></em>
+	<br/><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Sheng Zheng Wang and Jie Yang</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="gt5-1"><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >GT-5 Software, Systems, Prototypes, Architectures I</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >: Katharina Kaiser</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >MapFace-An Editor for MetaMap Transfer (MMTx)</span></em>
+	<br/><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Katharina Kaiser, Theresia Gschwandtner, and Patrick Martini</span></li>
+
+<li><em><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Multi-Dimensional Image Data Viewer with Flexible Extension Capability and its Application in Computer-Based Medical Systems</span></em>
+	<br/><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Yoshitaka Masutani</span></li>
+
+<li><em><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >ACHE: An Architecture for Clinical Hypothesis Examination</span></em>
+	<br/><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Laura Moss, Derek Sleeman, John Kinsella, and Malcolm Sim</span></li>
+
+<li><em><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >A Service-Oriented Architectural Framework for the Integration of Information Systems in Clinical Research</span></em>
+	<br/><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Sebastian Wurst, Gregor Lamla, J&ouml;rg Schlundt, Randi Karlsen, and Klaus Kuhn</span></li>
+
+<li><em><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Ultra-Mobile Echo Network in Health Care System</span></em>
+	<br/><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Yoshifumi Saijo, Takahiro Iwamoto, Kazuto Kobayashi, Satoshi Yamaguchi, Hiroshi Tsunoda, Hidehisa Nakayama, Nei Kato, and Yoshiaki Nemoto</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="gt5-2"><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >GT-5 Software, Systems, Prototypes, Architectures II</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >: Matsumoto Tsutomu</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Web-based Multi-observer Segmentation Evaluation Tool</span></em>
+	<br/><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Yaoyao Zhu, Xiaolei Huang, Daniel Lopresti, Rodney Long, Sameer Antani, Zhiyun Xue, and George Thoma</span></li>
+
+<li><em><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >The LENUS Master Patient Index: Combining Hospital Content Management with a Healthcare Service Bus</span></em>
+	<br/><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Dirk Krechel and Markus Hartbauer</span></li>
+
+<li><em><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >A Design of Information System Improving Dietary Habit Based on Individual Clinical Data and Life Style</span></em>
+	<br/><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Tsutomu Matsumoto, Yasuyuki Shimada, Thimoty Teo, and Shigeyasu Kawaji</span></li>
+
+<li><em><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Interface for Accessing Pharmacological Information</span></em>
+	<br/><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Tor Johan Mikael Karlsson</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt1-1"><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >SPT-1 Computational Proteomics: Management and Analysis of Proteomics Data I</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >: Mario Cannataro</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Analysis and Visualization of Spatial Proteomic Data for Tissue Characterization</span></em>
+	<br/><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Christian Fuchsberger, Heidi H&uuml;bl, Georg Sch&auml;fer, Alexandre Pelzer, Georg Bartsch, Helmut Klocker, Nicola Barbarini, Riccardo Bellazzi, Wolfgang Wieder, and G&uuml;nther Bonn</span></li>
+
+<li><em><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Network P2P for Exploring and Visualization of Proteomic Data Produced by
+Two Dimensional Electrophoresis</span></em>
+	<br/><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >Gregorio Mercurio, Silvio Maglio, Antonella Agrusti, Giorgio DeNunzio, Rosella Cataldo, Ivan DeMitri, Marco Favetta, Andrea Massafra, Giovanni Marsella, Daniele Vergara, and Michele Maffia</span></li>
+
+<li><em><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >MSPtool: A Versatile Tool for Mass Spectrometry Data Preprocessing</span></em>
+	<br/><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >Francesco Gullo, Giovanni Ponti, Andrea Tagarelli, Giuseppe Tradigo, and Pierangelo Veltri</span></li>
+
+<li><em><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >An Integrated Clinico-Proteomics Information Management and Analysis Platform</span></em>
+	<br/><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >Manos Kalaitzakis, Vaggelis Kritsotakis, Haridimos Kondylakis, George Potamias, Manolis Tsiknakis, and Dimitris Kafetzopoulos</span></li>
+
+<li><em><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >ProtCV: A Tool for Extracting, Visualizing and Validating Protein Clusters Using Mass Spectra Peak-Lists</span></em>
+	<br/><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Stavroula Ventoura, Eugenia G. Giannopoulou, and Elias Manolakos</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt1-2"><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >SPT-1 Computational Proteomics: Management and Analysis of Proteomics Data II</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >: Maria Mirto</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >myMCL: A Web Portal for Protein Complex Prediction</span></em>
+	<br/><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >Pietro Hiram Guzzi, Mario Cannataro, and Pierangelo Veltri</span></li>
+
+<li><em><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >A Grid-based Bioinformatics Wrapper for Biological Databases</span></em>
+	<br/><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Maria Mirto, Sandro Fiore, Massimo Cafaro, Marco Passante, and Giovanni Aloisio</span></li>
+
+<li><em><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Incremental Learning and Decremented Characterization of Gene Expression Data Analysis</span></em>
+	<br/><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Mario Rosario Guarracino, Salvatore Cuciniello, and Davide Feminiano</span></li>
+
+<li><em><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >Generating GO Slim Using Relational Database Management Systems to Support Proteomics Analysis</span></em>
+	<br/><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Getiria Onsongo, Hongwei Xie, Timothy. J Griffin, and John Carlis</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt2-1"><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >SPT-2 Knowledge Discovery and Knowledge-based Techniques and
+Systems in Medicine I</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >: Mykola Pechenizkiy</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >CBIR of Spine X-ray Images on Inter-Vertebral Disc Space and Shape Profiles</span></em>
+	<br/><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >Yuchou Chang, Sameer Antani, Dah-Jye Lee, Kent Gledhill, L. Rodney Long, and Paul Christensen</span></li>
+
+<li><em><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Data Warehousing Technology for Surgical Workflow Analysis</span></em>
+	<br/><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >Thomas Neumuth, Svetlana Mansmann, Marc H. Scholl, and Oliver Burgert</span></li>
+
+<li><em><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Decision Support for Alzheimer's Patients in Smart Homes</span></em>
+	<br/><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Shuai Zhang, Sally McClean, Bryan Scotney, Xin Hong, Chris Nugent, and Maurice Mulvenna</span></li>
+
+<li><em><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >Predicting Forensic Admission among the Mentally Ill: A Bayesian Approach</span></em>
+	<br/><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Erkki JO Soini, Tarja Rissanen, Jari Tiihonen, Markku Eronen, Sheilagh Hodgins, and Olli-Pekka Ryyn&auml;nen</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt2-2"><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >SPT-2 Knowledge Discovery and Knowledge-based Techniques and
+Systems in Medicine II</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >: Mykola Pechenizkiy</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Reliability Estimators for Classification by Decomposition Method: Experiments in the Medical Domain</span></em>
+	<br/><span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >Paolo Soda and Giulio Iannello</span></li>
+
+<li><em><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >HIDE: An Integrated System for Health Information DE-identification</span></em>
+	<br/><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >James Gardner and Li Xiong</span></li>
+
+<li><em><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >Atherosclerosis Risk Assessment using Rule-based Approach</span></em>
+	<br/><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >Petr Berka and Marie Tome&#154;kov&aacute;</span></li>
+
+<li><em><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >Classification of Task Driven Swaying Paths</span></em>
+	<br/><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >Jyrki Rasku and Martti Juhola</span></li>
+
+<li><em><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >Adaptive K-Local Hyperplane (AKLH) Classifiers on Semantic Spaces to Determine Health Consumer Webpage Metadata</span></em>
+	<br/><span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >Guocai Chen, Jim Warren, Tao Yang, and Vojislav Kecman</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt2-3"><span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >SPT-2 Knowledge Discovery and Knowledge-based Techniques and
+Systems in Medicine III</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >: Mykola Pechenizkiy</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >How to Improve Medical Image Diagnosis through Association Rules: The IDEA Method</span></em>
+	<br/><span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >Marcela Ribeiro, Agma Traina, Caetano Traina, Natalia Rosa, and Paulo Azevedo-Marques</span></li>
+
+<li><em><span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >Content-based Retrieval of Medical Images by Continuous Feature Selection</span></em>
+	<br/><span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >Pedro H. Bugatti, Marcela Ribeiro, Agma Traina, and Caetano Traina</span></li>
+
+<li><em><span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >A Novel Approach to Extract Structured Motifs by Multi-Objective Genetic Algorithm</span></em>
+	<br/><span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >Mehmet Kaya and Melikali G&uuml;&ccedil;</span></li>
+
+<li><em><span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >An Integrated Data Mining System for Patient Monitoring with Applications on Asthma Care</span></em>
+	<br/><span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >Vincent S. Tseng, Chao-Hui Lee, and Jessie Chia-Yu Chen</span></li>
+
+<li><em><span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >Comparing Posturographic Time Series through Events Detection</span></em>
+	<br/><span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >Juan Alfonso Lara, Guillermo Moreno, Aurora P&eacute;rez, Juan Pedro Valente, and &AACUTE;frica L&oacute;pez-Illescas</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt3-1"><span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >SPT-3 Ontologies for Biomedical Systems I</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >: Tharam Dillon</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >Semantic Visualization of Patient Information</span></em>
+	<br/><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >Sonja Zillner, Tam&aacute;s Hauer, Dmitry Rogulin, Alexey Tsymbal, Martin Huber, and Tony Solomonides</span></li>
+
+<li><em><span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >BOGENVI: A Biomedical Ontology for Modelling Gene*Environment Interactions on
+Intermediate Phenotypes in Nutrigenomics Research</span></em>
+	<br/><span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >Antonio Fabregat, Elisabet Barrera, Mar&iacute;a Arregui, Olga Portol&eacute;s, Dolores Corella, and Oscar Coltell</span></li>
+
+<li><em><span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >Process of Building a Vocabulary for the Infection Domain</span></em>
+	<br/><span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >Gayo Diallo, Patty Kostkova, Gawesh Jawaheer, Simon Jupp, and Robert Stevens</span></li>
+
+<li><em><span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >Use of Protein Ontology to Enable Data Exchange for Complex Proteomic Experiments</span></em>
+	<br/><span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >Amandeep Sidhu, Tharam Dillon and Elizabeth Chang</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt3-2"><span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >SPT-3 Ontologies for Biomedical Systems II</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >: Tharam Dillon</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >A Semantic Web Technology Based Approach to Identify Hypertensive Patients for Follow-Up/Recall</span></em>
+	<br/><span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >Thusitha Mabotuwana and Jim Warren</span></li>
+
+<li><em><span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >The ACGT Master Ontology on Cancer-A New Terminology Source for Oncological Practice</span></em>
+	<br/><span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >Mathias Brochhausen, Gabriele Weiler, Cristian Cocos, Holger Stenzhorn, Norbert Graf, Martin D&ouml;rr, and Manolis Tsiknakis</span></li>
+
+<li><em><span class="coloringspan" id="282" onmousedown="md(this)" onmouseup="mu(this)" >Thinking PubMed: An Innovative System for Mental Health Domain</span></em>
+	<br/><span class="coloringspan" id="283" onmousedown="md(this)" onmouseup="mu(this)" >Maja Hadzic, Russel D'Souza, Fedja Hadzic, and Tharam Dillon</span></li>
+
+<li><em><span class="coloringspan" id="284" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Generation of Integration and Preprocessing Ontologies for Biomedical Sources in a Distributed Scenario</span></em>
+	<br/><span class="coloringspan" id="285" onmousedown="md(this)" onmouseup="mu(this)" >Alberto Anguita, David P&eacute;rez-Rey, Jos&eacute; Crespo, and Victor Maojo</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt4-1"><span class="coloringspan" id="286" onmousedown="md(this)" onmouseup="mu(this)" >SPT-4 Healthgrid Computing-Applications to Biomedical Research and Healthcare I</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="287" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="288" onmousedown="md(this)" onmouseup="mu(this)" >: Maria Mirto</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="289" onmousedown="md(this)" onmouseup="mu(this)" >Review of HealthGrid 2008: "Global HealthGrid: eScience meets Biomedical Informatics"</span></em>
+	<br/><span class="coloringspan" id="290" onmousedown="md(this)" onmouseup="mu(this)" >Tony Solomonides</span></li>
+
+<li><em><span class="coloringspan" id="291" onmousedown="md(this)" onmouseup="mu(this)" >Web-based System for Advanced Heart Disease Identification using Grid Computing Technology</span></em>
+	<br/><span class="coloringspan" id="292" onmousedown="md(this)" onmouseup="mu(this)" >Chang Hee Han, Chan-Hyun Youn, and Wooram Jung</span></li>
+
+<li><em><span class="coloringspan" id="293" onmousedown="md(this)" onmouseup="mu(this)" >The Practical Experiences with Deployment of Advanced Medical Teleconsultation System over Public IT Infrastructure</span></em>
+	<br/><span class="coloringspan" id="294" onmousedown="md(this)" onmouseup="mu(this)" >Jacek Ca&#322;a, &#321;ukasz Czekierda, Micha&#322; Nowak, and Krzysztof Zieli&#324;ski</span></li>
+
+<li><em><span class="coloringspan" id="295" onmousedown="md(this)" onmouseup="mu(this)" >A GRelC based Data Grid Data Management Environment</span></em>
+	<br/><span class="coloringspan" id="296" onmousedown="md(this)" onmouseup="mu(this)" >Sandro Fiore, Maria Mirto, Massimo Cafaro, Salvatore Vadacca, Alessandro Negro, and Giovanni Aloisio</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt4-2"><span class="coloringspan" id="297" onmousedown="md(this)" onmouseup="mu(this)" >SPT-4 Healthgrid Computing-Applications to Biomedical Research and Healthcare II</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="298" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="299" onmousedown="md(this)" onmouseup="mu(this)" >: Maria Mirto</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="300" onmousedown="md(this)" onmouseup="mu(this)" >@neurIST-Towards a System Architecture for Advanced Disease Management through Integration of Heterogeneous Data, Computing, and Complex Processing Services</span></em>
+	<br/><span class="coloringspan" id="301" onmousedown="md(this)" onmouseup="mu(this)" >Hariharan Rajasekaran, Peer Hasselmeyer, Luigi Lo Iacono, Jochen Fingberg, Paul Summers, Sigfried Benkner, Gerhard Engelbrecht, Antonio Arbona, Alessandro Chiarini, Christoph Friedrich, Martin Hofmann-Apitius, Bob Moore, Philippe Bijlenga, Jimison Iavindrasana, Henning M&uuml;ller, Rod Hose, Robert Dunlop, Alejandro Frangi, and Kai Kumpf</span></li>
+
+<li><em><span class="coloringspan" id="302" onmousedown="md(this)" onmouseup="mu(this)" >Using the Grid for Enhancing the Performance of a Medical Image Search Engine</span></em>
+	<br/><span class="coloringspan" id="303" onmousedown="md(this)" onmouseup="mu(this)" >Mikko Juhani Pitkanen, Xin Zhou, Antti Eero Johannes Hyv&auml;rinen, and Henning M&uuml;ller</span></li>
+
+<li><em><span class="coloringspan" id="304" onmousedown="md(this)" onmouseup="mu(this)" >Virtual Laboratory for Development and Execution of Biomedical Collaborative Applications</span></em>
+	<br/><span class="coloringspan" id="305" onmousedown="md(this)" onmouseup="mu(this)" >Marian Bubak, Tomasz Gubala, Maciej Malawski, Bartosz Balis, Wlodzimierz Funika, Tomasz Bartynski, Eryk Ciepiela, Daniel Harezlak, Marek Kasztelnik, Joanna Kocot, Dariusz Krol, Piotr Nowakowski, Michal Pelczar, Jakub Wach, Matthias Assel, and Alfredo Tirado-Ramos</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt5-1"><span class="coloringspan" id="306" onmousedown="md(this)" onmouseup="mu(this)" >SPT-5 Technology Enhanced Learning in Medical Education I</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="307" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="308" onmousedown="md(this)" onmouseup="mu(this)" >: Panagiotis Bamidis</span>
+</p>
+<ol>
+<li><em><span class="coloringspan" id="309" onmousedown="md(this)" onmouseup="mu(this)" >Knowledge Assesment for Annotation Techniques on Medical eLearning Objects</span></em>
+	<br/><span class="coloringspan" id="310" onmousedown="md(this)" onmouseup="mu(this)" >Dorian Gorgan and Teodor Stefanut</span></li>
+
+<li><em><span class="coloringspan" id="311" onmousedown="md(this)" onmouseup="mu(this)" >New Approaches in Teaching Medical Informatics to Medical Students</span></em>
+	<br/><span class="coloringspan" id="312" onmousedown="md(this)" onmouseup="mu(this)" >Panagiotis Bamidis, Stathis Konstantinidis, Eleni Kaldoudi, Charalampos Bratsas, Maria Nikolaidou, Dimitris Koufogiannis, Nicos Maglaveras, and Costas Pappas</span></li>
+
+<li><em><span class="coloringspan" id="313" onmousedown="md(this)" onmouseup="mu(this)" >Problem-Based Learning via Web 2.0 Technologies</span></em>
+	<br/><span class="coloringspan" id="314" onmousedown="md(this)" onmouseup="mu(this)" >Eleni Kaldoudi, Panagiotis Bamidis, Miltiadis Papaioakeim, and Vassilis Vargemezis</span></li>
+
+<li><em><span class="coloringspan" id="315" onmousedown="md(this)" onmouseup="mu(this)" >Computer-Based Training System for Simulating Wrist Arthroscopy</span></em>
+	<br/><span class="coloringspan" id="316" onmousedown="md(this)" onmouseup="mu(this)" >Fadi Yaacoub, Yskandar Hamam, and Antoine Abche</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt5-2"><span class="coloringspan" id="317" onmousedown="md(this)" onmouseup="mu(this)" >SPT-5 Technology Enhanced Learning in Medical Education II</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="318" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="319" onmousedown="md(this)" onmouseup="mu(this)" >: Eleni Kaldoudi</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="320" onmousedown="md(this)" onmouseup="mu(this)" >Developing Competence Assessment Procedure for Spinal Anaesthesia</span></em>
+	<br/><span class="coloringspan" id="321" onmousedown="md(this)" onmouseup="mu(this)" >Dajie Zhang, Dietrich Albert, Cord Hockemeyer, Dorothy Breen, Zsuszsanna Kulcs&aacute;r, George Shorten, Annette Aboulafia, and Erik L&ouml;vquist</span></li>
+
+<li><em><span class="coloringspan" id="322" onmousedown="md(this)" onmouseup="mu(this)" >Acquiring Expertise in Medical Radiology through Long-Term Interactions</span></em>
+	<br/><span class="coloringspan" id="323" onmousedown="md(this)" onmouseup="mu(this)" >Alexandre Direne, Marcos Suny&eacute;, Marcos Castilho, Fabiano Silva, Luis Bona, Laura Garc&iacute;a, and Donia Scott</span></li>
+
+<li><em><span class="coloringspan" id="324" onmousedown="md(this)" onmouseup="mu(this)" >A SCORM Compliant e-Learning Platform for Cervical Cancer Prevention</span></em>
+	<br/><span class="coloringspan" id="325" onmousedown="md(this)" onmouseup="mu(this)" >Stathis Konstantinidis, Anastasia Kitsou, Panagiotis Bamidis, Themistoklis Mikos, Menelaos Zafrakas, Maria Nikolaidou, Costas Pappas, and Theodoros Agorastos</span></li>
+
+<li><em><span class="coloringspan" id="326" onmousedown="md(this)" onmouseup="mu(this)" >Imagistic Database for Medical e-Learning</span></em>
+	<br/><span class="coloringspan" id="327" onmousedown="md(this)" onmouseup="mu(this)" >Liana Stanescu, Dan Burdescu, Anca Ion, and Andrei Panus</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt5-3"><span class="coloringspan" id="328" onmousedown="md(this)" onmouseup="mu(this)" >SPT-5 Technology Enhanced Learning in Medical Education III</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="329" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="330" onmousedown="md(this)" onmouseup="mu(this)" >: Stathis Konstantinidis</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="331" onmousedown="md(this)" onmouseup="mu(this)" >VIMED: Fish-tank Approach to Nurse Practical Training</span></em>
+	<br/><span class="coloringspan" id="332" onmousedown="md(this)" onmouseup="mu(this)" >Jonathan Barr, Fatma Mili, Laura Pittiglio, and Margaret Harris</span></li>
+
+<li><em><span class="coloringspan" id="333" onmousedown="md(this)" onmouseup="mu(this)" >Towards Technology-Supported Surgical Training</span></em>
+	<br/><span class="coloringspan" id="334" onmousedown="md(this)" onmouseup="mu(this)" >Minna Silvennoinen</span></li>
+
+<li><em><span class="coloringspan" id="335" onmousedown="md(this)" onmouseup="mu(this)" >Evaluation of Professional Practices in Transfusion Medicine: Design and Implementation of a Web-based and Tutored ePortfolio</span></em>
+	<br/><span class="coloringspan" id="336" onmousedown="md(this)" onmouseup="mu(this)" >Pascal Staccini, Sophie Vessi&egrave;re, St&eacute;phanie Jullien, Christophe Bordonado, Jean-Fran&ccedil;ois Quaranta, Patrice Roussel, Jean-Jacques Cabaud, and Philippe Rouger</span></li>
+
+<li><em><span class="coloringspan" id="337" onmousedown="md(this)" onmouseup="mu(this)" >VITA-An Interactive 3-D Visualization System to Enhance Student Understanding of Mathematical Concepts in Medical Decision-making</span></em>
+	<br/><span class="coloringspan" id="338" onmousedown="md(this)" onmouseup="mu(this)" >M. Sriram Iyengar, John Svirbely, Mirabela Rusu, and Jack Smith</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt6"><span class="coloringspan" id="339" onmousedown="md(this)" onmouseup="mu(this)" >SPT-6 Personalisation for e-Health</span> </span></h3>
+<p class="pindent"><em><span class="coloringspan" id="340" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="341" onmousedown="md(this)" onmouseup="mu(this)" >: C&eacute;cile Paris</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="342" onmousedown="md(this)" onmouseup="mu(this)" >Generation of Personalised Advisory Messages: An Ontology Based Approach</span></em>
+	<br/><span class="coloringspan" id="343" onmousedown="md(this)" onmouseup="mu(this)" >Elisabetta Erriquez and Floriana Grasso</span></li>
+
+<li><em><span class="coloringspan" id="344" onmousedown="md(this)" onmouseup="mu(this)" >What Do You Want to Know? Investigating the Information Requirements of Patient Supporters</span></em>
+	<br/><span class="coloringspan" id="345" onmousedown="md(this)" onmouseup="mu(this)" >Wendy Moncur, Judith Masthoff, and Ehud Reiter</span></li>
+
+<li><em><span class="coloringspan" id="346" onmousedown="md(this)" onmouseup="mu(this)" >Personalizing Patient Education using Internet Health Resources and EPR Data:
+Pilot Evaluation of the STEPPS Prototype System</span></em>
+	<br/><span class="coloringspan" id="347" onmousedown="md(this)" onmouseup="mu(this)" >Persephone Doupi, Mark van Wijk, Jacobus van Wyk, and Johan van der Lei</span></li>
+
+<li><em><span class="coloringspan" id="348" onmousedown="md(this)" onmouseup="mu(this)" >Home Care Individual Intervention Plans in the K4Care Platform</span></em>
+	<br/><span class="coloringspan" id="349" onmousedown="md(this)" onmouseup="mu(this)" >David Isern, Miquel Millan, Antonio Moreno, Gianfranco Pedone, and L&aacute;szl&oacute; Zsolt Varga</span></li>
+
+<li><em><span class="coloringspan" id="350" onmousedown="md(this)" onmouseup="mu(this)" >Information Services to Promote Family Engagement in Healthy Living</span></em>
+	<br/><span class="coloringspan" id="351" onmousedown="md(this)" onmouseup="mu(this)" >Dipak Bhandari, Nathalie Colineau, Stephen Giugni, Peter Marendy, C&eacute;cile Paris, and Ross Wilkinson</span></li>
+
+<li><em><span class="coloringspan" id="352" onmousedown="md(this)" onmouseup="mu(this)" >Neonatal Intensive Care Information for Parents-An Affective Approach</span></em>
+	<br/><span class="coloringspan" id="353" onmousedown="md(this)" onmouseup="mu(this)" >Saad Mahamood, Ehud Reiter, and Chris Mellish</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt7-1"><span class="coloringspan" id="354" onmousedown="md(this)" onmouseup="mu(this)" >SPT-7 Health Knowledge Management I</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="355" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="356" onmousedown="md(this)" onmouseup="mu(this)" >: Bridget Kane</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="357" onmousedown="md(this)" onmouseup="mu(this)" >Implications of Shared Interactive Displays for Work at a Surgery Ward: Coordination, Articulation Work and Context-awareness</span></em>
+	<br/><span class="coloringspan" id="358" onmousedown="md(this)" onmouseup="mu(this)" >Claus Bossen and Lis Witte Kj&aelig;r Jensen</span></li>
+
+<li><em><span class="coloringspan" id="359" onmousedown="md(this)" onmouseup="mu(this)" >Supporting Practices of Positive Redundancy for Seamless Care</span></em>
+	<br/><span class="coloringspan" id="360" onmousedown="md(this)" onmouseup="mu(this)" >Federico Cabitza and Carla Simone</span></li>
+
+<li><em><span class="coloringspan" id="361" onmousedown="md(this)" onmouseup="mu(this)" >Support for Informal Information Use and its Formalization in Medical Work</span></em>
+	<br/><span class="coloringspan" id="362" onmousedown="md(this)" onmouseup="mu(this)" >Charlotte Tang and Sheelagh Carpendale</span></li>
+
+<li><em><span class="coloringspan" id="363" onmousedown="md(this)" onmouseup="mu(this)" >Public Yet Private: The Status, Durability and Visibility of Handover Sheets</span></em>
+	<br/><span class="coloringspan" id="364" onmousedown="md(this)" onmouseup="mu(this)" >Rebecca Randell, Peter Woodward, Stephanie Wilson, and Julia Galliers</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt7-2"><span class="coloringspan" id="365" onmousedown="md(this)" onmouseup="mu(this)" >SPT-7 Health Knowledge Management II</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="366" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="367" onmousedown="md(this)" onmouseup="mu(this)" >: Saturnino Luz</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="368" onmousedown="md(this)" onmouseup="mu(this)" >Supporting Enhanced Collaboration in Distributed Multidisciplinary Care Team Meetings</span></em>
+	<br/><span class="coloringspan" id="369" onmousedown="md(this)" onmouseup="mu(this)" >Jane Li, Tim Mansfield, and Susan Hansen</span></li>
+
+<li><em><span class="coloringspan" id="370" onmousedown="md(this)" onmouseup="mu(this)" >Information Quality in Healthcare: Coherence of Data Compared between Organization's Electronic Patient Records</span></em>
+	<br/><span class="coloringspan" id="371" onmousedown="md(this)" onmouseup="mu(this)" >Merja Miettinen and Maritta Korhonen</span></li>
+
+<li><em><span class="coloringspan" id="372" onmousedown="md(this)" onmouseup="mu(this)" >Taking Lessons from Teleconference to Improve Same Time, Same Place Interaction</span></em>
+	<br/><span class="coloringspan" id="373" onmousedown="md(this)" onmouseup="mu(this)" >Bridget Kane and Saturnino Luz</span></li>
+
+<li><em><span class="coloringspan" id="374" onmousedown="md(this)" onmouseup="mu(this)" >A Design Rationale-based Model as an Add-on to Electronic Medical Records</span></em>
+	<br/><span class="coloringspan" id="375" onmousedown="md(this)" onmouseup="mu(this)" >Cleo Billa, Claudia Barsottini, and Jacques Wainer</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt8-1"><span class="coloringspan" id="376" onmousedown="md(this)" onmouseup="mu(this)" >SPT-8 Intelligent Patient Management I</span> </span></h3>
+<p class="pindent"><em><span class="coloringspan" id="377" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="378" onmousedown="md(this)" onmouseup="mu(this)" >: Sally McLean</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="379" onmousedown="md(this)" onmouseup="mu(this)" >Modelling and Performance Measure of a Perinatal Centre in the United Kingdom</span></em>
+	<br/><span class="coloringspan" id="380" onmousedown="md(this)" onmouseup="mu(this)" >Md Asaduzzaman and Thierry Chaussalet</span></li>
+
+<li><em><span class="coloringspan" id="381" onmousedown="md(this)" onmouseup="mu(this)" >Optimal Control of Patient Admissions to Satisfy Resource Restrictions</span></em>
+	<br/><span class="coloringspan" id="382" onmousedown="md(this)" onmouseup="mu(this)" >Lalit Garg, Sally MCclean, Brian Meenan, and Peter Millard</span></li>
+
+<li><em><span class="coloringspan" id="383" onmousedown="md(this)" onmouseup="mu(this)" >Modeling the Survival of Hip Fracture Patients using a Conditional Phase-type Distribution</span></em>
+	<br/><span class="coloringspan" id="384" onmousedown="md(this)" onmouseup="mu(this)" >Adele Marshall and Barry Shaw</span></li>
+
+<li><em><span class="coloringspan" id="385" onmousedown="md(this)" onmouseup="mu(this)" >A Random Effects Sensitivity Analysis for Patient Pathways Model</span></em>
+	<br/><span class="coloringspan" id="386" onmousedown="md(this)" onmouseup="mu(this)" >Shola Adeyemi and Thierry J. Chaussalet</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt8-2"><span class="coloringspan" id="387" onmousedown="md(this)" onmouseup="mu(this)" >SPT-8 Intelligent Patient Management II</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="388" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="389" onmousedown="md(this)" onmouseup="mu(this)" >: Adele Marshall</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="390" onmousedown="md(this)" onmouseup="mu(this)" >A Gaussian Mixture Model Approach to Grouping Patients According to their Hospital Length of Stay</span></em>
+	<br/><span class="coloringspan" id="391" onmousedown="md(this)" onmouseup="mu(this)" >Elia El-Darzi, Revlin Abbi, Christos Vasilakis, and Peter Millard</span></li>
+
+<li><em><span class="coloringspan" id="392" onmousedown="md(this)" onmouseup="mu(this)" >The Effects of Anti-Hypertensive Drugs Evaluated Using Markov Modelling for Northern Ireland Chronic Kidney Disease Patients</span></em>
+	<br/><span class="coloringspan" id="393" onmousedown="md(this)" onmouseup="mu(this)" >Andrea Rainey, Karen Cairns, Adele Marshall, Michael Quinn, Gerard Savage, and Damian Fogarty</span></li>
+
+<li><em><span class="coloringspan" id="394" onmousedown="md(this)" onmouseup="mu(this)" >Gathering Precise Patient Medical History with an Ontology-driven Adaptive Questionnaire</span></em>
+	<br/><span class="coloringspan" id="395" onmousedown="md(this)" onmouseup="mu(this)" >Matt-Mouley Bouamrane, Alan Rector, and Martin Hurrell</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt9-1"><span class="coloringspan" id="396" onmousedown="md(this)" onmouseup="mu(this)" >SPT-9 Computer Based Decision Systems in Biomedicine I</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="397" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="398" onmousedown="md(this)" onmouseup="mu(this)" >: Francesco Tortorella</span>
+</p>
+<ol>
+<li><em><span class="coloringspan" id="399" onmousedown="md(this)" onmouseup="mu(this)" >Thyroid Texture Representation via Noise Resistant Image Features</span></em>
+	<br/><span class="coloringspan" id="400" onmousedown="md(this)" onmouseup="mu(this)" >Eystratios Keramidas, Dimitris Iakovidis, Dimitris Maroulis, and Nikos Dimitropoulos</span></li>
+
+<li><em><span class="coloringspan" id="401" onmousedown="md(this)" onmouseup="mu(this)" >A Two-Step Approach for Feature Selection and Classifier Ensemble Construction in Computer-Aided Diagnosis</span></em>
+	<br/><span class="coloringspan" id="402" onmousedown="md(this)" onmouseup="mu(this)" >Michael Lee, Lilla Boroczky, Kivilcim Sungur-Stasik, Aaron Cann, Alain Borczuk, Steven Kawut, and Charles Powell</span></li>
+
+<li><em><span class="coloringspan" id="403" onmousedown="md(this)" onmouseup="mu(this)" >A Supervised Pattern Recognition Approach for Human Movement Onset Detection</span></em>
+	<br/><span class="coloringspan" id="404" onmousedown="md(this)" onmouseup="mu(this)" >Paolo Soda, Stefano Mazzoleni, Giuseppe Cavallo, Eugenio Guglielmelli, and Giulio Iannello</span></li>
+
+<li><em><span class="coloringspan" id="405" onmousedown="md(this)" onmouseup="mu(this)" >Machine Learning Recognition of Otoneurogical Patients by Means of the Results of Vestibulo-Ocular Signal Analysis</span></em>
+	<br/><span class="coloringspan" id="406" onmousedown="md(this)" onmouseup="mu(this)" >Martti Juhola, Heikki Aalto, and Timo Hirvonen</span></li>
+
+<li><em><span class="coloringspan" id="407" onmousedown="md(this)" onmouseup="mu(this)" >Evaluating a Case-Based Classifier for Biomedical Applications</span></em>
+	<br/><span class="coloringspan" id="408" onmousedown="md(this)" onmouseup="mu(this)" >Suzanne Little, Petra Perner, and Ovidio Salvetti</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="spt9-2"><span class="coloringspan" id="409" onmousedown="md(this)" onmouseup="mu(this)" >SPT-9 Computer Based Decision Systems in Biomedicine II</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="410" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="411" onmousedown="md(this)" onmouseup="mu(this)" >: Paolo Soda</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="412" onmousedown="md(this)" onmouseup="mu(this)" >Lung Tissue Classification in HRCT Data Integrating the Clinical Context</span></em>
+	<br/><span class="coloringspan" id="413" onmousedown="md(this)" onmouseup="mu(this)" >Adrien Depeursinge, Jimison Iavindrasana, Gilles Cohen, Alexandra Platon, Pierre-Alexandre Poletti, and Henning M&uuml;ller</span></li>
+
+<li><em><span class="coloringspan" id="414" onmousedown="md(this)" onmouseup="mu(this)" >A Multi-Classifier System for Pulmonary Nodule Classification</span></em>
+	<br/><span class="coloringspan" id="415" onmousedown="md(this)" onmouseup="mu(this)" >Michela Antonelli, Marco Cococcioni, Beatrice Lazzerini, Francesco Marcelloni, and Dan Stefanescu</span></li>
+
+<li><em><span class="coloringspan" id="416" onmousedown="md(this)" onmouseup="mu(this)" >Detection of Clusters of Microcalcifications in Mammograms: A Multi Classifier Approach</span></em>
+	<br/><span class="coloringspan" id="417" onmousedown="md(this)" onmouseup="mu(this)" >Mario Molinara, Francesco Tortorella, Claudio Marrocco, and Ciro D'Elia</span></li>
+
+<li><em><span class="coloringspan" id="418" onmousedown="md(this)" onmouseup="mu(this)" >Fully Automatic Segmentation of Abdominal Organs from CT Images using Fast Marching Methods</span></em>
+	<br/><span class="coloringspan" id="419" onmousedown="md(this)" onmouseup="mu(this)" >Paola Campadelli, Elena Casiraghi, and Stella Pratissoli</span></li>
+
+<li><em><span class="coloringspan" id="420" onmousedown="md(this)" onmouseup="mu(this)" >Towards a Clinical Decision Support System for Pregnancies of Unknown Location</span></em>
+	<br/><span class="coloringspan" id="421" onmousedown="md(this)" onmouseup="mu(this)" >Ben Van Calster, Sabine Van Huffel, Dirk Timmerman, Emma Kirk, Tom Bourne, and George Condous</span></li>
+</ol>
+
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="ss1"><span class="coloringspan" id="422" onmousedown="md(this)" onmouseup="mu(this)" >SS-1 Bioinformatics and its Medical Applications</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="423" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="424" onmousedown="md(this)" onmouseup="mu(this)" >: Mykola Pechenizkiy</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="425" onmousedown="md(this)" onmouseup="mu(this)" >A New Path Length Measure Based on GO for Gene Similarity with Evaluation Using SGD Pathways</span></em>
+	<br/><span class="coloringspan" id="426" onmousedown="md(this)" onmouseup="mu(this)" >Hisham Al-Mubaid and Anurag Nagar</span></li>
+
+<li><em><span class="coloringspan" id="427" onmousedown="md(this)" onmouseup="mu(this)" >Application of Tree Growing up Algorithm to Protein Secondary Structure Estimation</span></em>
+	<br/><span class="coloringspan" id="428" onmousedown="md(this)" onmouseup="mu(this)" >Seda Arslan Tuncer and Ali Karci</span></li>
+
+<li><em><span class="coloringspan" id="429" onmousedown="md(this)" onmouseup="mu(this)" >Visual Analytical Methods to Identify Family Clustered Diseases</span></em>
+	<br/><span class="coloringspan" id="430" onmousedown="md(this)" onmouseup="mu(this)" >Christian Fuchsberger, Lukas Forer, Silvia Miksch, Cristian Pattaro, Andrew Hicks, and Peter Pramstaller</span></li>
+
+<li><em><span class="coloringspan" id="431" onmousedown="md(this)" onmouseup="mu(this)" >A Precise and Automatic Gridding Approach to Noise-Affected and Distorted Microarray Images</span></em>
+	<br/><span class="coloringspan" id="432" onmousedown="md(this)" onmouseup="mu(this)" >Eleni Zacharia and Dimitris Maroulis</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="ss2"><span class="coloringspan" id="433" onmousedown="md(this)" onmouseup="mu(this)" >SS-2 Machine Learning Methods for High-Dimensional Data in Bio-medicine</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="434" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="435" onmousedown="md(this)" onmouseup="mu(this)" >: Frank-Michael Schleif</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="436" onmousedown="md(this)" onmouseup="mu(this)" >Feature Selection by Lorentzian Peak Reconstruction for 1NMR Post-Processing</span></em>
+	<br/><span class="coloringspan" id="437" onmousedown="md(this)" onmouseup="mu(this)" >Hyung-Won Koh, Sasidhar Maddula, J&ouml;rg Lambert, Roland Hergenr&ouml;der, and Lars Hildebrand</span></li>
+
+<li><em><span class="coloringspan" id="438" onmousedown="md(this)" onmouseup="mu(this)" >Texture based Classification and Segmentation of Tissues using DT-CWT Feature Extraction Methods</span></em>
+	<br/><span class="coloringspan" id="439" onmousedown="md(this)" onmouseup="mu(this)" >Dogu Baran Aydogan, Markus Hannula, Tuukka Arola, Prasun Dastidar, and Jari Hyttinen</span></li>
+
+<li><em><span class="coloringspan" id="440" onmousedown="md(this)" onmouseup="mu(this)" >Sparse Coding Neural Gas for Analysis of Nuclear Magnetic Resonance Spectroscopy</span></em>
+	<br/><span class="coloringspan" id="441" onmousedown="md(this)" onmouseup="mu(this)" >Frank-Michael Schleif, Matthias Ongyerth, and Thomas Villmann</span></li>
+
+<li><em><span class="coloringspan" id="442" onmousedown="md(this)" onmouseup="mu(this)" >Mining Trajectories of Laboratory Data using Multiscale Matching and Clustering</span></em>
+	<br/><span class="coloringspan" id="443" onmousedown="md(this)" onmouseup="mu(this)" >Shusaku Tsumoto and Shoji Hirano</span></li>
+
+<li><em><span class="coloringspan" id="444" onmousedown="md(this)" onmouseup="mu(this)" >Effectiveness of Local Feature Selection in Ensemble Learning for Prediction of Antimicrobial Resistance</span></em>
+	<br/><span class="coloringspan" id="445" onmousedown="md(this)" onmouseup="mu(this)" >Seppo Puuronen, Mykola Pechenizkiy, and Alexey Tsymbal</span></li>
+</ol>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="ss3"><span class="coloringspan" id="446" onmousedown="md(this)" onmouseup="mu(this)" >SS-3 Data Integration in Biomedicine</span></span></h3>
+<p class="pindent"><em><span class="coloringspan" id="447" onmousedown="md(this)" onmouseup="mu(this)" >Chair</span></em><span class="coloringspan" id="448" onmousedown="md(this)" onmouseup="mu(this)" >: Thoralf T&ouml;pel</span> 
+</p>
+<ol>
+<li><em><span class="coloringspan" id="449" onmousedown="md(this)" onmouseup="mu(this)" >Asynchronous Data Replication: A National Integration Strategy for Databases on Telemedicine Network</span></em>
+	<br/><span class="coloringspan" id="450" onmousedown="md(this)" onmouseup="mu(this)" >Douglas Macedo, Hilton Perantunes, Rafael Andrade, Aldo von Wangenheim, and Mario Antonio Ribeiro Dantas Dantas</span></li>
+
+<li><em><span class="coloringspan" id="451" onmousedown="md(this)" onmouseup="mu(this)" >Medical Data Integration and the Semantic Annotation of Medical Protocols</span></em>
+	<br/><span class="coloringspan" id="452" onmousedown="md(this)" onmouseup="mu(this)" >Dmitry Rogulin, Ernesto Jim&eacute;nez Ruiz, Richard McClatchey, Rafael Berlanga, Tam&aacute;s Hauer, Jetendr Shamdasani, Sonja Zillner, Andrew Branson, Victoria Nebot, David Manset, and Joerg Freund</span></li>
+
+<li><em><span class="coloringspan" id="453" onmousedown="md(this)" onmouseup="mu(this)" >Towards More Integrated Implementation of Healthcare Information Systems: Using the 3LGM2 for Modeling the IHE-Scheduled Workflow Integration Profile</span></em>
+	<br/><span class="coloringspan" id="454" onmousedown="md(this)" onmouseup="mu(this)" >Rada Hussein and Alfred Winter</span></li>
+
+<li><em><span class="coloringspan" id="455" onmousedown="md(this)" onmouseup="mu(this)" >A Customizable Framework to Access and Interconnect Clinical Patient Data and
+Molecular Biology Information</span></em>
+	<br/><span class="coloringspan" id="456" onmousedown="md(this)" onmouseup="mu(this)" >Thoralf T&ouml;pel</span></li>
+</ol>
+
+
+        </div>
+
+        <div class="dummy"><span class="coloringspan" id="457" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></div>
+	<div id="footer">
+	  <p><span class="coloringspan" id="458" onmousedown="md(this)" onmouseup="mu(this)" >Please, send emails with further questions to</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:cbms2008@jyu.fi"><span class="coloringspan" id="459" onmousedown="md(this)" onmouseup="mu(this)" >cbms2008@jyu.fi</span></span><span class="coloringspan" id="460" onmousedown="md(this)" onmouseup="mu(this)" >.</span></p>
+	  <!--
+          <p>
+    <span onclick="return false" style="text-decoration:underline; color:blue" href="http://validator.w3.org/check?uri=referer"><img onmousedown="imd(this)" src="cfp_files/valid-xhtml10.gif" alt="Valid XHTML 1.0 Transitional" border="0" height="31" width="88"></span>
+	&nbsp;	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://jigsaw.w3.org/css-validator/">
+  <img onmousedown="imd(this)" style="border: 0pt none ; width: 88px; height: 31px;" src="cfp_files/vcss.png" alt="Valid CSS!">
+ </span>
+  </p>
+          -->
+  </div>
+  <br clear="all"><!-- without this little <br /> NS6 and IE5PC do not stretch the frame div down to encopass the content DIVs -->
+</div>
+
+<div class="dummy">
+<p>  <span class="coloringspan" id="461" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span>

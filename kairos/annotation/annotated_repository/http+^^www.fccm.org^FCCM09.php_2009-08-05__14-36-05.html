@@ -1,0 +1,575 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN">
+<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.fccm.org^FCCM09.php_2009-08-05__14-36-05.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.fccm.org^FCCM09.php_2009-08-05__14-36-05.yaml created on Wed Aug 05 17:31:55 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+  <title>FCCM IEEE Symposium</title>
+  <META name="description" content="IEEE Symposium on Field-Programmable Custom Computing Machines">
+  <META name="keywords" content="fccm, reconfigurable, reconfigurable computing, custom computing, fpga, fpgas">
+  <link rel="stylesheet" href="fccm.css">
+  <link rel="stylesheet" href="fccm2.css">
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<!-- HEADER -->
+<TABLE>
+<TR><TD>
+  <TABLE width="100%">
+    <TR><TD class="Title"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >FCCM</span></TD>
+    <TD class="TitleDates">
+<!--    <TABLE border="0" cellspacing="0" cellpadding="0">
+    <TR><TD align="left" nowrap>Conference Dates:</TD><TD>&nbsp;&nbsp;&nbsp;</TD><TD align="right" nowrap>April 5-7, 2009</TD></TR>
+	<TR><TD align="left" nowrap>Submission Deadline:</TD><TD>&nbsp;&nbsp;&nbsp;</TD><TD align="right" nowrap>Jan 16, 2009</TD></TR>
+    <TR><TD align="left" nowrap>Online Registration:</TD><TD>&nbsp;</TD><TD align="right" nowrap>CLOSED</TD></TR>
+    <TR><TD align="left" nowrap>Location:</TD><TD>&nbsp;&nbsp;&nbsp;</TD><TD align="right" nowrap>Napa, CA</TD></TR></TABLE>-->
+    </TD>
+    </TR>
+  </TABLE>
+</TD></TR>
+<TR><TD class="SubTitle"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Field-Programmable Custom Computing Machines</span></TD></TR>
+</TABLE>
+
+<!-- 2 COLUMN FORMAT -->
+<TABLE>
+<TR>
+
+<!-- LEFT MENU -->
+<TD class="Menu">
+  <TABLE cellspacing="8">
+    <TR><TD class="MenuItem"><span onclick="return false" style="text-decoration:underline; color:blue" href="index.php"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >FCCM Home</span></span></TD></TR>
+    <TR><TD class="MenuItem"><span onclick="return false" style="text-decoration:underline; color:blue" href="progcommittee2010.php"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >2010 Program Committee</span></span></TD></TR>
+    <TR><TD class="MenuItem"><b><span onclick="return false" style="text-decoration:underline; color:blue" href="cfparticipation2009.php"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >2009 Call</span><br /><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >For Participation</span></span></b></TD></TR>
+    <TR><TD class="MenuItem"><span onclick="return false" style="text-decoration:underline; color:blue" href="FCCM09.php"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >2009 Program</span></span></TD></TR> 
+<!--    <TR><TD class="MenuItem"><span onclick="return false" style="text-decoration:underline; color:blue" href="hotelreg2009.php">Location, Travel, & Registration</span></TD></TR> -->
+    <TR><TD class="MenuItem"><span onclick="return false" style="text-decoration:underline; color:blue" href="sponsors2009.php"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >2009 Sponsors</span></span></TD></TR>
+    <TR><TD class="MenuItem"><span onclick="return false" style="text-decoration:underline; color:blue" href="demonight2009.php"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Demo Night</span></span></TD></TR>
+<!--    <TR><TD class="MenuItem"><span onclick="return false" style="text-decoration:underline; color:blue" href="dining2009.php">Napa Restaurants</span></TD></TR> -->
+<!--    <TR><TD class="MenuItem"><span onclick="return false" style="text-decoration:underline; color:blue" href="cfpapers.php">Call For Papers</span></TD></TR>-->
+  </TABLE>
+  <P><BR></P>
+  <TABLE cellspacing="8">
+    <TR><TD class="MenuItem"><span onclick="return false" style="text-decoration:underline; color:blue" href="authorinfo.php"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Information For Authors</span></span></TD></TR>
+  </TABLE>
+  <P><BR></P>
+  <TABLE cellspacing="8">
+    <TR><TD class="MenuItem"><span onclick="return false" style="text-decoration:underline; color:blue" href="rellinks.php"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Related Links</span></span></TD></TR>
+    <TR><TD class="MenuItem"><span onclick="return false" style="text-decoration:underline; color:blue" href="pastprog.php"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Past Programs</span></span></TD></TR>
+    <TR><TD class="MenuItem"><span onclick="return false" style="text-decoration:underline; color:blue" href="top10.php"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Top 10 Predictions</span></span></TD></TR>
+  </TABLE>
+  <P><BR></P>
+  <TABLE cellspacing="8">
+    <TR><TD class="MenuItem"><span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:fccm@fccm.org?subject=FCCM%20Information"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Contact</span></span></TD></TR>
+  </TABLE>
+</TD>
+
+<!-- CONTENT -->
+<TD class="Content">
+
+<h1><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >IEEE Symposium on Field-Programmable Custom Computing Machines</span></h1>
+<h3><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >April 5 - April 7, 2009</span><br>
+<span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Napa Valley Marriott, Napa, California</span></h3>
+
+<p class="day"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Sunday, April 5</span></p>
+<table style="text-align: left; width: 100%;" border="0" cellpadding="8" cellspacing="0">
+<tbody>
+<tr>
+<td class="time"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >6:00 PM</span></td>
+<td class="session"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Panel:
+FCCM Research: Beyond
+the Next Five Years</span><br />
+<i><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Panel
+Chair: Wayne
+Luk, Imperial College, London</span></i>
+</td>
+</tr>
+<tr>
+<td class="time2"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >8:00 PM</span></td>
+<td class="session2"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></td>
+</tr>
+</tbody>
+</table>
+<p class="day"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Monday, April 6</span></p>
+<table style="text-align: left; width: 100%;" border="0" cellpadding="8" cellspacing="0">
+<tbody>
+<tr><td class="time"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >8:00 AM</span></td><td class="session"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Registration Opens</span></td></tr>
+<tr><td class="time2"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >8:30 AM</span></td><td class="session2"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Opening Remarks</span></td></tr><tr>
+<td class="time2"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >9:00 AM</span></td>
+<td class="session2"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Session 1: Space and Scientific Applications</span></td>
+</tr>
+<tr>
+<td class="item2" colspan="2" rowspan="1">
+<p><span class="title"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >On-Orbit Flight Results from
+the
+Reconfigurable Cibola Flight Experiment Satellite (CFESat)</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/75/75_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author">
+<span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Michael Caffrey, Michael Wirthlin, William Howes, Daniel Richins, Keith
+Morgan, Diane Roussel-Dupr, Scott Robinson, Anthony Nelson and Anthony
+Salazar</span></span><br><span class="affiliation"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Los Alamos National Laboratory and Brigham Young University</span></span></p>
+<p><span class="title"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Accelerating Cosmological Data Analysis with FPGAs</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/12/12_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Volodymyr Kindratenko and Robert Brunner</span></span><br><span class="affiliation"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >University of Illinois at Urbana-Champaign</span></span></p>
+<p><span class="title"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >FPGA Design Analysis of the Clustering Algorithm for the CERN Large Hadron Collider</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/44/44_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Anthony
+Gregerson, Amin Farmahini-Farahani, Ben Buchli, Steve Naumov, Michail
+Bachtis, Katherine Compton, Michael Schulte, Wesley Smith and Sridhara
+Dasu</span></span><br><span class="affiliation"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >University of Wisconsin, Madison</span></span></p>
+</td>
+</tr>
+<tr><td class="time2"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >10:15 AM</span></td><td class="session2"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Break and Poster Session 1</span></td></tr><tr>
+<td class="time2"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >11:00 AM</span></td>
+<td class="session2"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Session 2: High Speed Application Acceleration</span></td>
+</tr>
+<tr>
+<td class="item2" colspan="2" rowspan="1"><p><span class="title"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Accelerating Quadrature Methods for Option Valuation</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/48/48_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Anson H.T. Tse, David B. Thomas and Wayne Luk</span></span><br><span class="affiliation"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Imperial College</span></span></p>
+<p><span class="title"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Accelerating SPICE Model-Evaluation using FPGAs</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/30/30_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Nachiket Kapre and Andre DeHon</span></span><br><span class="affiliation"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >California Institute of Technology and University of Pennsylvania</span></span></p>
+<p><span class="title"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >FPGA Accelerated Simulation of Biologically Plausible Spiking Neural Networks</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/41/41_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >David B. Thomas and Wayne Luk</span></span><br><span class="affiliation"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Imperial College</span></span></p></td>
+
+</tr>
+<tr><td class="time2"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >12:15 PM</span></td><td class="session2"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></td></tr><tr>
+<td class="time2"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >2:00 PM</span></td>
+<td class="session2"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Session 3: Reconfiguration</span></td>
+</tr>
+<tr>
+<td class="item2" colspan="2" rowspan="1"><p><span class="title"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Generic Software Framework for Adaptive Applications on FPGAs</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/13/13_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Suhaib A. Fahmy, J&#8221;rg Lotze, Juanjo Noguera, Robert Esser and Linda Doyle</span></span><br><span class="affiliation"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Trinity College and Xilinx Research Labs</span></span></p>
+<p><span class="title"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Block, Drop or Roll(back): Alternative Preemption Methods for RH Multi-Tasking</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/82/82_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Kyle Rupnow, Wenyin Fu and Katherine Compton</span></span><br><span class="affiliation"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >University of Wisconsin, Madison</span></span></p>
+<p><span class="title"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Size-Reconfiguration Delay Trade-offs for a Class of DSP Blocks in Multi-mode Communication Systems</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/96/96_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Amir Hossein Gholamipour, Hamid Eslami, Ahmed Eltawil and Fadi Kurdahi</span></span><br><span class="affiliation"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >University of California, Irvine</span></span></p></td></tr>
+
+<tr><td class="time2"><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >3:15 PM</span></td><td class="session2"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Break and Poster Session 2</span></td></tr>
+
+<tr><td class="time2"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >4:00 PM</span></td><td class="session2"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Session 4: Search Applications</span></td></tr>
+<tr><td class="item2" colspan="2" rowspan="1"><p><span class="title"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >CAAD BLASTP: NCBI BLASTP Accelerated with FPGA-Based Pre-Filtering</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/52/52_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Jin Park, Yunfei Qiu and Martin Herbordt</span></span><br><span class="affiliation"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Boston University</span></span></p>
+<p><span class="title"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >RCBLASTn: Implementation and Evaluation of the BLASTn Scan Function</span>  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/31/31_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Siddhartha Datta, Parag Beeraka and Ron Sass</span></span><br><span class="affiliation"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >University of North Carolina at Charlotte</span></span></p>
+<p><span class="title"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Pipelined Multi-Core Architecture on FPGA for Large Dictionary String Matching</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/54/54_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Qingbo Wang and Viktor Prasanna</span></span><br><span class="affiliation"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >University of Southern California</span></span></p>
+<p><span class="title"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Memory-Efficient Pipelined Architecture for Large-Scale String Matching</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/91/91_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Yi-Hua E. Yang and Viktor K. Prasanna</span></span><br><span class="affiliation"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >University of Southern California</span></span></p></td></tr>
+
+<tr><td class="time2"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >5:40 PM</span></td><td class="session2"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Open</span></td></tr>
+</tbody>
+</table>
+<p><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></p>
+<table style="text-align: left; width: 100%;" border="0" cellpadding="8" cellspacing="0">
+<tbody>
+<tr><td class="session"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Monday 8pm-10pm</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="demonight2009.php"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >DEMO NIGHT!</span></span></td>
+</tr>
+</tbody></table>
+
+<p class="day"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday, April 7</span></p><table style="text-align: left; width: 100%;" border="0" cellpadding="8" cellspacing="0"><tbody>
+<tr>
+<td class="time"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >8:00 AM</span></td><td class="session"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Registration Opens</span></td></tr>
+<tr><td class="time2"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >8:45 AM</span></td><td class="session2"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Administrative Updates</span></td></tr>
+<tr><td class="time2"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >9:00 AM</span></td><td class="session2 "><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Session 5: Reconfigurable Architectures</span></td></tr>
+<tr><td class="item2" colspan="2" rowspan="1"><p><span class="title"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >A Massively Parallel FPGA-based Coprocessor for Support Vector Machines</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/40/40_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Srihari Cadambi, Igor Durdanovic, Venkata Jakkula, Murugan Sankaradass, Eric Cosatto, Srimat Chakradhar and Hans Peter Graf</span></span><br><span class="affiliation"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >NEC Laboratories</span></span></p>
+<p><span class="title"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Application-Specific Customization and Scalability of Soft Multiprocessors</span>  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/106/106_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Deepak Unnikrishnan, Jia Zhao and Russell Tessier</span></span><br><span class="affiliation"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >University of Massachusetts, Amherst</span></span></p>
+<p><span class="title"><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Benchmarking Reconfigurable Architectures in the Mobile Domain</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/22/22_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Peter Jamieson, Tobias Becker, Wayne Luk, Tero Rissa, Teemu Pitkanen and Peter Y.K. Cheung</span></span><br><span class="affiliation"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Imperial College, Nokia, and Tampere University of Technology</span></span></p></td></tr>
+
+<tr><td class="time2"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >10:15 AM</span></td><td class="session2"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Break and Poster Session 3</span></td></tr>
+<tr><td class="time2"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >11:00 AM</span></td><td class="session2"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Session 6: Image Processing</span></td></tr>
+<tr><td class="item2" colspan="2" rowspan="1"><p><span class="title"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Optical Flow on the Ambric Massively Parallel Processor Array (MPPA)</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/79/79_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Brad Hutchings, Brent Nelson, Stephen West, Reed Curtis</span></span><br><span class="affiliation"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Brigham Young University</span></span></p>
+<p><span class="title"><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Real-Time Fisheye Lens Distortion Correction Using Automatically Generated Streaming Accelerators</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/27/27_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Nikolaos Bellas, Sek Chai, Malcolm Dwyer and Dan Linzmeier</span></span><br><span class="affiliation"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >University of Thessely and Motorola</span></span></p>
+<p><span class="title"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >FPGA-based Monte Carlo Computation of Light Absorption for Photodynamic Cancer Therapy</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/62/62_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Jason Luu, Keith Redmond, William Chun Yip Lo, Paul Chow, Lothar Lilge and Jonathan Rose</span></span><br><span class="affiliation"><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >University of Toronto and Ontario Cancer Institute</span></span></p></td></tr>
+<tr><td class="time2"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >12:15 PM</span></td><td class="session2"><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Lunch &amp; Program Committee Meeting</span></td></tr>
+<tr><td class="time2"><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >2:00 PM</span></td><td class="session2"><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Session 7: Networking and Numerical Applications</span></td></tr><tr><td class="item2" colspan="2" rowspan="1"><p><span class="title"><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Scalable High Throughput and Power Efficient IP-Lookup on FPGA</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/37/37_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Hoang Le and Viktor Prasanna</span></span><br><span class="affiliation"><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >University of Southern California</span></span></p>
+<p><span class="title"><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Architectural Comparison of Instruments for Transaction Level Monitoring of FPGA-based Packet Processing Systems</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/6/6_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Paul McKechnie, Michaela Blott and Wim Vanderbauwhede</span></span><br><span class="affiliation"><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Xilinx and University of Glasgow</span></span></p>
+<p><span class="title"><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >A Fine-grained Pipelined Implementation of the LINPACK Benchmark on FPGAs</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/10/10_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Guiming Wu, Yong Dou, Yuanwu Lei, Jie Zhou and Miao Wang</span></span><br><span class="affiliation"><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >National University of Defense Technology, China</span></span></p></td></tr>
+
+<tr><td class="time2"><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >3:15 PM</span></td><td class="session2"><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Break and Poster Session 4</span></td></tr>
+<tr><td class="time2"><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >4:00 PM</span></td><td class="session2"><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Session 8: Discrete Applications</span></td></tr><tr><td class="item2" colspan="2" rowspan="1"><p><span class="title"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Compact and Flexible Microcoded Elliptic Curve Processor for Reconfigurable Devices</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/45/45_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Samuel Antao, Ricardo Chaves and Leonel Sousa</span></span><br><span class="affiliation"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Instituto Superior Tecnico/INESC</span></span></p>
+<p><span class="title"><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Non-Preconditioned Conjugate Gradient on Cell and FPGA based Hybrid Supercomputer Nodes</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/25/25_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >David DuBois, Andrew DuBois, Thomas Boorman and Carolyn Connor</span></span><br><span class="affiliation"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Los Alamos National Laboratory</span></span></p>
+<p><span class="title"><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >More Flops or More Precision? Accuracy Parameterizable Linear Equations Solvers for Model-Predictive Control</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/36/36_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Antonio Roldao-Lopes, Amir Shahzad, George Constantinides and Eric Kerrigan</span></span><br><span class="affiliation"><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Imperial College</span></span></p></td></tr>
+
+<tr><td class="time2"><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >5:15 PM</span></td><td class="session2"><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Closting Remarks &amp; Feedback</span></td></tr></tbody></table><br>
+
+<ul>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final.tar.gz" target="_blank"><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >[Archive of PDFs of all Papers and Short Papers]</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/posters.pdf" target="_blank"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >[PDF of all Poster Abstracts]</span></span></li>
+</ul>
+
+<table style="text-align: left; width: 100%;" border="0" cellpadding="8" cellspacing="0">
+<tbody>
+<tr><td class="session"><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Short Paper / Poster Session 1</span></td></tr>
+<tr><td class="item2"><p><span class="title"><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Acceleration and Energy Efficiency of Geometric Algebra Computations using Reconfigurable Computers and GPUs</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/24/24_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Holger Lange, Florian Stock, Andreas Koch and Dietmar Hildenbrand</span></span></p>
+<p><span class="title"><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >FPGA Implementation of a Single-Precision Floating-Point Multiply-Accumulator with Single-Cycle Accumulation</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/46/46_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Arun Paidimarri, Alessandro Cevrero, Philip Brisk and Paolo Ienne</span></span></p>
+<p><span class="title"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >FPGA Floating Point Datapath Compiler</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/89/89_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Martin Langhammer and Tom Vancourt</span></span></p>
+<p><span class="title"><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >High-End Reconfigurable Systems for Fast Password Cracking</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/2/2_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Kostas Theoharoulis and Ioannis Papaefstathiou</span></span></p>
+<p><span class="title"><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Application Experiments: MPPA and FPGA</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/50/50_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Philip Top and Maya Gokhale</span></span></p>
+<p><span class="title"><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Efficient Mapping of Hardware Tasks on Reconfigurable Computers Using Libraries of Architecture Variants</span>  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/74/74_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Miaoqing Huang, Vikram Narayana and Tarek El-Ghazawi</span></span></p>
+<p><span class="title"><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Exploiting Matrix Symmetry to Improve FPGA-Accelerated Conjugate Gradient</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/101/101_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Jason Bakos and Krishna Nagar</span></span></p>
+<p><span class="title"><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Employment of Reduced Precision Redundancy for Fault Tolerant FPGA Applications</span>  <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/18/18_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Margaret Sullivan, Herschel Loomis and Alan Ross</span></span></p>
+</td></tr>
+<tr><td class="session2"><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Short Paper / Poster Session 2</span></td></tr>
+<tr><td class="item2">
+<p><span class="title"><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Accelerating the Gauss-Seidel Power Flow Solver on a High Performance Reconfigurable Computer</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/28/28_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Jong-Ho Byun, Arun Ravindran, Arindam Mukherjee, Bharat Joshi and David Chassin</span></span></p>
+<p><span class="title"><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >FPGA Implemenations of the Interior-Point Algorithm for Linear Programming with Applications to Collision Detection</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/53/53_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Chih-Hung Wu, Seda Memik and Sanjay Mehrotra</span></span></p>
+<p><span class="title"><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Shared Memory Cache Organizations for Reconfigurable Computing Systems</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/67/67_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Philip Garcia and Katherine Compton</span></span></p>
+<p><span class="title"><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >Minimizing Internal Fragmentation by Fine-grained Two-dimensional Module Placement for Runtime Reconfigurable Systems</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/78/78_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Dirk Koch, Christian Beckhoff and Juergen Teich</span></span></p>
+<p><span class="title"><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >AIREN: A Novel Integration of On-Chip and Off-Chip FPGA Networks</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/3/3_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >Andrew Schmidt, William Kritikos, Rahul Sharma and Ron Sass</span></span></p>
+<p><span class="title"><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Exploiting Partially Reconfigurable FPGAs for Situation-Based Reconfiguration in Wireless Sensor Networks</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/11/11_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >Rafael Garcia, Ann Gordon-Ross and Alan George</span></span></p>
+<p><span class="title"><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >A Packet Generator on the NetFPGA platform</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/51/51_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >G. Adam Covington, Glen Gibb, John Lockwood and Nick McKeown</span></span></p>
+</td></tr>
+<tr><td class="session2"><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Short Paper / Poster Session 3</span></td></tr>
+<tr><td class="item2">
+<p><span class="title"><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >IMORC: Application Mapping, Monitoring and Optimization for High-Performance Reconfigurable Computing</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/70/70_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Tobias Schumacher, Christian Plessl and Marco Platzner</span></span></p>
+<p><span class="title"><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Optimal Placement-aware Trace-based Scheduling of Hardware Reconfigurations for FPGA Accelerators</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/26/26_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Joon Edward Sim, Weng-Fai Wong and Juergen Teich</span></span></p>
+<p><span class="title"><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >Context Sharing for Area Efficiency of Regular Expression Pattern Matching on FPGA</span></span><br><span class="author"><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Yuan-Chin Wen, Henry Yu and Sheng-De Wang</span></span></p>
+<p><span class="title"><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >FPGA Implementation and Customization of a 64-Bit BID-Based Decimal Floating-Point Adder</span></span><br><span class="author"><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Amin Farmahini-Farahani, Charles Tsen and Katherine Compton</span></span></p>
+<p><span class="title"><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >Performance Metrics for Hybrid Computation</span></span><br><span class="author"><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Kyle Rupnow, Jacob Adriaens, Wenyin Fu and Katherine Compton</span></span></p>
+<p><span class="title"><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >An FPGA-based Implementation of Velocity Interpolation for the Immersed Boundary Method</span></span><br><span class="author"><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Dinel Shah, Gabor Ferencz, Eric Peskin and Charles Peskin</span></span></p>
+<p><span class="title"><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >An Integer Linear Programming Model for Automated Matrix Operation Scheduling on FPGAs</span></span><br><span class="author"><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Colin Yu Lin, Ngai Wong and Hayden Kwok-Hay So</span></span></p>
+<p><span class="title"><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Woolcano: An Architecture and Tool Flow for Dynamic Instruction Set Extension on Xilinx Virtex-4 FX</span></span><br><span class="author"><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >Mariusz Grad and Christian Plessl</span></span></p>
+</td></tr>
+<tr><td class="session2"><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Short Paper / Poster Session 4</span></td></tr>
+<tr><td class="item2">
+<p><span class="title"><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >Evaluation of Static Analysis Techniques for Fixed-Point Precision Optimization</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/58/58_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >Jason Cong, Karthik Gururaj, Bin Liu, Chunyue Liu, Zhiru Zhang, Sheng Zhou and Yi Zou</span></span></p>
+<p><span class="title"><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >An FPGA Implementation for Solving Least Square Problem</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/29/29_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Depeng Yang, Gregory Peterson, Husheng Li and Junqing Sun</span></span></p>
+<p><span class="title"><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >In-situ FPGA Debug Driven by On-Board Microcontroller</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/64/64_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >Zachary Baker</span><span></p>
+<p><span class="title"><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >A Parameterized Stereo Vision Core for FPGAs</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gradebot.com/papers2009/final/42/42_Final_PDF.pdf" target="_blank"><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >[PDF]</span></span></span><br><span class="author"><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >Stephen Longfield and Mark Chang</span></span></p>
+<p><span class="title"><span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >Evaluation of an FPGA-Based Filesystem</span></span><br><span class="author"><span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >Ashwin Mendon, Andrew Schmidt and Ron Sass</span></span></p>
+<p><span class="title"><span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >An FPGA Implementation of 3-D FDTD Field Compute Engine</span></span><br><span class="author"><span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >Robin Pottathuparambil, Ryan S. Adams and Ron Sass</span></span></p>
+<p><span class="title"><span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >Design Exploration for FPGA-based MPSoC: JPEG Encoding Case Study</span></span><br><span class="author"><span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >Jason Wu, John Williams, Neil Bergmann and Peter Sutton</span></span></p>
+<p><span class="title"><span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >Real-time Landmine Detection Using FPGA-Based Hidden Markov Models</span></span><br><span class="author"><span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >Aaron Curry, Steven Hannah and Christopher Doss</span>

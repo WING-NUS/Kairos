@@ -1,0 +1,617 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/3/annotation/annotated_repository/http+^^www.hipeac.net^node^884_2009-08-05__14-36-56.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/3/annotation/annotated_repository/http+^^www.hipeac.net^node^884_2009-08-05__14-36-56.yaml created on Thu Aug 13 13:57:24 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+  <title>3rd HiPEAC Industrial Workshop | HiPEAC</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="/sites/all/themes/zen/zen_hipeac/print.css" type="text/css" media="print" />
+
+<link rel="shortcut icon" href="/files/favicon.png" type="image/x-icon" />
+  <style type="text/css" media="all">@import "/modules/book/book.css";</style>
+<style type="text/css" media="all">@import "/modules/node/node.css";</style>
+<style type="text/css" media="all">@import "/modules/poll/poll.css";</style>
+<style type="text/css" media="all">@import "/modules/system/defaults.css";</style>
+<style type="text/css" media="all">@import "/modules/system/system.css";</style>
+<style type="text/css" media="all">@import "/modules/user/user.css";</style>
+<style type="text/css" media="all">@import "/sites/all/modules/cck/content.css";</style>
+<style type="text/css" media="all">@import "/sites/all/modules/event/event.css";</style>
+<style type="text/css" media="all">@import "/sites/all/modules/og/og.css";</style>
+<style type="text/css" media="all">@import "/sites/all/modules/cck/fieldgroup.css";</style>
+<style type="text/css" media="all">@import "/sites/all/modules/panels/css/panels.css";</style>
+<style type="text/css" media="all">@import "/sites/all/themes/zen/zen_hipeac/style.css";</style>
+<style type="text/css" media="all">@import "/sites/all/themes/zen/tabs.css";</style>
+<style type="text/css" media="all">@import "/sites/all/themes/zen/zen_hipeac/html-elements.css";</style>
+<style type="text/css" media="all">@import "/sites/all/themes/zen/zen_hipeac/layout-garland.css";</style>
+<style type="text/css" media="all">@import "/sites/all/themes/zen/zen_hipeac/icons.css";</style>
+<style type="text/css" media="all">@import "/sites/all/themes/zen/zen_hipeac/zen-hipeac.css";</style>
+<style type="text/css" media="all">@import "/sites/all/themes/zen/block-editing.css";</style>
+
+   <script src='http://www.google-analytics.com/urchin.js' type='text/javascript'></script>
+   <script type='text/javascript'>_uacct = 'UA-2857653-1'; urchinTracker(); </script>
+
+  
+  <!--[if IE]>
+    <link rel="stylesheet" href="/sites/all/themes/zen/ie.css" type="text/css">
+          <link rel="stylesheet" href="/sites/all/themes/zen/zen_hipeac/ie.css" type="text/css">
+      <![endif]-->
+  <script type="text/javascript" src="/misc/jquery.js"></script>
+<script type="text/javascript" src="/misc/drupal.js"></script>
+<script type="text/javascript" src="/sites/all/modules/jquery_update/compat.js"></script>
+<script type="text/javascript" src="/sites/all/modules/panels/js/panels.js"></script>
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)" class="not-front not-logged-in node-type-announcement one-sidebar sidebar-left page-node-884 section-node"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+  <div id="page">
+
+      <div id="navigation" class="menu withprimary ">
+                  <div id="primary" class="clear-block">
+            <ul class="links"><li class="first menu-1-1-276"><span onclick="return false" style="text-decoration:underline; color:blue" href="/" class="menu-1-1-276"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></li>
+<li class="menu-1-2-276"><span onclick="return false" style="text-decoration:underline; color:blue" href="/activities" class="menu-1-2-276"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Activities</span></span></li>
+<li class="menu-1-3-276"><span onclick="return false" style="text-decoration:underline; color:blue" href="/mobility" class="menu-1-3-276"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Mobility</span></span></li>
+<li class="menu-1-4-276"><span onclick="return false" style="text-decoration:underline; color:blue" href="/research" class="menu-1-4-276"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Research</span></span></li>
+<li class="menu-1-5-276"><span onclick="return false" style="text-decoration:underline; color:blue" href="/publications" class="menu-1-5-276"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Publications</span></span></li>
+<li class="menu-1-6-276"><span onclick="return false" style="text-decoration:underline; color:blue" href="/industry" class="menu-1-6-276"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Industry</span></span></li>
+<li class="last menu-1-7-276"><span onclick="return false" style="text-decoration:underline; color:blue" href="/network" class="menu-1-7-276"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >The Network</span></span></li>
+</ul>          </div>
+        
+              </div> <!-- /navigation -->
+     <div class="spacer">
+
+    </div>
+
+
+    <div id="header">
+
+    
+
+
+       <div id="logo-title">
+
+                          <span onclick="return false" style="text-decoration:underline; color:blue" href="/" title="Home" rel="home">
+            <img onmousedown="imd(this)" src="/sites/all/themes/zen/zen_hipeac/logo.png" alt="Home" id="logo" />
+          </span>
+        
+        <div id="name-and-slogan">
+
+        
+                  <div id='site-slogan'>
+            <span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >European Network of Excellence on High Performance and Embedded Architecture and Compilation</span>          </div>
+        
+        </div> <!-- /name-and-slogan -->
+
+      </div> <!-- /logo-title -->
+
+    </div> <!-- /header -->
+         <div id="header-region">
+          <div class="breadcrumb"><span onclick="return false" style="text-decoration:underline; color:blue" href="/"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></div>                  </div> <!-- /header-region -->
+      
+    <div id="container" class="clear-block">
+
+              <div id="sidebar-left" class="column sidebar">
+          
+<div id="block-block-1" class="block block-block region-odd odd region-count-1 count-1">
+
+<div class="top-left"></div>
+<div class="top-right"></div>
+
+<div class="blockinside">
+<p class="notopgap"></p>
+
+
+<div class="block-inner">
+
+  
+  <div class="content">
+    <div  class="fp7imgblock"><center><img onmousedown="imd(this)" src='http://www.hipeac.net/system/files/fp7.png'></center></div>  </div>
+
+  
+
+
+</div>
+
+<p class="nobottomgap"></p>
+
+</div>
+<div class="bottom-left"></div>
+<div class="bottom-right"></div>
+</div> <!-- /block-inner, /block -->
+
+        </div> <!-- /sidebar-left -->
+      
+      <div id="main" class="column"><div id="squeeze" class="clear-block">
+                        <div id="content">
+
+	<div class="top-left"></div>
+	<div class="top-right"></div>
+	<div class="contentinsideleft"><div class="contentinsideright">
+	<div class="contentinside">
+
+	<div class="gap-saver"></div>
+	<p class="notopgap"></p>
+
+                      <h1 class="title"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >3rd HiPEAC Industrial Workshop</span></h1>
+                                                  
+
+
+<div class="node node-type-announcement" id="node-884">
+
+<div class="ntop-left"></div>
+<div class="ntop-right"></div>
+<div class="insideleft"><div class="insideright">
+<div class="inside">
+
+<div class="gap-saver"></div>
+<p class="notopgap"></p>
+
+<div class="node-inner">
+
+  
+  
+  
+      <div class="submitted">
+      <span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Submitted by</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/user/1" title="View user profile."><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >admin</span></span> <span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >on Tue, 30/01/2007 - 18:19.</span>    </div>
+  
+  
+  <div class="content">
+    <div class="announcement-start">
+<em><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >From 17th Apr 07 To 17th Apr 07</span></em>
+</div>
+
+<p style="text-align: center; margin-top: 2em;">
+<strong><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >April 17, 2007</span></strong><br />
+<strong><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Organized by IBM Research Lab in Haifa, Israel</span></strong><br />
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.haifa.il.ibm.com/Workshops/compiler2007/registration.html"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span>
+</p>
+<p>
+<span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >The Industrial Workshop will be coinciding with the next</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="node/1009"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >HiPEAC Cluster Meetings</span></span>
+</p>
+
+<p>
+<span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Click</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="node/1011"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >here</span></span> <span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >to request a traveling grant.</span>
+</p>
+
+
+<h2><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Agenda</span></h2>
+<p>
+<style>
+<span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >#program{
+  border: 1px gray solid;
+  border-collapse: collapse;
+}
+
+#program td{
+  border: 1px gray solid;
+  padding: 3px;
+}
+
+#program .title{
+  font-style: italic;
+  margin-bottom: 2px;
+  border-bottom: 1px dotted gray;
+}</span>
+
+</style>
+
+<table id="program">
+<tr><td><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >09:15</span></td><td><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Arrival</span></td></tr>
+
+<tr><td><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >09:30</span></td><td><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Welcome</span><br />
+      <span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Oded Cohn, Director, IBM HRL</span></td></tr>
+
+<tr><td colspan="2"><strong><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Session 1: Making better use of Hardware</span></strong></td></tr>
+
+<tr><td><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >09:45</span></td><td><div class="title"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Initial Results on the Performance Implications of Thread Migration
+on a Chip Multi-Core</span></div>
+      <span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Y. Sazeides*, P. Michaud+, L. He*, D. Fetis+, C. Ioannou*, P.
+Charalambous* and A. Seznec+</span><br />
+      <span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >*University of Cyprus, Nicosia, Cyprus, +Irisa-Inria, Rennes, France</span></td></tr>
+
+<tr><td><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >10:15</span></td><td><div class="title"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Caravela: A Distributed Stream-Based Computing Platform</span></div>
+      <span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Leonel Sousa and Shinichi Yamagiwa, INESC-ID/IST, TULisbon</span></td></tr>
+
+<tr><td><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >10:45</span></td><td><div class="title"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Probabilistic Cache Filtering</span></div>
+      <span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Yoav Etsion and Dror G. Feitelson (Hebrew University, Jerusalem)</span></td></tr>
+
+<tr><td><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >11:15</span></td><td><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span></td></tr>
+
+<tr><td colspan="2"><strong><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Session 2: Compiler Optimizations</span></strong></td></tr>
+
+<tr><td><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >11:35</span></td><td><div class="title"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Data Layout Optimizations in GCC</span></div>
+      <span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Olga Golovanevsky and Razya Ladelsky (IBM HRL)</span></td></tr>
+
+<tr><td><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >12:05</span></td><td><div class="title"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >SIMDinator: use of the x86 SIMD instructions</span></div>
+      <span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >David Livshin (DALsoft)</span></td></tr>
+
+<tr><td><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >12:35</span></td><td><div class="title"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Issues and challenges in compiling for multiple forms of parallelism,
+in IBM research compilers</span></div>
+      <span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Kathryn O'Brien (IBM T.J. Watson Research Center)</span></td></tr>
+
+<tr><td><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >13:05</span></td><td><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Lunch (and informal discussions)</span></td></tr>
+
+<tr><td><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >14:10</span></td><td><div class="title"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Keynote speech:  Cell: a highly programmable C/GPU</span></div>
+      <span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Peter Hofstee, IBM Distinguished Engineer, chief architect of the
+Cell Synergistic Processor, and Cell chief scientist</span></td></tr>
+
+<tr><td><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >15:00</span></td><td><div class="title"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Implementation and validation of a Cell simulator using UNISIM</span></div>
+      <span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Felipe Cabarcas, Alejandro Rico, David Rodenas, Xavier Martorell,
+Alex
+      Ramirez, Eduard Ayguade (UPC)</span></td></tr>
+
+<tr><td><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >15:30</span></td><td><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span></td></tr>
+<tr><td colspan="2"><strong><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Session 3: Making better use of Parallelism</span><strong></td></tr>
+
+<tr><td><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >15:50</span></td><td><div class="title"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >CAPSULE: Parallel Execution of Component-Based Programs</span></div>
+      <span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Pierre Palatin, Zheng Li, Yves Lhuillier, Olivier Temam (INRIA)</span></td></tr>
+
+<tr><td><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >16:20</span></td><td><div class="title"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Using Extremely Fine Granularity Multithreading for Energy Efficient
+Computing</span></div>
+      <span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Alex Gontmakher, Avi Mendelson and Assaf Schuster (Technion)</span></td></tr>
+
+<tr><td><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >16:50</span></td><td><div class="title"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >How many cores is too many cores</span></div>
+      <span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Avi Mendelson (Intel)</span></td></tr>
+
+<tr><td><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >17:20</span></td><td> <span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Concluding Remarks</span><br />
+      <span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >David Bernstein (IBM HRL)</span></td></tr>
+<tr><td><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td><td><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >SC dinner</span></td></tr>
+</table>
+
+
+</p>  </div>
+
+      <div class="links">
+      <ul class="links inline"><li class="first last event_calendar"><span onclick="return false" style="text-decoration:underline; color:blue" href="/event/2007/04/17" class="event_calendar"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Calendar</span>

@@ -1,0 +1,618 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html> <head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session1/2/annotation/annotated_repository/http+^^conferences.inf.ed.ac.uk^emnlp08^program.html_2009-08-05__14-22-47.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session1/2/annotation/annotated_repository/http+^^conferences.inf.ed.ac.uk^emnlp08^program.html_2009-08-05__14-22-47.yaml created on Thu Aug 13 13:45:18 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+ <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+ <title>EMNLP 2008 - Conference program</title>
+ <meta name="description" content="The 2008 Conference on Empirical Methods on Natural Language Processing - Conference program">
+ <meta name="keywords" content="EMNLP 2008, conference, Hawaii, Honolulu, AMTA 2008, AMTA">
+ <style type="text/css" media="all">@import "css/main.css";</style>
+</head> <body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span> <div id="wrapper">
+
+
+ <h1 id="header"><span onclick="return false" style="text-decoration:underline; color:blue" href="."><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >EMNLP 2008</span></span><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >: conference on Empirical Methods in Natural Language Processing
+  &mdash; October 25-27, 2008 &mdash; Waikiki, Honolulu, Hawaii.</span> </h1>
+
+
+<div id="introduction" class="short">
+ <h2><span></span><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Welcome to</span> <strong><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >EMNLP 2008</span></strong></h2>
+</div>
+
+<div id="content">
+ <h2><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >List of accepted papers</span></h2>
+
+ <p><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >We received</span> <big><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >385</span></big> <span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >submissions (not counting papers that were
+ withdrawn or rejected without review).</span>
+
+ <p><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >We were able to accept</span> <big><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >81</span></big>
+ <span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >papers as</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#talks"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >talks</span></span> <span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >and an additional</span> <big><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >35</span></big> <span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >submissions as</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#posters"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >posters</span></span><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >.</span>
+
+<div id="talks"> <h3> <span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Talks</span> </h3> <ul>
+
+<li><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >An Exploration of Document Impact on Graph-Based Multi-Document Summarization</span> <span><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Xiaojun Wan</span></span>
+
+<li><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Complexity of finding the BLEU-optimal hypothesis in a confusion network</span> <span><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Gregor Leusch, Evgeny Matusov and Hermann Ney</span></span>
+
+<li><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Acquiring Domain-Specific Dialog Information from Task-Oriented Human-Human Interaction through an Unsupervised Learning</span> <span><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Ananlada Chotimongkol and Alexander Rudnicky</span></span>
+
+<li><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Dependency-based Semantic Role Labeling of PropBank</span> <span><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Richard Johansson and Pierre Nugues</span></span>
+
+<li><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Question Classification using Head Words and their Hypernyms</span> <span><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Zhiheng Huang, Marcus Thint and Zengchang Qin</span></span>
+
+<li><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Sentence Fusion via Dependency Graph Compression</span> <span><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Katja Filippova and Michael Strube</span></span>
+
+<li><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Revisiting Readability: A Unified Framework for Predicting Text Quality</span> <span><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Emily Pitler and Ani Nenkova</span></span>
+
+<li><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Ranking Reader Emotions Using Pairwise Loss Minimization and Emotional Distribution Regression</span> <span><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Kevin Lin and Hsin-Hsi Chen</span></span>
+
+<li><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >It's a Contradiction&mdash;no, it's not: A Case Study using Functional Relations</span> <span><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Alan Ritter, Stephen Soderland, Doug Downey and Oren Etzioni</span></span>
+
+<li><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >A graph-theoretic model of lexical syntactic acquisition</span> <span><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Hinrich Schuetze and Michael Walsh</span></span>
+
+<li><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Construction of an Idiom Corpus and its Application to Idiom Identification based on WSD incorporating Idiom-Specific Features</span> <span><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Chikara Hashimoto and Daisuke Kawahara</span></span>
+
+<li><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Part-of-Speech Tagging for English-Spanish Code-Switched Text</span> <span><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Thamar Solorio and Yang Liu</span> </span>
+
+<li><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >N-gram Weighting: Reducing Training Data Mismatch in Cross-Domain Language Model Estimation</span> <span><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Bo-June (Paul) Hsu and James Glass</span></span>
+
+<li><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Mention Detection Crossing the Language Barrier</span> <span><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Imed Zitouni and Radu Florian</span></span>
+
+<li><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Integrating Multi-level Linguistic Knowledge with a Unified Framework for Mandarin Speech Recognition</span> <span><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Xinhao Wang, Jiazhong Nie, Dingsheng Luo and Xihong Wu</span></span>
+
+<li><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Relative Rank Statistics for Dialog Analysis</span> <span><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Juan Huerta</span> </span>
+
+<li><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Attacking Decipherment Problems Optimally with Low-Order N-gram Models</span> <span><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Sujith Ravi and Kevin Knight</span></span>
+
+<li><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Incorporating Temporal and Semantic Information with Eye Gaze for Automatic Word Acquisition in Multimodal Conversational Systems,</span>  <span><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Shaolin Qu and Joyce Chai</span></span>
+
+<li><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Online Methods for Multi-Domain Learning and Adaptation,</span>  <span><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Mark Dredze and Koby Crammer</span></span>
+
+<li><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >A Generative Model for Parsing Natural Language to Meaning Representations</span> <span><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Wei Lu, Hwee Tou Ng, Wee Sun Lee and Luke. S. Zettlemoyer</span> </span>
+
+<li><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Discriminative Learning of Selectional Preference from Unlabeled Text</span> <span><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Shane Bergsma, Dekang Lin and Randy Goebel</span></span>
+
+<li><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Indirect-HMM-based Hypothesis Alignment for Combining Outputs from Machine Translation Systems</span> <span><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Xiaodong He, Mei Yang, Jianfeng Gao, Patrick Nguyen and Robert Moore</span></span>
+
+<li><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >One-Class Clustering in the Text Domain</span> <span><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Ron Bekkerman and Koby Crammer</span></span>
+
+<li><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Information Retrieval Oriented Word Segmentation based on Character Association Strength Ranking</span> <span><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Liu Yixuan, Wang bin, Ding fan and Xu sheng</span></span>
+
+<li><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Adding Redundant Features for CRFs-based Sentence Sentiment Classification</span> <span><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Jun Zhao, Kang Liu and Gen Wang</span></span>
+
+<li><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Probabilistic Inference for Machine Translation with Millions of Sparse Features and a Language Model</span> <span><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Phil Blunsom and Miles Osborne</span></span>
+
+<li><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Mining and Modeling Relations between Formal and Informal Chinese Phrases from Web Corpora</span> <span><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Zhifei Li and David Yarowsky</span></span>
+
+<li><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Specialized models and ranking for coreference resolution</span> <span><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Pascal Denis and Jason Baldridge</span></span>
+
+<li><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Phrase Translation Probabilities with ITG Priors and Smoothing as Learning Objective</span> <span><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Markos Mylonakis and Khalil Sima'an</span></span>
+
+<li><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Learning to Predict Code-Switching Points</span> <span><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Thamar Solorio and Yang Liu</span></span>
+
+<li><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Refining Generative Language Models using Discriminative Learning</span> <span><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Ben Sandbank</span></span>
+
+<li><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >A Structured Vector Space Model for Word Meaning in Context</span> <span><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Katrin Erk and Sebastian Pad&oacute;</span> </span>
+
+<li><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Revealing the Structure of Medical Dictations with Conditional Random Fields</span> <span><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Jeremy Jancsary, Johannes Matiasek and Harald Trost</span></span>
+
+<li><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Sparse Multi-Scale Grammars for Discriminative Latent Variable Parsing</span> <span><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Slav Petrov and Dan Klein</span></span>
+
+<li><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Summarizing Spoken and Written Conversations</span> <span><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Gabriel Murray and Giuseppe Carenini</span></span>
+
+<li><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Learning with Probabilistic Features for Improved Pipeline Models</span> <span><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Razvan Bunescu</span> </span>
+
+<li><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Automatic inference of the temporal location of situations in Chinese text</span> <span><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Nianwen Xue</span> </span>
+
+<li><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >An Analysis of Active Learning Strategies for Sequence Labeling Tasks</span> <span><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Burr Settles and Mark Craven</span></span>
+
+<li><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Cross-Task Knowledge-Constrained Self Training</span> <span><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Hal Daume III</span></span>
+
+<li><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Decomposability of Translation Metrics for Improved Evaluation and Efficient Algorithms</span> <span><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >David Chiang, Steve DeNeefe, Yee Seng Chan and Hwee Tou Ng</span></span>
+
+<li><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Stacking Dependency Parsers</span> <span><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Andr&eacute; Filipe Torres Martins, Dipanjan Das, Noah A. Smith and Eric P. Xing</span></span>
+
+<li><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Learning the scope of negation in biomedical texts</span> <span><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Roser Morante, Anthony Liekens and Walter Daelemans</span></span>
+
+<li><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Joint Unsupervised Coreference Resolution with Markov Logic</span> <span><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Hoifung Poon and Pedro Domingos</span></span>
+
+<li><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Multilingual Subjectivity Analysis Using Machine Translation</span> <span><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Carmen Banea, Rada Mihalcea, Janyce Wiebe and Samer Hassan</span></span>
+
+<li><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Predicting Success in Machine Translation</span> <span><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Alexandra Birch, Miles Osborne and Philipp Koehn</span></span>
+
+<li><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Regular Expression Learning for Information Extraction</span> <span><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Yunyao Li, Rajasekar Krishnamurthy, Sriram Raghavan, Shivakumar Vaithyanathan and H. V. Jagadish</span></span>
+
+<li><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Syntactic Models for Structural Word Insertion and Deletion during Translation</span> <span><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Arul Menezes and Chris Quirk</span></span>
+
+<li><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >A noisy-channel model of rational human sentence comprehension under uncertain input</span> <span><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Roger Levy</span></span>
+
+<li><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Better Binarization for the CKY Parsing</span> <span><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Xinying Song, Shilin Ding and Chin-Yew Lin</span></span>
+
+<li><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Computing Word-Pair Antonymy</span> <span><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Saif Mohammad, Bonnie Dorr and Graeme Hirst</span></span>
+
+<li><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Online Large-Margin Training of Syntactic and Structural Translation Features</span> <span><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >David Chiang, Yuval Marton and Philip Resnik</span></span>
+
+<li><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >The Linguistic Structure of English Web-Search Queries</span> <span><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Cory Barr, Rosie Jones and Moira Regelson</span></span>
+
+<li><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Maximum Entropy based Rule Selection Model for Syntax-based Statistical Machine Translation</span> <span><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Zhongjun He, Qun Liu and Shouxun Lin</span></span>
+
+<li><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Coarse-to-Fine Syntactic Machine Translation using Language Projections</span> <span><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Slav Petrov, Aria Haghighi and Dan Klein</span></span>
+
+<li><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Jointly Combining Implicit Constraints Improves Temporal Ordering</span> <span><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Nathanael Chambers and Dan Jurafsky</span></span>
+
+<li><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Prediction of Parser Accuracy</span> <span><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Sujith Ravi, Kevin Knight and Radu Soricut</span></span>
+
+<li><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Word Sense Disambiguation Using OntoNotes: An Empirical Study</span> <span><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Zhi Zhong, Hwee Tou Ng and Yee Seng Chan</span></span>
+
+<li><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Forest-based Translation Rule Extraction</span> <span><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Haitao Mi and Liang Huang</span></span>
+
+<li><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Learning with Compositional Semantics as Structural Inference for Subsentential Sentiment Analysis</span> <span><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Yejin Choi and Claire Cardie</span></span>
+
+<li><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Topic-Driven Multi-Document Summarization with Encyclopedic Knowledge and Activation Spreading</span> <span><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Vivi Nastase</span></span>
+
+<li><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Scaling Textual Inference to the Web</span> <span><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Stefan Schoenmackers, Oren Etzioni and Daniel Weld</span></span>
+
+<li><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >A Phrase-Based Alignment Model for Natural Language Inference</span> <span><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Bill MacCartney, Michel Galley and Christopher D. Manning</span></span>
+
+<li><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Lattice Minimum Bayes-Risk Decoding for Statistical Machine Translation</span> <span><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Roy Tromble, Shankar Kumar, Franz Och and Wolfgang Macherey,</span> </span>
+
+<li><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Lattice-based Minimum Error Rate Training</span> <span><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Wolfgang Macherey, Franz Och, Ignacio Thayer and Jakob Uszkoreit</span></span>
+
+<li><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Language and Translation Model Adaptation using Comparable Corpora</span> <span><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Matthew Snover, Bonnie Dorr and Richard Schwartz</span></span>
+
+<li><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Graph-based Analysis of Semantic Drift in Espresso-like
+Bootstrapping Algorithms</span> <span><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Mamoru Komachi, Taku Kudo, Masashi Shimbo and Yuji Matsumoto</span></span>
+
+<li><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Set Expansion for List Question Answering</span> <span><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Richard C. Wang, Nico Schlaefer, William W. Cohen and Eric Nyberg</span></span>
+
+<li><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >CoCQA: Co-Training Over Questions and Answers for Predicting Question Subjectivity Orientation</span> <span><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Baoli Li, Yandong Liu, and Eugene Agichtein</span></span>
+
+<li><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Seeded Discovery of Base Relations in Large Corpora</span> <span><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Nicholas Andrews and Naren Ramakrishnan</span></span>
+
+<li><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Cheap and Fast &mdash; But is it Good? Evaluating Non-Expert Annotations for Natural Language Tasks</span> <span><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Rion Snow, Brendan O'Connor, Dan Jurafsky and Andrew Ng</span></span>
+
+<li><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Weakly-Supervised Acquisition of Labeled Class Instances for Open-Domain Information Extraction using Graph Random Walks</span> <span><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Partha Pratim Talukdar, Joseph Reisinger, Marius Pasca, Deepak Ravichandran, Rahul Bhagat and Fernando Pereira</span></span>
+
+<li><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Syntactic Constraints on Paraphrases Extracted from Parallel Corpora</span> <span><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Chris Callison-Burch</span></span>
+
+<li><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Unsupervised Multilingual Learning for POS Tagging</span> <span><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Benjamin Snyder, Tahira Naseem, Jacob Eisenstein and Regina Barzilay</span></span>
+
+<li><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Learning Graph Walk Based Similarity Measures</span> <span><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Einat Minkov and William Cohen</span></span>
+
+<li><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Unsupervised Models for Coreference Resolution</span> <span><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Vincent Ng</span></span>
+
+<li><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >A Simple and Effective Hierarchical Phrase Reordering Model</span> <span><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Michel Galley and Christopher Manning</span></span>
+
+<li><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Dependency Parsing by Belief Propagation</span> <span><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >David Smith and Jason Eisner</span></span>
+
+<li><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Latent-Variable Modeling of String Transductions With Finite-State Methods</span> <span><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Markus Dreyer, Jason Smith and Jason Eisner</span></span>
+
+<li><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Soft-Supervised Learning for Text Classification</span> <span><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Amarnag Subramanya and Jeff Bilmes</span></span>
+
+<li><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Two Languages are Better than One (for Syntactic Parsing)</span> <span><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >David Burkett and Dan Klein</span></span>
+
+<li><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Modeling Annotators: A Generative Approach to Learning from Annotator Rationales</span> <span><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Omar Zaidan, Jason Eisner and Christine Piatko</span></span>
+
+</ul> </div>
+
+<div id="posters"> <h3> <span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Posters</span> </h3> <ul>
+
+<li><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >A Tale of Two Parsers: investigating and combining graph-based and transition-based dependency parsing using beam-search</span> <span><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Yue Zhang and Stephen Clark</span></span>
+
+<li><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Selecting Sentences for Answering Complex Questions</span> <span><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Yllias Chali and Shafiq Joty</span></span>
+
+<li><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Using Bilingual Knowledge and Ensemble Techniques for Unsupervised Chinese Sentiment Analysis</span> <span><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Xiaojun Wan</span></span>
+
+<li><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Scalable Language Processing Algorithms for the Masses: A Case Study in Computing Word Co-occurrence Matrices with MapReduce</span> <span><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Jimmy Lin</span></span>
+
+<li><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >LTAG Dependency Parsing with Bidirectional Incremental Construction</span> <span><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Libin Shen and Aravind Joshi</span></span>
+
+<li><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Online Acquisition of Japanese Unknown Morphemes using Morphological Constraints</span> <span><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Yugo Murawaki and Sadao Kurohashi</span></span>
+
+<li><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Legal Docket Classification: Where Machine Learning stumbles</span> <span><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Ramesh Nallapati and Christopher Manning</span></span>
+
+<li><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >A Casual Conversation System Using Modality and Word Associations Retrieved from the Web</span> <span><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Shinsuke Higuchi, Rafal Rzepka and Kenji Araki</span></span>
+
+<li><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >HTM: A Topic Model for Hypertexts</span> <span><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Congkai Sun, Bin Gao and Hang Li</span></span>
+
+<li><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Improving Chinese Semantic Role Classification with Hierarchical Feature Selection Strategy</span> <span><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Weiwei Ding and Baobao Chang</span></span>
+
+<li><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Improving Interactive Machine Translation via Mouse Actions</span> <span><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Germ&eacute;n Sanchis-Trilles, Daniel Ortiz-Mart&igrave;ez, Jorge Civera, Francisco Casacuberta, Enrique Vidal and Hieu Hoang</span></span>
+
+<li><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >When Harry Met Harri: Cross-lingual Name Spelling Normalization</span> <span><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Fei Huang, Ahmad Emami and Imed Zitouni</span></span>
+
+<li><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >HotSpots: Visualizing Edits to a Text</span> <span><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Srinivas Bangalore and David Smith</span></span>
+
+<li><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Triplet Lexicon Models for Statistical Machine Translation</span> <span><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >Sa&#353;a Hasan, Juri Ganitkevitch, Hermann Ney and Jesus Andres Ferrer</span></span>
+
+<li><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Who is Who and What is What: Experiments in Cross-Document Co-Reference</span> <span><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >Alex Baron and Marjorie Freedman</span></span>
+
+<li><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Improved Sentence Alignment on Parallel Web Pages Using a Stochastic Tree Alignment Model</span> <span><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >Lei Shi and Ming Zhou</span></span>
+
+<li><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >A comparison of Bayesian estimators for unsupervised Hidden Markov Model POS taggers</span> <span><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Jianfeng Gao and Mark Johnson</span></span>
+
+<li><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Arabic Named Entity Recognition using Optimal Feature Sets</span> <span><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Yassine Benajiba, Mona Diab and Paolo Rosso</span></span>
+
+<li><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Multilingual Subjectivity Analysis of Multiparty Conversation</span> <span><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Stephan Raaijmakers, Khiet Truong and Theresa Wilson</span></span>
+
+<li><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >A Discriminative Candidate Generator for String Transformations</span> <span><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Naoaki Okazaki, Yoshimasa Tsuruoka, Sophia Ananiadou and Jun'ichi Tsujii</span></span>
+
+<li><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Using Topic Models to Study the History of Ideas</span> <span><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >David Hall, Daniel Jurafsky and Christopher Manning</span></span>
+
+<li><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Sampling Alignment Structure under a Bayesian Translation Model</span> <span><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >John DeNero, Alexandre Bouchard-Côté and Dan Klein</span></span>
+
+<li><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Adapting a Lexicalized-Grammar Parser to Contrasting Domains</span> <span><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Laura Rimell and Stephen Clark</span></span>
+
+<li><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Generalizing Local and Non-Local Word-Reordering Patterns for Syntax-Based Machine Translation</span> <span><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >Bing Zhao and Yaser Al-onaizan</span></span>
+
+<li><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Bridging Lexical Gaps between Queries and Questions on Large Online Q&amp;A Collections with Compact Translation Models</span> <span><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >Jung-Tae Lee, Sang-Bum Kim, Young-In Song and Hae-Chang Rim</span></span>
+
+<li><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Automatic induction of FrameNet lexical units</span> <span><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >Marco Pennacchiotti, Diego De Cao, Roberto Basili and Danilo Croce</span></span>
+
+<li><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Understanding the Value of Features for Coreference Resolution</span> <span><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Eric Bengtson and Dan Roth</span></span>
+
+<li><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >Bayesian Unsupervised Topic Segmentation</span> <span><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Jacob Eisenstein and Regina Barzilay</span></span>
+
+<li><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >Transliteration as Constrained Optimization</span> <span><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Dan Goldwasser and Dan Roth</span></span>
+
+<li><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >Seed and Grow: Augmenting Statistically Generated Summary
+Sentences using Schematic Word Patterns</span> <span><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Stephen Wan, Robart
+Dale, Mark Dras and Cecile Paris</span></span>
+
+<li><span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >Online Word Games for Semantic Data Collection</span> <span><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >David Vickrey, Aaron Bronsan, William Choi, Aman Kumar, Jason Turner-Maier, Arthur Wang and Daphne Koller</span></span>
+
+<li><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >A Dependency-based Word Subsequence Kernel</span> <span><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >Rohit Kate</span></span>
+
+<li><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >A Japanese Predicate Argument Structure Analysis using Decision Lists</span> <span><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >Hirotoshi Taira, Sanae Fujita and Masaaki Nagata</span>

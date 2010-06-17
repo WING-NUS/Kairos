@@ -1,0 +1,1154 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN">
+
+<html>
+
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^ics08.hpclab.ceid.upatras.gr^program.html_2009-08-05__14-24-59.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^ics08.hpclab.ceid.upatras.gr^program.html_2009-08-05__14-24-59.yaml created on Wed Aug 05 17:31:16 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+	<meta http-equiv="Content-Type" content="text/html;charset=utf-8">
+	<link rel="StyleSheet" href="styles.css" type="text/css">
+	<title>International Conference on Supercomputing, ICS 2008</title>
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<div id="header">
+
+    <h2 style="text-align:right;"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >22nd ACM International Conference on Supercomputing</span></h2>
+	<h3 style="text-align:right;"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >June  7-12, 2008</span><br> <span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Island of Kos - Aegean Sea - Greece</span></h3>
+
+</div>
+
+<div id="logo">
+
+	<br>
+	<span style="float:left"><img onmousedown="imd(this)" src="images/ics08_left.jpg" alt="ics08" ></span>
+	
+</div>
+
+<div id="links">
+
+<p>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="index.html"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span>
+</p>
+
+<p style="color: #5580AC">
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="call.html"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span>
+</p>
+
+<p>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="committees.html"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Conference Committees</span></span>
+</p>
+
+<p>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="program.html"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Conference Program</span></span>
+</p>
+
+<p>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="registration.html"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Conference Registration</span></span>
+</p>
+
+<p>
+    <span onclick="return false" style="text-decoration:underline; color:blue" href="reservations.html"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Hotel Reservations</span></span>
+</p>
+
+<p>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="paper.html"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Paper Submission</span></span>
+</p>
+
+<p>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.html"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Workshops and Tutorials</span></span>
+</p>
+
+<p>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="hotel.html"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Travel/Hotel Information</span></span>
+</p>
+
+</div>
+
+<div id="left_footer">
+
+<br>
+<br>
+
+<p>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://portal.acm.org/browse_dl.cfm?linked=1&amp;part=series&amp;idx=SERIES383&amp;coll=portal&amp;dl=ACM&amp;CFID=40510658&amp;CFTOKEN=46842549"><img onmousedown="imd(this)" style="border:0" src="images/acm.jpg" alt="ACM"></span>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ics-conference.org/"><img onmousedown="imd(this)" style="border:0" src="images/newicslogosmall.jpg" alt="ICS"></span><br>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://validator.w3.org/check?uri=referer"><img onmousedown="imd(this)" style="border:0;height:25px" src="http://www.w3.org/Icons/valid-html401" alt="Valid HTML 4.01"></span>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://jigsaw.w3.org/css-validator/check/referer"><img onmousedown="imd(this)" style="border:0;height:25px" src="http://jigsaw.w3.org/css-validator/images/vcss" alt="Valid CSS!"></span>  
+</p>
+
+</div>
+
+<div id="main">
+
+<h2><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Technical Program</span></h2>
+
+<br>
+<br>
+
+<TABLE FRAME=VOID CELLSPACING=0 RULES=NONE BORDER=0 WIDTH="100%">
+<TBODY>
+<TR STYLE="background-color: #FFFF00">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" COLSPAN=2 ALIGN=LEFT><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Saturday, 7 June 2008</span></TD>
+</TR>
+<TR STYLE="background-color: #CCFFFF">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Full day</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span onclick="return false" style="text-decoration:underline; color:blue" href="http://itolab.is.ocha.ac.jp/IWSV2008/program.html" target="_blank"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >1st International Workshop on Super Visualization</span></span><br><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Meeting Room: Acesso</span></TD>
+</TR>
+<TR STYLE="background-color: #CCFFFF">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Full day</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.lrr.in.tum.de/~gerndt/home/Research/ScalableToolsWorkshop/scalableTools.htm" target="_blank"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >International Workshop on Scalable Tools for High-End Computing</span></span><br><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Meeting Room: Melambus</span></TD>
+</TR>
+</TBODY>
+</TABLE>
+
+<br>
+<br>
+
+<TABLE FRAME=VOID CELLSPACING=0 RULES=NONE BORDER=0 WIDTH="100%">
+<TBODY>
+<TR STYLE="background-color: #FFFF00">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" COLSPAN=2 ALIGN=LEFT><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Sunday, 8 June 2008</span></TD>
+</TR>
+<!--
+<TR STYLE="background-color: #CCFFFF">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>Full day</TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>Tutorial: Parallel Performance Evaluation Tools for HPC Systems</TD>
+</TR>
+-->
+<TR STYLE="background-color: #CCFFFF">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Full day</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorial_program.html" target="_blank"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial: Programming emerging architectures: GPUs and multicores</span></span><br><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Meeting Room: Melambus</span></TD>
+</TR>
+<!--
+<TR STYLE="background-color: #CCFFFF">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>Full day</TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>Tutorial: An Advanced Introduction to OpenMP 3.0</TD>
+</TR>
+-->
+</TBODY>
+</TABLE>
+
+<br>
+<br>
+
+<TABLE FRAME=VOID CELLSPACING=0 RULES=NONE BORDER=0 WIDTH="100%">
+<TBODY>
+<TR STYLE="background-color: #FFFF00">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" COLSPAN=2 ALIGN=LEFT><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Monday, 9 June 2008</span></TD>
+</TR>
+<TR STYLE="background-color: #CCFFCC">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >08:30-08:45</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Opening</span> </TD>
+</TR>
+<TR STYLE="background-color: #FFCC00">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >08:45-09:45</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Keynote 1:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#keynote1"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Many-core GPU Computing with NVIDIA CUDA</span></span><br>
+<span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Mark Harris, NVIDIA</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #CCFFCC">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >10:45-11:00</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></TD>
+</TR>
+<TR STYLE="background-color: #99CCFF">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >10:00-11:30</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=CENTER><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Session 1: Algorithms and Applications I</span></TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #13 ->
+<span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Implementing Wilson-Dirac Operator on the Cell Broadband Engine.</span><br>
+<span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Khaled Z. Ibrahim (IRISA/INRIA, Rennes, France)</span> <br>
+<span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >F. Bodin (IRISA/INRIA, Rennes, France)</span> 
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #151 ->
+<span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Biomedical Image Analysis on a Cooperative Cluster of GPUs and Multicores.</span> <br>
+<span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Timothy D.R. Hartley (Department of Biomedical Informatics and Electrical and Computer Engineering, Ohio State University, USA)</span><br>
+<span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Umit Catalyurek (Department of Biomedical Informatics and Electrical and Computer Engineering, Ohio State University, USA)</span><br>
+<span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Antonio Ruiz (Computer Architecture Department, University of Malaga, Spain)</span><br>
+<span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Manuel Ujaldon (Computer Architecture Department, University of Malaga, Spain)</span><br>
+<span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Francisco Igual (Department of Computer Engineering and Computer Science, University Jaume I, Spain)</span><br>
+<span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Rafael Mayo (Department of Computer Engineering and Computer Science, University Jaume I, Spain)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!-  Paper #199 ->
+<span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Data Mining on the Cell Broadband Engine</span> <br>
+<span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Gregory Buehrer (Ohio State University)</span><br>
+<span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Srinivasan Parthasarathy (Ohio State University)</span><br>
+<span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Matthew Goyder (Ohio State University)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #99CCFF">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >11:30-12:30</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=CENTER><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Session 2: Performance Evaluation I</span></TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #5 ->
+<span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Accurate Memory Signatures and Synthetic Address Traces for HPC Applications</span> <br>
+<span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Jonathan Weinberg (University of California, San Diego)</span><br>
+<span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Allan Snavely (San Diego Supercomputer Center)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #11 ->
+<span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Preserving Time in Large-Scale Communication Traces</span><br>
+<span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Prasun Ratn (North Carolina State University)</span><br>
+<span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Frank Mueller (North Carolina State University)</span><br>
+<span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Bronis R. de Supinski (Lawrence Livermore National Laboratory)</span><br>
+<span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Martin Schulz (Lawrence Livermore National Laboratory)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #CCFFCC">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >12:30-14:00</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></TD>
+</TR>
+<TR STYLE="background-color: #99CCFF">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >14:00-15:30</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=CENTER><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >Session 3: Architecture I</span></TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #62 ->
+<span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >A Vacuum Microelectronic Freespace Crossbar</span><br>
+<span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Michel Victor (Exaconnect Inc)</span><br>
+<span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Aris Silzars (Exaconnect Inc)</span><br>
+<span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Edward Davidson (University of Michigan)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #201 ->
+<span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Adaptive DRAM Temperature and Power Management</span>
+<br>
+<span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Song Liu (Northwestern University)</span><br>
+<span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Seda Memik (Northwestern University)</span><br>
+<span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Yu Zhang (Northwestern University)</span><br>
+<span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Gokhan Memik (Northwestern University)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #224 ->
+<span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >The Shared-Thread Multiprocessor</span><br>
+<span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Jeffery A. Brown (UC San Diego)</span><br>
+<span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Dean M. Tullsen (UC San Diego)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #CCFFCC">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >15:30-15:45</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></TD>
+</TR>
+<TR STYLE="background-color: #99CCFF">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >15:45-17:15</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=CENTER><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Session 4: Communication and Synchronization I</span></TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #42 ->
+<span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Advanced Collective Communication in Aspen</span><br>
+<span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Qasim Ali (Purdue University, West Lafayette)</span><br>
+<span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Sam Midkiff (Purdue University, West Lafayette)</span><br>
+<span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Vijay Pai (Purdue University, West Lafayette)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #94 ->
+<span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >The Deep Computing Messaging Framework: Generalized Scalable Message Passing on the Blue Gene/P Supercomputer</span><br>
+<span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Sameer Kumar (IBM Research)</span><br>
+<span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Gabor Dozsa (IBM Research)</span><br>
+<span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Gheorghe Almasi (IBM Research)</span><br>
+<span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Dong Chen (IBM Research)</span><br>
+<span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Mark E. Giampapa (IBM Research)</span><br>
+<span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Philip Heidelberger (IBM Research)</span><br>
+<span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Michael Blocksome (IBM Rochester)</span><br>
+<span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Ahmad Faraj (IBM Rochester)</span><br>
+<span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Jeff Parker (IBM Rochester)</span><br>
+<span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Joseph Ratterman (IBM Rochester)</span><br>
+<span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Brian Smith (IBM Rochester)</span><br>
+<span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Charles Archer (IBM Rochester)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #10 ->
+<span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >A Projection-Based Optimization Framework for Abstractions with Application to the Unstructured Mesh Domain</span><br>
+<span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Brian S. White (Cornell University)</span><br>
+<span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Sally A. McKee (Cornell University)</span><br>
+<span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Daniel Quinlan (Lawrence Livermore National Laboratory)</span>
+</TD>
+</TR>
+</TBODY>
+</TABLE>
+
+<br>
+<br>
+
+<TABLE FRAME=VOID CELLSPACING=0 RULES=NONE BORDER=0 WIDTH="100%">
+<TBODY>
+<TR STYLE="background-color: #FFFF00">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" COLSPAN=2 ALIGN=LEFT><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Tuesday, 10 June 2008</span></TD>
+</TR>
+<TR STYLE="background-color: #FFCC00">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >08:30-09:30</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Keynote 2:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#keynote2"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Challenges on the Road to Exascale Computing</span></span><br>
+<span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Tilak Agerwala, IBM Research</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #CCFFCC">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >09:30-09:45</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></TD>
+</TR>
+<TR STYLE="background-color: #99CCFF">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >09:45-11:15</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=CENTER><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Session 5: File Systems</span></TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #9 ->
+<span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >CprFS: A User-level File System to Support Consistent File State for Checkpoint and Restart</span><br>
+<span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Ruini Xue (Department of Computer Science and Techonology, Tsinghua University)</span><br>
+<span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Wenguang Chen (Department of Computer Science and Techonology, Tsinghua University)</span><br>
+<span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >Weimin Zheng (Department of Computer Science and Techonology, Tsinghua University)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #212. AUTHOR (affil) ->
+<span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Timely Offloading of Result-Data in HPC Centers</span><br>
+<span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Henry Monti (Virginia Tech.)</span><br>
+<span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Ali R. Butt (Virginia Tech.)</span><br>
+<span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Sudharshan S. Vazhkudai (Oak Ridge National Laboratory)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #215 ->
+<span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Shifted Declustering: An Ideal-placement Layout Scheme for Multi-way Replication Storage Architecture</span><br>
+<span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Huijun Zhu (University of Central Florida)</span><br>
+<span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Peng Gu (University of Central Florida)</span><br>
+<span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Jun Wang (University of Central Florida</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #CCFFCC">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >11:15-11:30</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></TD>
+</TR>
+<TR STYLE="background-color: #99CCFF">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >11:30-12:30</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=CENTER><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >Session 6: Fault Tolerance</span>  </TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #137 ->
+<span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Can Software Reliability Outperform Hardware Reliability on High Performance Interconnects? : A Case Study with MPI over InfiniBand</span><br>
+<span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Matthew J. Koop (The Ohio State University)</span><br>
+<span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Rahul Kumar (The Ohio State University)</span><br>
+<span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Dhabaleswar K. Panda (The Ohio State University)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #140 ->
+<span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Soft Error Vulnerability of Iterative Linear Algebra Methods</span><br>
+<span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Greg Bronevetsky (Lawrence Livermore National Laboratory)</span><br>
+<span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >Bronis deSupinski (Lawrence Livermore National Laboratory)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #CCFFCC">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >12:30-14:00</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></TD>
+</TR>
+<TR STYLE="background-color: #99CCFF">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >14:00-15:30</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=CENTER><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Session 7: Operating Systems</span></TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #58 ->
+<span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Evaluating the Effect of Replacing CNK with Linux on the Compute-Nodes of Blue Gene/L</span><br>
+<span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Edi Shmueli (IBM)</span><br>
+<span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >George Almasi (IBM)</span><br>
+<span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Jose Brunheroto (IBM)</span><br>
+<span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Jose Castanos (IBM)</span><br>
+<span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Gabor Dozsa (IBM)</span><br>
+<span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Sameer Kumar (IBM)</span><br>
+<span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Derek Lieber (IBM)</span> 
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #87 ->
+<span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Power-aware Dynamic Placement of HPC Applications</span><br>
+<span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Puneet Ahuja (IIT Delhi)</span><br>
+<span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Anindya Neogi (IBM India Research Lab)</span><br>
+<span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >Akshat Verma (IBM India Research Lab)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #185 ->
+<span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Autonomous Learning for Efficient Resource Utilization of Dynamic VM Migration</span><br>
+<span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Hyung Won Choi (New Jersey Institute of Technology)</span><br>
+<span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Hukeun Kwak (Soongsil University)</span><br>
+<span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Andrew Sohn (New Jersey Institute of Technology)</span><br>
+<span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Kyusik Chung (Soongsil University)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #CCFFCC">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >15:30-15:45</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></TD>
+</TR>
+<TR STYLE="background-color: #99CCFF">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >15:45-17:15</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=CENTER><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Session 8: Algorithms and Applications II</span></TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #54 ->
+<span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Adaptive Runtime Tuning of Parallel Sparse-Vector Multiplication on Distributed Memory Systems</span><br>
+<span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Seyong Lee  (School of ECE, Purdue University, West Lafayette, IN 47907, USA)</span><br>
+<span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Rudolf Eigenmann (School of ECE, Purdue University, West Lafayette, IN 47907, USA)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #164 ->
+<span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Fast Scan Algorithms on Graphics Processors</span><br>
+<span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Yuri Dotsenko (Microsoft Corporation)</span><br>
+<span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Naga Govindaraju (Microsoft Corporation)</span><br>
+<span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Peter-Pike Sloan (Microsoft Corporation)</span><br>
+<span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Charles Boyd (Microsoft Corporation)</span><br>
+<span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >John Manferdelli (Microsoft Corporation)</span><br>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #171 ->
+<span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Three-Dimensional Delaunay Refinement for Multi-Core Processors</span><br>
+<span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Andrey N. Chernikov (College of William and Mary)</span><br>
+<span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Nikos P. Chrisochoides (College of William and Mary)</span>
+</TD>
+</TR>
+</TBODY>
+</TABLE>
+
+<br>
+<br>
+
+<TABLE FRAME=VOID CELLSPACING=0 RULES=NONE BORDER=0 WIDTH="100%">
+<TBODY>
+<TR STYLE="background-color: #FFFF00">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" COLSPAN=2 ALIGN=LEFT><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Wednesday, 11 June 2008</span></TD>
+</TR>
+<TR STYLE="background-color: #FFCC00">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >08:30-09:30</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Keynote 3:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="#keynote3"><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Petaflop&#47;s, Seriously</span></span><br>
+<span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >David E. Keyes, Columbia University</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #CCFFCC">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >09:30-09:45</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></TD>
+</TR>
+<TR STYLE="background-color: #99CCFF">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >09:45-11:15</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=CENTER><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Session 9: Code Performance Tuning</span></TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #105 ->
+<span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >A Compiler Framework for Optimization of Affine Loop Nests for GPGPUs</span><br>
+<span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Muthu Manikandan Baskaran (Department of CSE, The Ohio State University)</span><br>
+<span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Uday Bondhugula (Department of CSE, The Ohio State University)</span><br>
+<span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >J Ramanujam (Department of ECE, Louisiana State University)</span><br>
+<span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Atanas Rountev (Department of CSE, The Ohio State University)</span><br>
+<span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >P Sadayappan (Department of CSE, The Ohio State University)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #106 ->
+<span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Rotating Register Allocation with Multiple Rotating Branches</span><br>
+<span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Suhyun Kim (KIST)</span><br>
+<span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Soo-Mook Moon (SNU)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #139 ->
+<span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Automatic SIMD Vectorization of Chains of Recurrences</span><br>
+<span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Yixin Shou (Department of Computer Science, Florida State University, Tallahassee, FL 32306-4530)</span><br>
+<span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Robert A. van Engelen (School of Computational Science, Florida State University, Tallahassee, FL 32306-4530)</span><br>
+</TD>
+</TR>
+<TR STYLE="background-color: #CCFFCC">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >11:15-11:30</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></TD>
+</TR>
+<TR STYLE="background-color: #99CCFF">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >11:30-13:00</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=CENTER><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Session 10: Communication and Synchronization II</span>  </TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #72 ->
+<span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Optimizing Irregular Shared-Memory Applications for Clusters</span><br>
+<span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Seung-Jai Min (Purdue University, USA)</span><br>
+<span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Rudolf Eigenmann (Purdue University, USA)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #147 ->
+<span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Performance Portable Optimizations for Loops Containing Communication Operations</span><br>
+<span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Costin Iancu (Lawrence Berkeley National Laboratory)</span><br>
+<span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Wei Chen (Intel)</span><br>
+<span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Kathy Yelick (Lawrence Berkeley National Laboratory)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #183 ->
+<span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Phasers: a Unified Deadlock-Free Construct for Collective and Point-to-point Synchronization</span><br>
+<span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Jun Shirako (Waseda University)</span><br>
+<span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >David Peixotto (Rice University)</span><br>
+<span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Vivek Sarkar (Rice University)</span><br>
+<span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >William Scherer (Rice University)</span><br>
+</TD>
+</TR>
+<TR STYLE="background-color: #CCFFCC">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >13:00-21:00</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Excursion</span></TD>
+</TR>
+</TBODY>
+</TABLE>
+
+<br>
+<br>
+
+<TABLE FRAME=VOID CELLSPACING=0 RULES=NONE BORDER=0 WIDTH="100%">
+<TBODY>
+<TR STYLE="background-color: #FFFF00">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" COLSPAN=2 ALIGN=LEFT><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >Thursday, 12 June 2008</span></TD>
+</TR>
+<TR STYLE="background-color: #99CCFF">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >08:30-10:00</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=CENTER><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >Session 11: Memory Management</span></TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #45 ->
+<span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >Orchestrating Data Transfer for the Cell/B.E. Processor</span>
+<br>
+<span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >Tong Chen (IBM T.J. Waston Research Lab)</span><br>
+<span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >Haibo Lin (IBM China Research Lab)</span><br>
+<span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Tao Zhang (IBM T. J. Waston Research Lab)</span><br>
+<span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Kathryn O&#39;Brien (IBM T. J. Watson Research Lab)</span><br>
+<span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Kevin O&#39;Brien (IBM T. J. Waston Research Lab)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #48  ->
+<span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >CUBA: An Architecture for Efficient CPU/Co-processor Data Communication</span>
+<br>
+<span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Isaac Gelado (Universitat Politecnica de Catalunya)</span><br>
+<span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >John Kelm (University of Illinois at Urbana-Champaign)</span><br>
+<span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Shane Ryoo (University of Illinois at Urbana-Champaign)</span><br>
+<span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Steve Lumetta (University of Illinois at Urbana-Champaign)</span><br>
+<span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Nacho Navarro (Univesitat Politecnica de Catalunya)</span><br>
+<span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Wen-mei Hwu (University of Illinois at Urbana-Champaign)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #49 ->
+<span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >Efficient computation of sum-products on GPUs through software-managed cache</span>
+<br>
+<span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Mark Silberstein (Technion - Israel Institute of Technology, Israel)</span><br>
+<span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Dan Geiger (Technion - Israel Institute of Technology, Israel)</span><br>
+<span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Assaf Schuster (Technion - Israel Institute of Technology, Israel)</span><br>
+<span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >Anjul Patney (University of California in Davis, USA)</span><br>
+<span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >John D. Owens (University of California in Davis, USA)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #CCFFCC">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >10:00-10:15</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></TD>
+</TR>
+<TR STYLE="background-color: #99CCFF">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >10:15-11:45</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=CENTER><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Session 12: Architecture II</span>  </TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #6 ->
+<span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Exploiting Idle Register Classes for Fast Spill Destination</span>
+<br>
+<span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >Fang Lu (Key Laboratory of Computer System and Architecture, Institute of Computing Technology, Chinese Academy of Sciences,China)</span><br>
+<span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Lei Wang (Key Laboratory of Computer System and Architecture, Institute of Computing Technology, Chinese Academy of Sciences,China)</span><br>
+<span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >Xiaobing Feng (Key Laboratory of Computer System and Architecture, Institute of Computing Technology, Chinese Academy of Sciences,China)</span><br>
+<span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Zhiyuan Li (Department of Computer Sciences,Purdue University,U.S.A)</span><br>
+<span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >Zhaoqing Zhang (Key Laboratory of Computer System and Architecture, Institute of Computing Technology, Chinese Academy of Sciences,China)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #34 ->
+<span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Analysis of Dynamic Power Management on Multi-Core Processors</span>
+<br>
+<span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >W. Lloyd Bircher (Advanced Micro Devices)</span><br>
+<span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Lizy John (University of Texas at Austin)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #112 ->
+<span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >Focused Prefetching: Performance Oriented Prefetching Based On Commit Stalls</span><br>
+<span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >R. Manikantan (Dept of Computer Science and Automation, Indian Institute of Science)</span><br>
+<span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >R. Govindarajan (Dept of Computer Science and Automation, Indian Institute of Science)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #CCFFCC">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >11:45-13:00</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >Break</span></TD>
+</TR>
+<TR STYLE="background-color: #99CCFF">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >13:00-14:30</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=CENTER><span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >Session 13: Performance Evaluation II</span></TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #18 ->
+<span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Analysis of Speedup of MPI Applications</span>
+<br>
+<span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >Marc Casas (Universitat Polit&#232;cnica de Catalunya)</span><br>
+<span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >Rosa M. Badia (Universitat Polit&#232;cnica de Catalunya)</span><br>
+<span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >Jes&#250;s Labarta (Universitat Polit&#232;cnica de Catalunya)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #69 ->
+<span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >Analyzing Memory Access Intensity in Parallel Programs on Multicore</span> 
+<br>
+<span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >Lixia Liu (Department of Computer Science, Purdue University, USA)</span><br>
+<span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >Zhiyuan Li (Department of Computer Science, Purdue University, USA)</span><br>
+<span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >Ahmed Sameh (Department of Computer Science, Purdue University, USA)</span>
+</TD>
+</TR>
+<TR STYLE="background-color: #FFCC99">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><BR></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT>
+<!- Paper #144 ->
+<span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >A Regression-Based Approach to Scalability Prediction</span>
+<br>
+<span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >Brad Barnes (University of Georgia)</span><br>
+<span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >Barry Rountree (University of Georgia)</span><br>
+<span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >David Lowenthal (University of Georgia)</span><br>
+<span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >Jaxk Reeves (University of Georgia)</span><br>
+<span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >Bronis de Supinski (Lawrence Livermore National Laboratory)</span><br>
+<span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >Martin Schulz(Lawrence Livermore National Laboratory)</span><br>
+</TD>
+</TR>
+<TR STYLE="background-color: #CCFFCC">
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >14:30-14:45</span></TD>
+<TD STYLE="border-top: 1px solid #000000; border-bottom: 1px solid #000000; border-left: 1px solid #000000; border-right: 1px solid #000000" ALIGN=LEFT><span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >Closing</span></TD>
+</TR>
+</TBODY>
+</TABLE>
+
+<br>
+<br>
+<br>
+
+<hr>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name=keynote1></span>
+
+<br>
+
+<h2><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Talks</span></h2>
+
+<br>
+
+<hr>
+
+<br>
+<br>
+
+<h3><span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >Many-core GPU Computing with NVIDIA CUDA</span></h3>
+
+<b><span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >Mark Harris</span></b> <span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >- NVIDIA</span>
+<p>
+<span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >In the past, graphics processors were special-purpose hardwired application accelerators, suitable only for conventional graphics applications. Modern GPUs are fully programmable, massively parallel floating point processors. In this talk I will describe NVIDIA's scalable, highly parallel many-core GPU architecture and how CUDA software for GPU computing delivers high throughput for data-intensive processing. I will discuss how CUDA is reinvigorating research on data-parallel algorithms, reducing time to scientific discovery, and enabling a variety of compute-intensive industrial applications of GPUs beyond computer graphics.</span>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name=keynote2></span>
+
+<br>
+<br>
+<br>
+
+<hr>
+
+<br>
+<br>
+
+<h3><span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >Challenges on the Road to Exascale Computing</span></h3>
+
+<b><span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >Tilak Agerwala</span></b> <span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >- Vice President of Systems, IBM Research</span> 
+
+<p>
+<span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >Supercomputing systems have made great strides in recent years as the extensive computing needs of cutting-edge engineering work and scientific discovery have driven the development of more powerful systems.  The first teraflop computer, ASCI Red, came on the scene in late 1996, and now a machine must achieve 5.9 teraflops to gain entry to the very bottom of the Top500 supercomputing list.</span>  
+
+<p>
+<span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >With the emergence of petascale supercomputers expected in 2008 or 2009, we have set our sights on the increased capacity and expected muscle of exascale computing.  This has also been the focus of organizations such as the Institute for Advanced Architectures jointly launched at Sandia and Oak Ridge National Laboratories.  However, the challenges of exascale computing will not be solved by the technologies of today.</span>  
+<p>
+<span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >If today&#39;s most power and energy efficient supercomputer was linearly scaled to the exascale level, it would consume around 200MWatts of power, contain over 60 million cores, and require over 400M dollars of memory.  Such a system will present significant problems in management and programmability as current bounds of parallelism are tested.  Data accessibility will also be a significant issue as our ability to sense, generate and calculate on data is growing faster than our ability to access, manage and even &#34;store&#34; that data.  These problems only get worse as the systems computational power scales up.  In this talk, I will discuss exascale computing challenges to be overcome in the areas of power, architecture, programmability, management, and data accessibility.</span>  
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name=keynote3></span>
+
+<br>
+<br>
+<br>
+
+<hr>
+
+<br>
+<br>
+
+<h3><span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >Petaflop&#47;s, Seriously</span></h3>
+
+<b><span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >David E. Keyes</span></b> <span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >- Fu Foundation Professor of Applied Mathematics,
+Columbia University, and Acting Director of Institute for Scientific Computing
+Research (ISCR) at Lawrence Livermore National Laboratory.</span>
+
+<p>
+<span class="coloringspan" id="282" onmousedown="md(this)" onmouseup="mu(this)" >Sustained floating-point rates on real applications, as tracked by the
+Gordon Bell Prize, have increased by over five orders of magnitude from
+1988, when 1 Gigaflop/s was reported on a structural simulation, to 2006,
+when 200 Teraflop/s were reported on a molecular dynamics simulation.
+Various versions of Moore's Law over the same interval provide only two to
+three orders of magnitude of improvement for an individual processor; the
+remaining factor comes from concurrency, which is of order 100,000 for the
+BlueGene/L computer, the platform of choice for the majority of recent Bell
+Prize finalists. As the semiconductor industry begins to slip relative to
+its own roadmap for silicon-based logic and memory, concurrency will play an
+increasing role in attaining the next order of magnitude, to arrive at the
+long-awaited milepost of 1 Petaflop/s sustained on a practical application,
+which should occur around 2009. Simulations based on Eulerian formulations
+of partial differential equations can be among the first applications to
+take advantage of petascale capabilities, but not the way most are presently
+being pursued. Only weak scaling can get around the fundamental limitation
+expressed in Amdahl's Law and only optimal implicit formulations can get
+around another limitation on scaling that is an immediate consequence of
+Courant-Friedrichs-Lewy stability theory under weak scaling of a PDE. Many
+PDE-based applications and other lattice-based applications with petascale
+roadmaps, such as quantum chromodynamics, will likely be forced to adopt
+optimal implicit solvers. However, even this narrow path to petascale
+simulation is made treacherous by the imperative of dynamic adaptivity,
+which drives us to consider algorithms and queueing policies that are less
+synchronous than those in common use today. Drawing on the SCaLeS report
+(2003-04), the latest ITRS roadmap, some back-of-the-envelope estimates, and
+numerical experiences with PDE-based codes on recently available platforms,
+we will attempt to project the pathway to Petaflop/s for representative
+applications.</span>

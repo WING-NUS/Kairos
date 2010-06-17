@@ -1,0 +1,508 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.aspdac.com^aspdac2008^design_contest^index.html_2009-08-05__14-31-51.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.aspdac.com^aspdac2008^design_contest^index.html_2009-08-05__14-31-51.yaml created on Wed Aug 05 17:31:35 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<title>13th Asia and South Pacific Design Automation Conference (ASP-DAC 2008)</title>
+<link rel="stylesheet" href="http://www.aspdac.com/aspdac2008/aspdac.css" type="text/css" />
+</head>
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<div id="body"><!--- body -->
+<TABLE cellpadding="0" cellspacing="0" border="0">
+<TR>
+	<TD><div id="header">
+ <div id="title"><h2><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >13th Asia and South Pacific Design Automation Conference</span></h2>
+ <h2><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >ASP-DAC 2008</span></h2>
+ <p><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Date : January 21 - 24, 2008</span><br/> 
+ <span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Place:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.coex.co.kr/eng/index.asp" target="_brank"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >COEX</span></span><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >, Seoul, Korea</span></div>
+</div></TD>
+</TR>
+<TR>
+	<TD>
+	<div id="content"><!-- content -->
+	<TABLE cellpadding="0" cellspacing="0" border="0">
+	<TR>
+		<TD valign="top">
+<div id="sidemenu" >
+<div id="navcontainer">
+<ul>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/sitemap/index.html"><font size="2pt;"><b><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >SITE MAP</span></b></font></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/home/index.html"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/introduction/index.html"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Introduction</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/committees/index.html"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Committees</span></span></li>
+<!-- <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/important_dates/index.html">Important Dates</span></li> -->
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/call_for_papers/index.html"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/technical_progr/index.html"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Technical Program</span> </span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/authors_guide/index.html"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Author's Guide</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/Designers/index.html"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Designers' Forum</span> </span></li> 
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/keynote/index.html"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Addresses</span> </span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/paper_submissio/index.html"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Paper Submission</span> </span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/design_contest/index.html"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Univ. LSI Design Contest</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/tutorial/index.html"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Tutorial</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/student_forum/index.html"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Student Forum</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/registration/index.html"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/Exhibition/index.html"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Exhibition</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/accommodation/index.html"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation & Tour</span></span></li>
+<!-- <li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/venue/index.html">Venue</span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/transportation/index.html">Transportation</span></li> -->
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/general_informa/index.html"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Useful Information</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/aspdac_history/index.html"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >ASP-DAC History</span> </span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/related_conferences/index.html"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Associated Conferences</span> </span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/co_related/index.html"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Co-located Events</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.aspdac.com/aspdac2008/Sponsors/index.html"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></span></li>
+<li></li>
+</ul></div>
+<div id="sponsor"><h3><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Sponsored By:</span></h3><img onmousedown="imd(this)" src="http://www.aspdac.com/aspdac2008/images/mark1.gif" "  alt="Sponsor"  border="0"/></div>
+</div>
+<map name="Map">
+<area shape="rect" coords="10,6,66,58" href="http://www.ieee-cas.org/" target="_brank">
+  <!-- <area shape="rect" coords="74,8,118,60" href="2#"> -->
+  <area shape="rect" coords="9,60,65,111" href="http://www.sigda.org/" target="_brank">
+  <!-- <area shape="rect" coords="73,63,115,111" href="4#"> -->
+  <area shape="rect" coords="2,113,131,148" href="http://www.ieek.or.kr/" target="_brank">
+</map> <!-- End sidemenu --></TD>
+		<TD valign="top">
+	<div id="main"><!-- main -->
+
+<p>
+<h1><span onclick="return false" style="text-decoration:underline; color:blue" name="Design Contest Submission"></span><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >LSI Univ. Design Contest</span></h1>
+<p>
+
+
+
+
+<span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >The University LSI Design Contest is a key event of ASP-DAC, which focuses on real chip designs in academia. The Design Contest Committee selected 12 designs for presentation, from which winners of design awards will be announced in the conference.</span>
+<UL>
+	<LI><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Date: Mon., January 22, 2008</span>
+	<LI><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Place:</span> <br>
+	<UL>
+		<LI><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Oral Presentation: Room311BC (10:15-12:20)</span> 
+		<LI><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Poster Presentation: Room 321A (12:20-13:30) (Light meals will be served.)</span>
+	</UL>
+	<LI><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Chair: In-Cheol Park (KAIST, Korea)</span>
+</UL>
+
+<TABLE width="100%" cellpadding="3" cellspacing="1" bgcolor="#D7D7D7">
+<TR bgcolor="#F4D0F9">
+	<TD align="center"><B><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Session No.</span></B></TD>
+	<TD align="center"><B><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Time</span></B></TD>
+	<TD align="center"><B><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Presentation Title</span></B></TD>
+</TR>
+<TR bgcolor="#FFFFFF">
+	<TD align="center"><B><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >1D-1</span></B></TD>
+	<TD align="center"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >10:15 - 10:22</span></TD>
+	<TD><B><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >A 1.2GHz Delayed Clock Generator for High-speed Microprocessors</span></B><br><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Inhwa Jung, Moo-Young Kim, and Chulwoo Kim (Korea Univ., Korea)</span></TD>
+</TR>
+<TR bgcolor="#FFFFFF">
+	<TD align="center"><B><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >1D-2</span></B></TD>
+	<TD align="center"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >10:22 - 10:29</span></TD>
+	<TD><B><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >LVDS-type On-Chip Transmission Line Interconnect with Passive Equalizers in 90 nm CMOS Process</span></B><br><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Akiko Mineyama, Hiroyuki Ito, Takahiro Ishii, Kenichi Okada, and Kazuya Masu (Tokyo Inst. of Technology, Japan)</span></TD>
+</TR>
+<TR bgcolor="#FFFFFF">
+	<TD align="center"><B><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >1D-3</span></B></TD>
+	<TD align="center"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >10:29 - 10:36</span></TD>
+	<TD><B><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >A Low-Leakage Current Power 180-nm CMOS SRAM</span></B><br><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Tadayoshi Enomoto and Yuki Higuchi (Chuo Univ., Japan)</span></TD>
+</TR>
+<TR bgcolor="#FFFFFF">
+	<TD align="center"><B><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >1D-5</span></B></TD>
+	<TD align="center"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >10:43 - 10:50</span></TD>
+	<TD><B><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >A CMOS Direct Sampling Mixer using Switched Capacitor Filter Technique for Software-Defined Radio</span></B><br><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Hong Phuc Ninh, Takashi Moue, Takashi Kurashina, Kenichi Okada, and Akira Matsuzawa (Tokyo Inst. of Technology, Japan)</span></TD>
+</TR>
+<TR bgcolor="#FFFFFF">
+	<TD align="center"><B><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >1D-6</span></B></TD>
+	<TD align="center"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >10:50 - 10:57</span></TD>
+	<TD><B><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Small-Area CMOS RF Distributed Mixer using Multi-Port Inductors</span></B><br><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Susumu Sadoshima, Satoshi Fukuda, Tackya Yammouch, Hiroyuki Ito, Kenichi Okada, and Kazuya Masu (Tokyo Inst. of Technology, Japan)</span></TD>
+</TR>
+<TR bgcolor="#FFFFFF">
+	<TD align="center"><B><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >1D-7</span></B></TD>
+	<TD align="center"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >10:57 - 11:04</span></TD>
+	<TD><B><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Dynamic Supply Noise Measurement Circuit Composed of Standard Cells Suitable for In-Site SoC Power Integrity Verification</span></B><br><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Yasuhiro Ogasahara, Masanori Hashimoto, and Takao Onoye (Osaka Univ.,Japan)</span></TD>
+</TR>
+<TR bgcolor="#FFFFFF">
+	<TD align="center"><B><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >1D-8</span></B></TD>
+	<TD align="center"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >11:04 - 11:11</span></TD>
+	<TD><B><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Duo-Binary Circular Turbo Decoder Based on Border Metric Encoding for WiMAX</span></B><br><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Ji-Hoon Kim and In-Cheol Park (KAIST, Korea)</span></TD>
+</TR>
+<TR bgcolor="#FFFFFF">
+	<TD align="center"><B><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >1D-9</span></B></TD>
+	<TD align="center"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >11:11 - 11:18</span></TD>
+	<TD><B><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Area and Power Efficient Design of Coarse Time Synchronizer and Frequency Offset Estimator for Fixed WiMAX Systems</span></B><br><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Tae-Hwan Kim and In-Cheol Park (KAIST, Korea)</span></TD>
+</TR>
+<TR bgcolor="#FFFFFF">
+	<TD align="center"><B><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >1D-10</span></B></TD>
+	<TD align="center"><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >11:18 - 11:25</span></TD>
+	<TD><B><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >A Low-Cost Cryptographic Processor for Security Embeded System</span></B><br><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Ronghua Lu, Jun Han, Xiaoyang Zeng, Qing Li, Lang Mai, and Zhao Jia (Fudan Univ., China)</span></TD>
+</TR>
+<TR bgcolor="#FFFFFF">
+	<TD align="center"><B><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >1D-11</span></B></TD>
+	<TD align="center"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >11:25 - 11:32</span></TD>
+	<TD><B><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Multithreaded Coprocessor Interface for Multi-Core Multimedia SoC</span></B><br><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Shih Hao Ou, Tay Jyi Lin, Xiang Sheng Deng, Zhi Hong Zhuo, and Chih Wei Liu (Nat¡¯l Chiao Tung Univ., Taiwan)</span></TD>
+</TR>
+<TR bgcolor="#FFFFFF">
+	<TD align="center"><B><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >1D-12</span></B></TD>
+	<TD align="center"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >11:32 - 11:39</span></TD>
+	<TD><B><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Parameterized Embedded In-circuit Emulator and Its Retargetable Debugging Software for Microprocessor/Microcontroller/DSP Processor</span></B><br><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Liang-Bi Chen, Yung-Chih Liu, Chien-Hung Chen, Chung-Fu Kao, and Ing-Jer Huang (Nat¡¯l Sun Yat-Sen Univ., Taiwan)</span></TD>
+</TR>
+</TABLE>
+<h6><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Last Updated on: January 1, 2008</span></h6>
+		
+	</div><!--- main -->	
+		</TD>
+	</TR>
+	</TABLE>
+	<div class="clear"></span><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></div></div><!--- content -->	
+	</TD>
+</TR>
+<TR>
+	<TD><div id="footer"> <span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Conference Secretariat  Genicom Co., Ltd.</span> <br/> <span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Phone: +82-42-472-7463 FAX: +82-42-472-7459 e-mail:aspdac2008@aspdac2008.com  &nbsp;</span>

@@ -1,0 +1,1564 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+
+<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^irina.rish.googlepages.com^schedule_2009-08-05__14-26-08.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^irina.rish.googlepages.com^schedule_2009-08-05__14-26-08.yaml created on Wed Aug 05 17:31:20 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+  <title>Irina.Rish - Workshop Schedule </title>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <style type="text/css">
+  #g_title p, #g_footer p, #g_description p {
+    margin: 0;
+  }
+  /*
+
+  	-- -- -- -- -- -- --
+  	Browser Fixes
+  	-- -- -- -- -- -- --
+  	
+  	This file uses CSS filtering methods to fix various
+  	layout bugs.
+
+  	Each of the following three imported files is a 
+  	separate, browser-specific CSS file that keeps all 
+  	hacks out of the main style sheet.
+  	
+  	Over time, as supporting these browsers no longer
+  	remains a priority, cleaning up the hacks is as
+  	easy as deleting the @import statement below, or
+  	simply no longer linking this file from the HTML.
+  	
+  */
+
+  /* 
+    fix ie6 "peekaboo bug" using the "holly hack". 
+    Note, this style only gets applied to ie6
+  */
+  * html .wrapper {
+    height: 0.1%;
+  }
+
+  /* 
+   * IE5 mac - overrides the IE/Win hack 
+   */
+
+  /*\*//*/
+
+  * html #threecolumn div {
+  	height: auto;
+  }
+
+  /**/
+
+
+  /* 
+   * IE5/Win-specific CSS -ensures #container wraps all content on window resize
+   */
+
+  @media tty {
+   i{content:"\";/*" "*/}} * html #container { height: 1%; } /*";}
+  }/* */
+  /* Styling for editable elements. Eventually, this will be part of the style. */
+  .editable {
+    border: 1px dashed blue;
+  }
+  
+  #footer {
+    clear: both;
+  }
+  
+  /* Extra divs hidden by default. The custom CSS can override this though */
+  #extraDiv1, #extraDiv2, #extraDiv3, #extraDiv4, #extraDiv5, #extraDiv6 {
+    display: none;
+  }
+  
+  a img,:link img,:visited img {border: none;}
+
+
+  body {
+    text-align: center;
+  }
+  #container {
+    width: 718px;
+    text-align: left;
+    margin: 0 auto;
+  }
+  /** BEGIN CUSTOM SKIN **/
+  /*
+
+  	-- -- -- -- -- -- --
+  	Base CSS
+  	-- -- -- -- -- -- --
+  	
+  	This file simply removes default styling on most HTML elements in 
+  	order to reduce the need to later override them.
+  	
+  */
+
+  h1,h2,h3,h4,h5,h6,pre,code,p {font-size: 1em;}
+  dl,li,dt,dd,h1,h2,h3,h4,h5,h6,pre,form,body,html,p,blockquote,fieldset,input {margin: 0; padding: 0;}
+  a img,:link img,:visited img {border: none;}
+  address {font-style: normal;}/*
+
+  	-- -- -- -- -- -- --
+  	Type Scheme: Deco
+  	-- -- -- -- -- -- --
+  	
+  */
+
+  body {
+  	font: 76% Verdana, sans-serif;
+  }	
+
+  h1, h2, h3, h4, h5, h6, p.description {
+  	font-family: "Trebuchet MS", Trebuchet, sans-serif;
+  }
+  h1 {
+  	font-size: 3em;
+  	font-weight: bold;
+  	letter-spacing: 2px;
+  }
+  h2 {
+  	font-size: 2em;
+  	font-weight: normal;
+  }
+  h3 {
+  	font-size: 1.5em;
+  }
+  h4 {
+  	font-size: 1.2em;
+  	letter-spacing: 0.2em;
+  }
+  h5 {
+  	font-size: 1.2em;
+  }
+  h6 {
+  	font-size: 1em;
+  	font-weight: bold;
+  }
+
+  p, td {
+  	line-height: 1.8em;
+  }
+  code, kbd {
+  	font-size: 1.25em;
+  }/*
+
+  	-- -- -- -- -- -- --
+  	STYLE: Lagoona
+  	-- -- -- -- -- -- --
+
+
+  	Each of the following three files is a separate,
+  	browser-specific CSS file that keeps all hacks
+  	out of the main style sheet.
+
+  	Over time, as supporting these browsers no longer
+  	remains a priority, cleaning up the hacks is as
+  	easy as deleting the @import statement.
+
+  */
+
+
+
+  /* ie6win */
+
+  /* fixes a repeating character bug in the sidebar column  - hide for IE Mac \*/ 
+
+  * html #sidebar a { 
+
+      height: 1px; 
+
+  } 
+
+  /*  */ 
+
+
+
+  /* fixes the bad support of the boxmodel - hide for IE Mac \*/ 
+
+  * html #twocolumn-left #main-content,
+
+  * html #twocolumn-right #main-content {
+
+  	width: 475px;
+
+  }
+
+  /*  */ 
+
+  /* fixes the double margin bug - hide for IE Mac \*/ 
+
+  * html #twocolumn-liquid-left #sidebar {
+
+  	margin-left: 1em;
+
+  }
+
+  /* ie5win */
+  @media tty { i{content:"\";/*" "*/}} * html td, * html th, * html caption  { font-size: 76%; } * html #main-content .wrapper { padding: 0 1.2em; } * html #threecolumn #main-content { width: 428px; } /*";}
+  }/* */
+
+
+
+
+
+  /* Basic HTML style
+
+  ----------------------------------------------- */
+
+  a:link {
+  	margin: -1px;
+  	padding: 1px;
+  }
+
+  a:visited {
+  	color: #eeeeee;
+  }
+
+  body {
+
+  	font: 76% Helvetica, Arial, Verdana, sans-serif;
+
+  	margin: 0;
+
+  	padding: 0;
+
+  }
+
+  blockquote {
+
+  	margin: 1em 0;
+
+  	font-style: italic;
+
+  }
+
+  caption {
+
+  	font-weight: bold;
+
+  	width: inherit;
+
+  	padding: 0.3em 1em;
+
+  	border-bottom: 1px solid;
+
+  }
+
+  dd {
+
+  	margin: 1em 0;
+
+  	padding: 3px;
+
+  	border-left: 5px solid;
+
+  }
+
+  dt {
+
+  	font-weight: bold;
+
+  }
+
+  hr {
+
+  	margin: 1em 0;
+
+  	border-style: none;
+
+  	height: 1px;
+
+  }
+
+  li {
+
+  	margin: 1em 0;
+
+  }
+
+  td {
+
+  	vertical-align: top;
+
+  	padding: 0.5em;
+
+  	border-bottom: 1px solid;
+
+  }
+
+  td p {
+
+  	margin-top: 0;
+
+  	line-height: 1.3em;
+
+  }
+  p, td {
+   line-height: 1.3em;
+  }
+
+  th {
+
+  	text-align: left;
+
+  	border-bottom: 1px solid;
+
+  	padding: 0.5em;
+
+  }
+
+
+
+
+
+  /* Custom font definitions for Lagoona style
+
+  ----------------------------------------------- */
+
+  p {
+
+  	margin: 1em 0;
+  	line-height: 1.5;
+
+  }
+
+  p.description {
+
+  	margin: 0;
+
+  	line-height: 1.5;
+
+  	font-style: normal;
+
+  	font-size: 1.2em;
+
+  }
+
+  h1 {
+
+  	font-size: 3em;
+
+  }
+
+  h2 {
+
+  	margin: 5px 0 5px 0;
+
+  	padding-left: 17px;
+
+  	font-size: 2em;
+
+  	font-weight: normal;
+
+  }
+
+  h3 {
+
+  	padding: 0 5px 0 17px;
+
+  	border-bottom: 1px dotted;
+
+  	font-size: 1.6em;
+
+  	font-weight: normal;
+
+  }
+
+  h4 {
+
+  	font-size: 1.2em;
+
+  }
+
+  h5 {
+
+  	font-size: 1.2em;
+
+  	padding: 3px 0 3px 15px;
+
+  	border-top: 1px dotted;
+
+  	border-bottom: 1px dotted;	
+
+  }
+
+  h6 {
+
+  	font-size: 1em;
+
+  	padding-bottom: 3px;
+
+  	border-top: 1px dotted;
+
+  	border-bottom: 1px dotted;
+
+  }
+
+  .editable {
+
+  	border: #f00 dashed 1px;
+
+  	position: relative;
+
+  }
+
+
+
+  /* layout patches
+
+  ----------------------------------------------- */
+
+  #twocolumn-liquid-left #sidebar {
+
+  	float: left;
+
+  }
+
+  #twocolumn-liquid-right #sidebar {
+
+  	float: right;
+
+  }
+
+  #threecolumn #sidebar-alternate {
+
+  	float: right;
+
+  }
+
+
+
+
+
+  /* Header style
+
+  ----------------------------------------------- */
+
+  #header {
+
+  	margin-bottom: 10px;
+  }
+
+
+  /* The following are to get the header area to be at least 123px so that
+     the body text doesn't begin where the header background is.  Just setting
+     the height to 123px breaks for most browsers, since it puts the body and
+     sidebars on TOP of the header when the header is more than 123px.  Using
+     min-height is what we want, but it breaks in the page editor. So we get 
+     creative here ... */
+
+  /* ie6win - hide for IE Mac \*/ 
+  /* ie deosn't have min-height, but it uses height as if it were min-height */ 
+
+  * html #header { 
+  	height: 123px; 
+
+  } 
+
+  /* Safari/Opera/Firefox - we set the padding of the header to the min height we want. 
+                            This forces it to be at least 123px */
+  *>#header {
+  	padding-top: 123px;
+  }
+
+  /* Safari/Opera/Firefox - then we pull the contents up to where we want them */
+  *>#header .wrapper {
+  	margin-top: -123px;
+
+  }
+
+
+  #header .wrapper {
+
+  	padding: 2em;
+
+  }
+
+  #threecolumn #header .wrapper {
+
+  	padding: 2em 0;
+
+  }
+
+  #twocolumn-left #header .wrapper {
+
+  	padding: 2em 2em 2em 0;
+
+  }
+
+  #twocolumn-right #header .wrapper {
+
+  	padding: 2em 0 2em 2em;
+
+  }
+
+
+
+
+
+  /* Content column tweaks
+
+  ----------------------------------------------- */
+
+  #main-content .wrapper {
+
+  	padding: 0 2em;
+
+  }
+
+  #main-content blockquote {
+
+  	margin: 1em;
+
+  }
+
+
+
+  /* Sidebar style
+
+  ----------------------------------------------- */
+
+
+
+  #sidebar {
+
+  	margin: 1em 0 0 0;
+
+  }
+
+  #sidebar .links .wrapper {
+
+  	margin-top: 1em;
+
+  	padding: 1px 0;
+
+  }
+
+  #sidebar .links ul {
+
+  	margin-top: 1px;
+
+  	padding: 0.7em 0 0 1em;
+
+  }
+
+  #sidebar .links .wrapper ul li {
+
+  	background: none;
+
+  	padding: 0 0 0.5em 0;
+
+  	margin: 0;
+
+  }
+
+  #sidebar li a:link, #sidebar li a:visited {
+
+  	background: none;
+
+  	font-weight: normal;
+  }
+
+  #sidebar h3 {
+
+  	left: 0;
+
+  	line-height: 1;
+
+  	margin: 0.5em 0;
+
+  	padding-left: 10px;
+
+  	background: none;
+
+  	border-left: 5px solid;
+
+  	border-bottom: none;
+
+  }
+
+  #sidebar h4 {
+
+  	padding: 5px 5px 5px 0;
+
+  	border-bottom: 1px dotted;
+
+  	border-top: 1px dotted;
+
+  }
+
+  #sidebar h6 {
+
+  	padding: 3px 0 3px 0px;
+
+  	margin: 1em 0;
+
+  	background: none;
+
+  	border-top: 1px dotted;
+
+  	border-bottom: 1px dotted;
+
+  }
+
+  #sidebar p {
+
+  	line-height: 1.2em;
+
+  	font-size: 90%;
+
+  	padding: 0 0 0.3em 1em;
+
+  	margin: 0.3em 0 0.7em 0;
+
+  }
+
+  #adsense {
+
+  	margin: 3em 2em;
+
+  	text-align: center;
+
+  }
+
+
+
+
+
+  /* Footer style
+
+  ----------------------------------------------- */
+
+
+
+  #footer {
+
+  	padding-top: 0.5em;
+
+  	margin: 1em 0;
+
+  }
+
+  #footer .wrapper {
+
+  	margin: 1em 0;
+
+  	padding-top: 1em;
+
+  	font-size: 0.8em;
+
+  	clear: both;
+
+  }
+
+  #footer hr {
+
+  	display: none;
+
+  }
+
+
+
+  /* Tweaks for Three-column layout
+
+  ----------------------------------------------- */
+
+
+
+  #sidebar-alternate p {
+
+  	line-height: 1.4 em;
+
+  	font-size: 92%;
+
+  	margin: 0.5em 1em;
+
+  }
+
+  #sidebar-alternate blockquote {
+
+  	margin: 0.5em 0;
+
+  }
+
+  #sidebar-alternate  {
+
+  	margin-top: 2em;
+
+  	padding-top: 10px;
+
+  }
+
+  #sidebar-alternate .wrapper {
+
+  	padding: 1px 0 10px 0;
+
+  }
+
+  .alternate-content h3 {
+
+  	padding: 0 0 0 17px;
+
+  	margin: 5px;
+
+  }
+
+  #sidebar-alternate h3 {
+
+  	left: 0;
+
+  	line-height: 1;
+
+  	margin: 0.5em 0 0.3em 0;
+
+  	padding: 0 5px 3px 22px;
+
+  	background-position: 5px 5px;
+
+  	border-bottom: none;
+
+  }
+
+  #sidebar-alternate h4 {
+
+  	padding: 5px 5px 5px 10px;
+
+  	border-bottom: 1px dotted;
+
+  	border-top: 1px dotted;
+
+  }
+
+  #sidebar-alternate h5, #sidebar h5 {
+
+  	padding: 3px 0 3px 15px;
+
+  	margin: 0px;
+
+  	border-top: 1px dotted;
+
+  	border-bottom: 1px dotted;
+
+  }
+
+  #sidebar-alternate h6 {
+
+  	padding: 3px 0 3px 10px;
+
+  	margin: 0.3em 0;
+
+  	background: none;
+
+  	border-top: 1px dotted;
+
+  	border-bottom: 1px dotted;
+
+  }
+
+  #alternate-content p {
+
+  	padding: 10px;
+
+  }
+
+  #alternate-content blockquote {
+
+  	padding: 0;
+
+  	margin: 0;
+
+  }
+
+  #threecolumn #adsense {
+
+  	margin: 3em 0 3em 0;
+
+  	text-align: left;
+
+  }
+
+  #sidebar-alternate ul li, #sidebar ul li {
+
+  	margin: 0 0.2em 0 0;
+
+  }
+
+  #sidebar-alternate ol li, #sidebar ol li {
+
+  	margin: 0 0.2em 0 0;
+
+  }
+
+  #sidebar-alternate ul, #sidebar ul, #sidebar-alternate ol, #sidebar ol  {
+
+  	padding: 0 0 0 12px;
+
+  	margin: 0 1em;
+
+  }
+
+  /* Tweaks for One-column layout 
+
+  ----------------------------------------------- */
+
+
+
+  #onecolumn #footer {
+
+  	padding: 0 2em;
+
+  }
+
+  /* Tweaks for Two-column Left layout 
+
+  ----------------------------------------------- */
+
+
+
+  #twocolumn-left #footer {
+
+  	margin: 1em 2em 1em 0;
+
+  	padding-bottom: 1px;
+
+  }
+
+  /* Tweaks for Two-column Right layout 
+
+  ----------------------------------------------- */
+
+
+
+  #twocolumn-right #footer {
+
+  	margin: 1em 0;
+
+  	padding: 0.5em 0 1px 2em;
+
+  }
+
+
+
+  /* Tweaks for Two-column Left Liquid layout 
+
+  ----------------------------------------------- */
+
+
+
+  #twocolumn-liquid-left #footer {
+
+  	margin: 1em 2em;
+
+  	padding-bottom: 1px;
+
+  }
+
+  #twocolumn-liquid-left #sidebar {
+
+  	margin-left: 2em;
+
+  }
+
+
+
+  /* Tweaks for Two-column Right Liquid layout 
+
+  ----------------------------------------------- */
+
+
+
+  #twocolumn-liquid-right #footer {
+
+  	margin-left: 2em;
+
+  	padding-bottom: 1px;
+
+  }
+
+  #twocolumn-liquid-right #container {
+
+  	padding-right: 2em;
+
+  }
+
+  #twocolumn-liquid-right #header .wrapper {
+
+  	padding: 2em 0 2em 2em;
+
+  }
+  /* Basic HTML style
+
+  ----------------------------------------------- */
+
+
+  body {
+
+  	font: 76% Helvetica, Arial, Verdana, sans-serif;
+
+  	color: #CEDBDF;
+
+  	background: #3b5f7b url(/-/includes/style/lagoona/aqua/body-bg.gif) repeat-x;
+
+  }
+
+  blockquote {
+
+  	color: #a4c7dc;
+
+  }
+
+  caption {
+
+  	color: #ECFBFF;
+
+  	background: #598094;
+
+  	border-bottom-color: #3b5f7b;
+
+  }
+
+  dd {
+
+  	background: #2B4A63;
+
+  	color: #B0DAE9;
+
+  	border-left-color: #598094;
+
+  }
+
+  hr {
+
+  	color: #456160;
+
+  	background: #456160;
+
+  	border-color: #456160;
+
+  }
+
+  td {
+
+  	border-bottom-color: #3b5f7b;
+
+  	background-color: #2B4A63;
+
+  }
+
+  th {
+
+  	color: #E2F9FF;
+
+  	background: #7FA08F;
+
+  	border-bottom-color: #3b5f7b;
+
+  }
+
+  a:link {
+  	color: #99FFFF;
+  }
+
+  a:visited {
+  	color: #eeeeee;
+  }
+  a:hover {
+  	color: #eeeeee;
+  }
+
+
+  /* Custom font definitions for Lagoona style
+
+  ----------------------------------------------- */
+
+
+
+  p.description {
+
+  	color: #FFF;
+
+  }
+
+  h2 {
+
+  	color: #B0DAE9;
+
+  	background: url(/-/includes/style/lagoona/aqua/h2-bg.gif) no-repeat left center;
+
+  }
+
+  h3 {
+
+  	color: #C1D6B9;
+
+  	background: url(/-/includes/style/lagoona/aqua/h3-bg.gif) no-repeat 0 0.2em;
+
+  	border-bottom-color: #5e8b9c;
+
+  }
+
+  h4 {
+
+  	color: #8EE3FF;
+
+  }
+
+  h5 {
+
+  	color: #C1D6B9;
+
+  	background: url(/-/includes/style/lagoona/aqua/h5-bg.gif) no-repeat 5px 10px;
+
+  	border-top-color: #899f90;
+
+  	border-bottom-color: #899f90;
+
+  }
+
+  h6 {
+
+  	color: #B0DAE9;
+
+  	border-top-color: #70a2ca;
+
+  	border-bottom-color: #70a2ca;
+
+  }
+
+
+
+  /* Header style
+
+  ----------------------------------------------- */
+
+
+
+  #header {
+
+  	color: #6D9BB0;
+
+  	background: transparent url(/-/includes/style/lagoona/aqua/header.jpg) no-repeat;
+
+  }
+
+  #header h2 {
+  	color: #90BAC9;
+  }
+
+
+
+  /* Sidebar style
+
+  ----------------------------------------------- */
+
+
+
+  #sidebar .links ul {
+
+  	color: #EEFEFF;
+
+  }
+
+  #sidebar h3 {
+
+  	color: #EEFFF2;
+
+  	border-left-color: #FF3300;
+
+  }
+
+  #sidebar h4 {
+
+  	border-bottom-color: #70a2ca;
+
+  	border-top-color: #70a2ca;
+
+  	color: #99bfde;
+
+  }
+
+  #sidebar p {
+
+  	color: #8daeb2;
+
+  }
+
+
+
+  /* Footer style
+
+  ----------------------------------------------- */
+
+
+
+  #footer .wrapper {
+
+  	color: #adced2;
+
+  	background: transparent url(/-/includes/style/lagoona/aqua/footer-bg.gif) repeat-x;
+
+  }
+
+
+
+  /* Tweaks for Three-column layout
+
+  ----------------------------------------------- */
+
+
+
+  #sidebar-alternate {
+
+  	background:#4b7291  url(/-/includes/style/lagoona/aqua/3c-alt-top.gif) no-repeat left top;
+
+  }
+
+  #sidebar-alternate .wrapper {
+
+  	color: #accbc3;
+
+  	background: #4b7291 url(/-/includes/style/lagoona/aqua/3c-alt-bottom.gif) no-repeat left bottom;
+
+  }
+
+  #sidebar-alternate .wrapper .wrapper {
+
+  	background: #4b7291;
+
+  }
+
+  #sidebar-alternate h3 {
+
+  	color: #a2c3df;
+
+  }
+
+  #sidebar-alternate h4 {
+
+  	border-bottom-color: #70a2ca;
+
+  	border-top-color: #70a2ca;
+
+  	color: #99bfde;
+
+  	background: url(/-/includes/style/lagoona/aqua/h4-alt-bg.gif) repeat-y;
+
+  }
+
+  #sidebar-alternate h5, #sidebar h5 {
+
+  	background: #355570 url(/-/includes/style/lagoona/aqua/h5-bg.gif) no-repeat 5px 10px;
+
+  	border-top-color: #899f90;
+
+  	border-bottom-color: #899f90;
+
+  }
+
+  #sidebar-alternate .alternate-content h5 {
+
+  	border-left-color: #bae0ff;
+
+  	border-right-color: #bae0ff;
+
+  }
+
+  #alternate-content blockquote {
+
+  	color: #cadfef;
+
+  }
+
+
+  #sidebar-alternate ol li, #sidebar ol li {
+
+  	color: #9fd2ec;
+
+  }
+
+  /** END CUSTOM SKIN **/
+  </style>
+
+  <!-- Hack to avoid flash of unstyled content in IE -->
+  <script> </script>
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)" id="onecolumn"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+  <div id="container">
+    <div class="wrapper">
+      <div id="header">
+        <div class="wrapper">
+          <h1 id="page-title"><div id='g_title'><font color="#000000"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Schedule </span> <br></font></div></h1>
+          <div style="clear: both;"></div>
+          <p class="description"><div id='g_description'><p style="color: rgb(0, 0, 0);"><font size="4"><b><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >The workshop takes place on</span> <span style="color: rgb(102, 0, 204);" class="style1"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >July 9th, 2008</span></span></b></font></p></div></p>
+          <div style="clear: both"></div>
+        </div>
+      </div>
+      <!-- /editable --><!-- /wrapper --><!-- /header -->
+      <div id="main-content">
+        
+        <div class="wrapper">
+          <div class="content-item "><div id='g_body'><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >   </span> <br><p><font size="4"><b> </b></font></p><p>
+
+<font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >8:30-8:40</span></b><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >      </span> </span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Introduction</span></span></font><font style="font-family: arial,sans-serif;" size="2"> <span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >(</span><i><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Irina Rish</span></i><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >)</span><br></font><b><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" > </span></span></font><br></b><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >8:40-9:20 </span></b><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >     </span> </span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" style="color: rgb(102, 255, 255);" href="Wainwright_SPARSE08.pdf"><b><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Convex relaxations and sparsity in high-dimensional machine learning</span></b></span><i> <span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >(</span></i></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><i><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Martin Wainwright</span></i></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >)</span><br></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" > </span></span></font><br><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >9:20-10:10</span></b><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >    </span> </span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >:</span></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://dsp.rice.edu/%7Erichb/talks/baraniuk-cs-COLT-july08-print.pdf"><span style="color: rgb(102, 255, 255);"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Exploiting sparsity in compressed sensing</span></span></span></b> <span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >(</span><i><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Richard Baraniuk</span></i><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >)</span></span></font><font style="font-family: arial,sans-serif;" size="2"><br></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" > </span></span></font><br><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >10:10-10:30</span></b><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >   </span> </span><span class="style1"><b><span onclick="return false" style="text-decoration:underline; color:blue" style="color: rgb(102, 255, 255);" href="Srebro.pdf"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Low \ell_1-norm and guarantees on sparsifiability</span></span> </b><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >(</span></span><i><span class="style1"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Shai Shalev-Shwartz and Nathan Srebro)</span></span></i><span class="style1"> <br></span><span class="style1"></span></font><font style="font-family: arial,sans-serif;" size="2"><br></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >10:30-10:50</span></b><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >    Coffee Break</span><span style="color: rgb(255, 255, 255);"></span></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"></span></font><font style="font-family: arial,sans-serif;" size="2"><br><br></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >10:50-11:10</span></b><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >   </span> </span><span class="style1"><b><span style="color: rgb(0, 204, 204);"><span onclick="return false" style="text-decoration:underline; color:blue" style="color: rgb(102, 255, 255);" href="Rosasco.pdf"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Elastic net regularization in learning theory</span></span><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" > </span></span> </b></span><span class="style1"><i><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >(Christine De Mol, Ernesto De Vito and Lorenzo Rosasco),</span><span onclick="return false" style="text-decoration:underline; color:blue" href="tr_1216368420688"> </span></i><span onclick="return false" style="text-decoration:underline; color:blue" href="Rosasco_talk.pdf"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >slides (pdf)</span></span></span></font><font style="font-family: arial,sans-serif;" size="2"><br></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >                         </span> </span></font><font style="font-family: arial,sans-serif;" size="2"><br></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >11:10-11:30</span></b><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >   </span> <span onclick="return false" style="text-decoration:underline; color:blue" style="color: rgb(102, 255, 255);" href="Bach_1.pdf"><b><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Consistency of the group Lasso and multiple kernel learning</span></b></span> <span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >(</span><i><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Francis Bach</span></i><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >)</span></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="grouplasso_talk_icml.pdf"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >slides (pdf)</span></span><br><br></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >11:30-12:10</span></b> <span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >  </span> </span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >:</span></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span style="color: rgb(255, 255, 255);"></span> <span onclick="return false" style="text-decoration:underline; color:blue" style="color: rgb(102, 255, 255);" href="Carin.txt"><b><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Hierarchical statistical methods in compressive sensing</span></b></span> <span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >(</span><i><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Lawrence Carin</span></i><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >)</span></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Carin_talk.pdf"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >slides (pdf)</span></span><br><br></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >12:10-12:30</span></b><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >    Discussion</span><span style="color: rgb(255, 255, 255);"></span></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"></span></font></p><p><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span style="color: rgb(255, 255, 255);"></span></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >12:20-14:00</span></b><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >    Lunch Break</span><span style="color: rgb(255, 255, 255);"></span></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span style="color: rgb(255, 255, 255);"></span><br><br><b><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >14:00-14:40</span></b><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >   </span> </span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >:</span></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >  </span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Gert_talk.pdf"><b style="color: rgb(102, 255, 255);"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Sparse Eigenvalue Problems and Applications</span></b></span> <span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >(Gert Lanckriet</span></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >)</span><br><br></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >14:40-15:00</span></b><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >  </span> </span><span class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" style="color: rgb(102, 255, 255);" href="Quattoni.pdf"><b><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Semi-supervised multi-task feature selection for learning</span></b> <b><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >discriminative image representations</span></b></span> <span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >(</span><i><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Ariadna Quattoni, Michael Collins and Trevor Darrell</span></i><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >),</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Quattoni_talk.pdf"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >slides (pdf)</span></span></span><span class="style1"><br></span></font></p><p><font style="font-family: arial,sans-serif;" size="2"><span class="style1"></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >15:00-15:10</span></b><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >   </span><span style="color: rgb(255, 255, 255);"></span></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b> </b><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >break</span><b> </b><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >(prepare for &quot;Beyond \ell_1&quot; session :)</span><b><br>
+</b></span></font></p><p><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >15:10-15:30</span></b><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >   </span><span onclick="return false" style="text-decoration:underline; color:blue" href="tr_1214318969622"> </span></span><span class="style1"><span onclick="return false" style="text-decoration:underline; color:blue" style="color: rgb(102, 255, 255);" href="Kaban.pdf"><b><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >A norm concentration argument for non-convex regularization</span></b></span> <span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >(</span><i><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Ata Kaban</span></i> <i><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >and Robert J. Durrant</span></i></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >),</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Kaban_talk.pdf"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >slides (pdf)</span></span><br></span></font></p><p><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >15:30-15:50</span> </b><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >  </span> <span onclick="return false" style="text-decoration:underline; color:blue" style="color: rgb(102, 255, 255);" href="Lin.pdf"><b><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >In defense of \ell</span><font size="1"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >_</span><font size="2"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >0</span></font></font></b></span> <span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >(</span><i><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Dongyu Lin, Emily Pitler, Dean P. Foster and Lyle H. Ungar</span></i></span></font><font style="font-family: arial,sans-serif;" size="2"><i><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >)</span></i><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Lin_talk.pdf"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >slides (pdf)</span></span><br></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"></span></font><b><font style="font-family: arial,sans-serif;" size="2"><br></font></b><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >15:50-16:50</span></b><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >  </span> <span style="color: rgb(255, 255, 255);"></span><span style="color: rgb(255, 255, 255);"></span></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"> </span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break and Poster Session.  </span> <br></span></font></p><p><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >                   </span> <b style="color: rgb(51, 204, 255);"><span onclick="return false" style="text-decoration:underline; color:blue" style="color: rgb(102, 255, 255);" href="Bach_2.pdf"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Consitency of Trace-Norm Minimization</span></span> </b><span style="color: rgb(204, 255, 255);"><i><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >(Francis Bach)</span></i><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="tracenorm_poster_icml.pdf"><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >poster (pdf)</span></span></span></span></font></p><p><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b style="color: rgb(51, 204, 255);"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >                   </span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Balcan.pdf"><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >Similarity-Based Theoretical Foundation for Sparse Parzen Window Prediction</span></span> </b><span style="color: rgb(204, 255, 255);"><i><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >(Maria-Florina Balcan, Avrim Blum and Nathan Srebro)</span></i><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Balcan_poster.pdf"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >poster (pdf)</span></span><br></span></span></font></p><p><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span style="color: rgb(204, 255, 255);"><b><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >                   </span> </b></span><b style="color: rgb(51, 204, 255);"><span onclick="return false" style="text-decoration:underline; color:blue" href="Clark_final.pdf"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Multi-objective optimisation of relevance vector machines: selecting sparse features for     face  verification</span></span></b><span style="color: rgb(204, 255, 255);"><i><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >  (Andrew Clark and Richard Everson)</span></i><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Clark_poster.pdf"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >poster (pdf)</span></span></span></span></font></p><p><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b style="color: rgb(51, 204, 255);"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >                   </span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Cui.pdf"><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Orthogonal Principal Feature Selection</span></span> </b></span></font><i style="color: rgb(204, 255, 255);"><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >(</span></span></font></i><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><i style="color: rgb(204, 255, 255);"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Ying Cui and Jennifer G. Dy)</span></i><span style="color: rgb(51, 204, 255);"></span><span style="color: rgb(204, 255, 255);"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >, poster (pdf)</span></span><b style="color: rgb(51, 204, 255);"><br></b></span></font></p><p><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b style="color: rgb(51, 204, 255);"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >                   </span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Goetschalckx.pdf"><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Cost-Sensitive Linear Regression with Costly Features</span></span> </b></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span style="color: rgb(204, 255, 255);"><i><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >(Robby Goetschalckx, Scott Sanner  and Kurt Driessens),</span> </i><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >poster (pdf)</span><i> </i></span></span></font></p><p><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b style="color: rgb(51, 204, 255);"><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >                    </span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Kropotov.pdf"><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >An Automatic Relevance Determination Procedure Based on Akaike Information Criterion for Linear Regression Problems</span></span><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" > </span> </b></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"></span></font><i style="color: rgb(204, 255, 255);"><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >(</span></span></font></i><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><i style="color: rgb(204, 255, 255);"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Dmitry Kropotov and Dmitry Vetrov)</span></i><span style="color: rgb(51, 204, 255);"></span><span style="color: rgb(204, 255, 255);"><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Kropotov_poster.pdf"><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >poster (pdf)</span></span></span><b style="color: rgb(51, 204, 255);"><br></b></span></font></p><p><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b style="color: rgb(51, 204, 255);"><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >                    </span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Palatucci.pdf"><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Discovering a Semantic Basis of Neural Activity Using Simultaneous Sparse Approximation</span></span></b></span></font><i style="color: rgb(204, 255, 255);"><font style="font-family: arial,sans-serif;" size="2"><span class="style1"> <span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >(Mark Palatucci, Tom Mitchell and Han Liu</span></span></font></i><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><i style="color: rgb(204, 255, 255);"><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >)</span></i><span style="color: rgb(51, 204, 255);"></span><span style="color: rgb(204, 255, 255);"><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Palatucci_poster.ppt"><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >poster (ppt)</span></span></span><b style="color: rgb(51, 204, 255);"><br></b></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b style="color: rgb(51, 204, 255);"><br><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >                    </span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Signoretto.pdf"><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Convex-concave selection of functional components</span></span> </b></span></font><i style="color: rgb(204, 255, 255);"><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >(Marco Signoretto  and Johan A.K. Suykens</span></span></font></i><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><i style="color: rgb(204, 255, 255);"><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >)</span></i><span style="color: rgb(51, 204, 255);"></span><span style="color: rgb(204, 255, 255);"><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Signoretto_poster.pdf"><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >poster (pdf)</span></span></span><b style="color: rgb(51, 204, 255);"><br></b></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><br></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >                    </span> <span onclick="return false" style="text-decoration:underline; color:blue" href="Vidaurre_final.pdf"><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Learning a L1-regularized Gaussian Bayesian network in the space of equivalence classes</span></span> </b></span></font><i style="color: rgb(204, 255, 255);"><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >(Diego Vidaurre, Concha Bielza and  Pedro Larra˜naga</span></span></font></i><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><i style="color: rgb(204, 255, 255);"><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >)</span></i><span style="color: rgb(51, 204, 255);"></span><span style="color: rgb(204, 255, 255);"><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >, poster (pdf)</span></span><b style="color: rgb(51, 204, 255);"><br></b></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b> </b></span></font></p><p><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >16:50-17:30</span></b><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >   </span></span><span class="style1"></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b> </b><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk</span></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >:</span> <span onclick="return false" style="text-decoration:underline; color:blue" style="color: rgb(102, 255, 255);" href="Saul.txt"><b><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Sparse Optimizations for Speech and Audio Processing</span></b></span> <span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >(</span><i><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Lawrence Saul</span></i><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >)</span></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" > </span></span></font></p><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><b><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >17:30-18:00 </span></b><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >  </span> </span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Discussion: Open Questions and Future Directions </span></span></font><font style="font-family: arial,sans-serif;" size="2"><span class="style1"><span style="color: rgb(255, 255, 255);"></span></span></font><p><span class="style1"><br></span></p><p><span class="style1"><br></span></p><p><span class="style1"><br></span>
+</p><ul></ul></div></div>
+          <div style="clear: both"></div>
+        </div>
+      </div>
+      <!-- /wrapper --><!-- /main-content -->
+      <div id="footer"><div class="wrapper">
+        <hr />
+        <p><div id='g_footer'><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" > </span>

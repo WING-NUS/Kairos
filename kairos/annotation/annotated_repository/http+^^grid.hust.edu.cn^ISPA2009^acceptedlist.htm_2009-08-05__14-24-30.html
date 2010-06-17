@@ -1,0 +1,1706 @@
+<html>
+
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^grid.hust.edu.cn^ISPA2009^acceptedlist.htm_2009-08-05__14-24-30.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^grid.hust.edu.cn^ISPA2009^acceptedlist.htm_2009-08-05__14-24-30.yaml created on Wed Aug 05 17:31:13 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<meta http-equiv="Content-Language" content="zh-cn">
+<meta http-equiv="Content-Type" content="text/html; charset=gb2312">
+<title>Main Page</title>
+<style>
+<!--
+div.Section1
+	{page:Section1;}
+ li.MsoNormal
+	{mso-style-parent:"";
+	margin-bottom:.0001pt;
+	text-align:justify;
+	text-justify:inter-ideograph;
+	font-size:10.5pt;
+	font-family:"Times New Roman";
+	margin-left:0cm; margin-right:0cm; margin-top:0cm}
+h2
+	{margin:13.0pt 0cm; line-height:173%;
+	page-break-after:avoid;
+	font-size:16.0pt;
+	font-family:Arial;
+	}
+-->
+</style>
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<div align="left">
+	<table id="table1" style="float: left" cellSpacing="0" cellPadding="0" width="694" align="left" border="0">
+		<tr>
+			<td vAlign="top" align="justify">
+			<div class="Section1" style="layout-grid: 15.6pt none">
+				<p class="MsoNormal" style="text-align: left" align="left">
+				<span style="font-size: 14pt; color: #000080" lang="en-us"><b>
+				<span style="font-family: 'Arial Black',sans-serif">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://grid.hust.edu.cn/ISPA2009/"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Main Page</span></span></span></b></span></p>
+				<p class="MsoNormal"><font color="#FF0000">
+				<span lang="EN-US" style="font-size: 18.0pt; font-weight: 700">
+				<span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Accpeted papers list (20090521 update)</span></span></font></p>
+				<p class="MsoNormal"><font size="5" color="#FF0000">
+				<span style="font-weight: 700">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="#Main_Conference_(fixed)"><span lang="en-us"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >M</span></span><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >ain 
+				Conf.</span></span></span></font></p>
+				<p class="MsoNormal"><font size="5" color="#FF0000">
+				<span style="font-weight: 700">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="#2009_IEEE_International_Workshop_on_Security_in_e-Science_and_e-Research_(ISSR-09)">
+				<span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >ISSR</span></span></span></font></p>
+				<p class="MsoNormal"><font size="5" color="#FF0000">
+				<span style="font-weight: 700">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="#The_2nd_International_Workshop_on_Cyberspace_Safety_and_Security_(CSS_2009)">
+				<span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >CSS</span></span></span></font></p>
+				<p class="MsoNormal"><span style="font-weight: 700">
+				<font size="5" color="#FF0000">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="#The_2009_International_Workshop_on_Architecture_Support_on_Virtualization_Techniques_(IWASVT2009)">
+				<span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >IWASVT</span></span></font></span></p>
+				<p class="MsoNormal"><span style="font-weight: 700">
+				<font size="5" color="#FF0000">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="#The_1st_International_Workshop_on_Workflow_Management_in_Service_and_Cloud_Computing_(WMSC2009)">
+				<span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >WMSC</span></span></font></span></p>
+				<p class="MsoNormal"><span style="font-weight: 700">
+				<font size="5" color="#FF0000">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="#The_International_Workshop_on_Distributed_Systems,_Algorithms_and_Applications_(DSAA_2009)_Accepted_papers_(pending)">
+				<span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >DSAA</span></span></font></span></p>
+				<p class="MsoNormal"><span lang="EN-US"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span></p>
+				<p class="MsoNormal"><b>
+				<span lang="EN-US" style="font-size:14.0pt">
+				<span onclick="return false" style="text-decoration:underline; color:blue" name="Main_Conference_(fixed)"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Main Conference (fixed)</span></span></span></b></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-113</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Optimize Multiple Mobile Elements Touring in Wireless Sensor 
+				Network</span><br>
+				<span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Jingdong Xu, Liang He, Yuntao Yu &nbsp;</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-124</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >ARRAY: A Non-application-related, Secure, Wide-area Disaster 
+				Recovery Storage System</span><br>
+				<span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Lingfang Zeng, Dan Feng, Bharadwaj Veeravalli, Qingsong Wei</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-126</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >One NEW Research About IPSec Communication Based on HTTP tunnel</span><br>
+				<span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >mei song, zhang yun-he</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-128</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >A Novel Broadcast Paradigm in Supporting Power-Saving Mobile 
+				Stations</span><br>
+				<span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Haw-Yun Shin, Mao-Hsu Yem</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-139</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Software Viterbi Decoder with SSE4 Parallel Processing 
+				Instructions for Software DVB-T Receiver</span><br>
+				<span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Shu-Ming Tseng, Yen-Chih Ku, Yueh-Teng Hsu</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-141</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Random Scheduling for Wireless Sensor Networks</span><br>
+				<span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Jie Jiang, Li Fang, Jun Wen, Guofu Wu, Heying Zhang</span>
+				</p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-146</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Semantic Security Policy for Web Service</span><br>
+				<span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >He Zheng-qiu, Wu Li-fa</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-149</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Survivable Virtual Topology Reconfiguration Problem on WDM 
+				Networks with Reconfiguration Constraint</span><br>
+				<span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Der-Rong Din, Yu-Sheng Chiu</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-157</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >P-Cache: Providing Prioritized Caching Service for Storage 
+				System</span><br>
+				<span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >meng xiaoxuan, si chengxiang, na wenwu, xu lu</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-161</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Solo: A Lightweight Virtual Machine</span><br>
+				<span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Xiang Zhang, Jie Ma, Yanchao Miao, Qingwei Meng, Dan Meng</span> 
+				</p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-163</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Research of Self-organizing Network Routing Model</span><br>
+				<span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Rong Wang, Aiwang Chen, Zupeng Li</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-164</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Consistent Message Ordering in Wireless Sensor and Actor 
+				Networks</span><br>
+				<span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Yang Wang, Liusheng Huang, Hongli Xu, Gang Wang</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-167</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >An Efficient Task Allocation Protocol for P2P Multi-Agent 
+				Systems</span><br>
+				<span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Dayong Ye, Quan Bai, Minjie Zhang, Khin Than Win, Zhiqi Shen</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-169</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Supporting Reconfigurable Fault Tolerance on Application Servers</span><br>
+				<span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Junguo Li, Gang Huang, Xingrun Chen, Hong Mei</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-171</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >A Designated Path Scheme for Energy-Balanced Data Aggregation in 
+				Wireless Sensor Networks</span><br>
+				<span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Yong-Ki Kim, Rabindra Bista, Jae-Woo Chang</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-174</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Event Based Semantic Location Model in Cooperative Mobile 
+				Computing</span><br>
+				<span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Zhengyong Zhang, Jing Yang, Juzhong Gu, Yingchen Xu</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-179</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Interference-Aware Relay Assignment for Cooperative Networks</span><br>
+				<span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Hongli Xu, Liusheng Huang, Gang Wang, Tao Xu</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-182</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Scheduling Jobs in Grids Adaptively</span><br>
+				<span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Chih-Yuan Lin, Chun-Fu Lin</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-183</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >MM-DSM:Multi-threaded Multi-home Distributed Shared Memory 
+				Systems</span><br>
+				<span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Chonglei Mei, Hai Jiang, Jeff Jenness</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-184</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >A forwarding migration algorithm for multipath transmission</span><br>
+				<span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Laiquan Han, Jinkuan Wang, Cuirong Wang</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-188</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Load Balancing in Server Consolidation</span><br>
+				<span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Deshi Ye, Hua Chen, Qinming He</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-196</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Security system for overlapping non dedicated clusters</span><br>
+				<span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Martin Stava, Pavel Tvrdik</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-197</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Performance, Fault-tolerance and Scalability Analysis of Virtual 
+				Infrastructure Management System</span><br>
+				<span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Xiangzhen Kong, Jiwei Huang, Chuang Lin, Peter Ungsunan</span> 
+				</p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-198</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Utility Proportional Optimization Flow Control for Overlay 
+				Multicast</span><br>
+				<span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Ali Jafari, H. Shafiei, Baharan Mirzasoleiman, Godrat Sepidnam</span>
+				</p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-202</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Managing Large-Scale Scientific Computing in Ensemble Prediction 
+				Using BPEL</span><br>
+				<span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Cancan Liu, Weimin Zhang, Zhigang Luo, Xiaoqun Cao, Hai Liu</span>
+				</p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-203</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >A Two-Phase Log-based Fault Recovery Mechanism in Master/Worker 
+				based Computing Environment</span><br>
+				<span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Chen Ting, Wang Yong-jian, Huang Yuan-qiang, Luo Cheng, Qian 
+				De-pei, Luan Zhong-zhi</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-205</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >A Self-stabilizing Distributed Algorithm for Maintaining a 
+				Hamiltonian Cycle</span><br>
+				<span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Nabil Guellati, Hamamache Kheddouci</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-207</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >A Synchronization-Based Alternative to Directory Protocol</span><br>
+				<span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >He Huang, Lei Liu, Nan Yuan Wei Lin Fenglong Song, Junchao 
+				Zhang, Dongrui Fan</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-210</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >A Hardware-Software Cooperative Approach for the Exhaustive 
+				Verification of the Collatz Conjecture</span><br>
+				<span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Yasuaki Ito, Koji Nakano</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-212</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >An Empirically Optimized Radix Sort for GPU</span><br>
+				<span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Bonan Huang, Jinlan Gao, Xiaoming Li</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-215</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >REMOCA: Hypervisor Remote Disk Cache</span><br>
+				<span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Haogang Chen, Xiaolin Wang, Zhenlin Wang, Xiang Wen, Xinxin Jin, 
+				Yingwei Luo, Xiaoming Li</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-216</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >An Efficient Algorithm for Mobile Group Pattern Mining</span><br>
+				<span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Zahra Farzanyar, Mohammadreza Kangavari, Naser Mozayani</span>
+				</p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-222</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Distributed Execution of Workflow by using Parallel Partitioning</span><br>
+				<span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >maryam khademi, cai wentong, stephen john turner, shayan shahand</span>
+				</p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-223</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Analysing Internet Information Propagation using Quality of 
+				Service Methodology based on Algebra of System</span><br>
+				<span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Tianju Wang, Qu Qu, Benjamin Koo</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-229</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Virtual Machine Resource Management for High Performance 
+				Computing Applications</span><br>
+				<span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >Zhiyuan Shao, Hai Jin, Yong Li, Jian Huang</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-231</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Efficient and Lightweight Data Integrity Check in In-Networking 
+				Storage Wireless Sensor Networks</span><br>
+				<span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Wei Ren, Yi Ren</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-236</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Program Optimization of Stencil Based Application on the GPU-accelerated 
+				System</span><br>
+				<span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Wang Guibin, Yang Xuejun, Zhang Ying, Tang Tao, Fang Xudong</span>
+				</p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-237</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Characterizing Betweenness Centrality Algorithm on Multi-core 
+				Architectures</span><br>
+				<span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >Dengbiao Tu, Guangming Tan</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-241</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >CISP-Growth: A Contiguous Item Sequential Pattern mining 
+				algorithm with application level IO patterns</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Jing-Liang Zhang, Jun-Wei Zhang, Jian-Gang Zhang, Lu Xu</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-245</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Fault-Tolerant Routing Schemes for Wormhole Mesh</span><br>
+				<span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Xinming Duan, Dakun Zhang, Xuemei Sun</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-247</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Transport and routing redundancy for MANETs robustness</span><br>
+				<span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Amadou baba Bagayoko, Beatrice Paillassa, Claudia Betous</span>
+				</p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-248</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >VoIP Performance in Multi-radio Mobile Devices</span><br>
+				<span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Abiodun Iwayemi, Chi Zhou</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-249</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Semantically Reliable Multicast Based on the (m-k)-Firm 
+				Technique</span><br>
+				<span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Wilian Queiroz, Lau Lung, Luciana Rech, Luiz Lima</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-255</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Performance Analysis of ClearSpeed's CSX600 Interconnects</span><br>
+				<span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Yuri Nishikawa, Michihiro Koibuchi, Masato Yoshimi, Akihiro 
+				Shitara, Kenichi Miura, Hideharu Amano</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-260</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Bandwidth Sensitive Co-allocation Scheme for Parallel 
+				Downloading in Data Grid</span><br>
+				<span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Ching-Hsien Hsu, Chia-Wei Chu, Chih-Hsun Chou</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-261</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >Accelerating Partitional Algorithms for Flow Cytometry on GPUs</span><br>
+				<span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >Jeremy Espenshade, Andrew Pangborn, James Cavenaugh, Gregor von</span>
+				<br>
+				<span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Laszweski, and Doug Roberts</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-265</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >An Adaptive Resource Monitor Approach for Distributed Computing 
+				Environment</span><br>
+				<span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Gang Yang, Kaibo Wang, Xingshe Zhou</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-270</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >A New Cloaking Method Supporting both K-anonymity and 
+				L-diversity for Privacy Protection in Location-Based Services</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Jung-Ho Um, Mi-Young Jang, Kyoung-Jin Jo, Jae-Woo Chang</span> 
+				</p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-272</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >DLBS: Duplex Loading Balancing Strategy on Object Storage System</span><br>
+				<span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Tan Zhipeng, Feng Dan, Tu Xudong, He Fei</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-276</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Challenges for Deployment of Voice Communication In Mobile Ad 
+				Hoc Networks</span><br>
+				<span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >M. Faisal Amjad faisal@nust.edu.pk, Bilal Rauf bilalrauf@nust.edu.pk</span>
+				</p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-277</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >A Low Latency Handoff Scheme Based on the Location and Movement 
+				Pattern</span><br>
+				<span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >Fei Shi, Keqiu Li, Yanming Shen</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-278</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Balancing Parallel Applications on Multi-core Processors Based 
+				on Cache Partitioning</span><br>
+				<span lang="EN-US" style="font-size: 11.5pt; font-family: Times-Roman">
+				<span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Guang Suo, Xue-jun Yang</span></span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-280</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >An Active Trusted Model for Virtual Machine Systems</span><br>
+				<span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Wentao Qu, Minglu Li, Chuliang Weng</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-281</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >Web Service Locating Unit in RFID-centric Anti-counterfeit 
+				System</span><br>
+				<span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >Zhiyuan Tan, Xiangjian He, Priyadarsi Nanda</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-282</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Centralized Botnet Detection by Traffic Aggregation</span><br>
+				<span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >Tao Wang, Shun-Zheng Yu</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-284</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >An Alliance Based Reputation Model for Internet Autonomous 
+				System Trust Evaluation</span><br>
+				<span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Ning hu, Peidong Zhu, Peng Zou</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-285</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >A Distributed Optimum Algorithm for Target Coverage in Wireless 
+				Sensor Networks</span><br>
+				<span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >Zhang Hongwu, Wang Hongyuan, Feng Hongcai</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-288</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >DDSA: A Sampling and Validation Based Spectrum Access Algorithm 
+				in Wireless Networks</span><br>
+				<span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Yang Panlong, Chen Guihai, Liu Xue, Guo Deke, Liu Yunhao</span>
+				</p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-291</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >Secure Logging for Auditable File System using Separate Virtual 
+				Machines</span><br>
+				<span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >Siqin Zhao, Kang Chen, Weimin Zheng</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-298</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >A Replacement Algorithm Designed for the Web Search Engine and 
+				Its Application in Storage Cache</span><br>
+				<span lang="EN-US" style="font-size: 11.5pt; font-family: Times-Roman">
+				<span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >Meng xiaoxuan, Si chengxiang, Xiaoming Han, Jiangang Zhang, Xu 
+				lu</span></span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-302</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >An Efficient Algorithm for Multimedia Delivery in Pervasive 
+				Space</span><br>
+				<span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >Sheng Zhang, Zhuzhong Qian, Minyi Guo, Sanglu Lu</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-303</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >Design and Implementation of a RFID Based Real-Time 
+				Location-aware System in Clean Room</span><br>
+				<span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >Kun-Ming Yu, Ming-Gong Lee, Chien-Tung Liao, Hung-Jui Lin</span>
+				</p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-304</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >A Case-Based Component Selection Framework for Mobile 
+				Context-aware Applications</span><br>
+				<span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >Fan Dong, Li Zhang, Dexter H. Hu, Cho-Li Wang</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >ID: ISPA-305</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >I-Cache Tag Reduction for Low Power Chip Multiprocessor</span><br>
+				<span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >Long Zheng, Mianxiong Dong, Minyi Guo, Song Guo, Li Li</span> </p>
+				<p class="MsoNormal"><span lang="EN-US"><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span></p>
+				<p class="MsoNormal"><span lang="EN-US"><span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span></p>
+				<p class="MsoNormal"><b>
+				<span lang="EN-GB" style="font-size: 14.0pt; font-family: TimesNewRoman">
+				<span onclick="return false" style="text-decoration:underline; color:blue" name="2009_IEEE_International_Workshop_on_Security_in_e-Science_and_e-Research_(ISSR-09)">
+				<span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >2009 IEEE International Workshop on Security in e-Science and 
+				e-Research (ISSR-09)</span></span></span></b><span lang="EN-GB" style="font-size: 14.0pt; font-family: TimesNewRoman"><span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span></p>
+				<p class="MsoNormal"><b>
+				<span lang="EN-US" style="font-size:14.0pt;font-family:
+TimesNewRoman"><span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >Accepted papers (fixed)</span></span></b></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >，&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+				ID: ISSR-18</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >Tool Support for Security-oriented Virtual Research 
+				Collaborations</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >John Watt, Richard Sinnott, Jipu Jiang, Tom Doherty, Chris 
+				Higgins, Michael</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >Koutroumpas</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >National e-Science Centre, University of Glasgow, UK</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >j.watt@nesc.gla.ac.uk</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >，&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+				ID: ISSR-23</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >Towards a Trustable Virtual Organisation</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="282" onmousedown="md(this)" onmouseup="mu(this)" >Jun Ho Huh, Andrew Martin</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="283" onmousedown="md(this)" onmouseup="mu(this)" >Oxford University Computing Laboratory, UK</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:jun.ho.huh@comlab.ox.ac.uk">
+				<span class="coloringspan" id="284" onmousedown="md(this)" onmouseup="mu(this)" >jun.ho.huh@comlab.ox.ac.uk</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span lang="EN-US" style="font-size: 11.5pt; font-family: Times-Roman">
+				<span class="coloringspan" id="285" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="286" onmousedown="md(this)" onmouseup="mu(this)" >，&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+				ID: ISSR-31</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="287" onmousedown="md(this)" onmouseup="mu(this)" >USGPA: A User-centric and Secure Grid Portal Architecture for 
+				High-performance</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="288" onmousedown="md(this)" onmouseup="mu(this)" >Computing</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="289" onmousedown="md(this)" onmouseup="mu(this)" >Rongqiang Cao, Xuebin Chi, Zongyan Cao, Zhihui Dai, Haili Xiao</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="290" onmousedown="md(this)" onmouseup="mu(this)" >Supercomputing Center, Chinese Academy of Sciences, China</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="291" onmousedown="md(this)" onmouseup="mu(this)" >caorq@sccas.cn</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="292" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="293" onmousedown="md(this)" onmouseup="mu(this)" >，&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+				ID: ISSR-33</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="294" onmousedown="md(this)" onmouseup="mu(this)" >Enhancing Privacy and Security in RFID-Enabled Banknotes</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="295" onmousedown="md(this)" onmouseup="mu(this)" >Ching-Nung Yang, Jie-Ru Chen, Chih-Yang Chiu, Gen-Chin Wu, 
+				Chih-Cheng Wu</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="296" onmousedown="md(this)" onmouseup="mu(this)" >National Dong Hwa University, Taiwan</span></p>
+				<p class="MsoNormal" style="margin-top: 0; margin-bottom: 0; text-autospace:none">
+				<span class="coloringspan" id="297" onmousedown="md(this)" onmouseup="mu(this)" >Email: cnyang@mail.ndhu.edu.tw</span></p>
+				<p class="MsoNormal" style="text-indent:18.0pt;text-autospace:none">
+				<span lang="EN-US"><span class="coloringspan" id="298" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span></p>
+				<p class="MsoNormal"><span lang="EN-US"><span class="coloringspan" id="299" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0"><b>
+				<span lang="EN-US" style="font-size:14.0pt;font-family:TimesNewRoman">
+				<span onclick="return false" style="text-decoration:underline; color:blue" name="The_2nd_International_Workshop_on_Cyberspace_Safety_and_Security_(CSS_2009)">
+				<span class="coloringspan" id="300" onmousedown="md(this)" onmouseup="mu(this)" >The 2nd International Workshop on Cyberspace Safety and Security 
+				(CSS 2009)</span></span><br>
+				<span class="coloringspan" id="301" onmousedown="md(this)" onmouseup="mu(this)" >Accepted papers (fixed)</span></span></b><span lang="EN-US"><br>
+				<br>
+				<span class="coloringspan" id="302" onmousedown="md(this)" onmouseup="mu(this)" >I</span></span><span class="coloringspan" id="303" onmousedown="md(this)" onmouseup="mu(this)" >D: CSS-05</span><br>
+				<span class="coloringspan" id="304" onmousedown="md(this)" onmouseup="mu(this)" >Active Attacks on Reputable Mix Networks</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="305" onmousedown="md(this)" onmouseup="mu(this)" >LongHai Li, ShaoFeng Fu and XiangQuan Che</span> </p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="306" onmousedown="md(this)" onmouseup="mu(this)" >Xidian University, China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="307" onmousedown="md(this)" onmouseup="mu(this)" >xdlilh@gmail.com</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="308" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br>
+				<span class="coloringspan" id="309" onmousedown="md(this)" onmouseup="mu(this)" >ID: CSS-06</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0"><span class="coloringspan" id="310" onmousedown="md(this)" onmouseup="mu(this)" >Analysis and Vulnerability Detection for 
+				Network System Software</span><br>
+				<span class="coloringspan" id="311" onmousedown="md(this)" onmouseup="mu(this)" >Wei Pan Reverse</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="312" onmousedown="md(this)" onmouseup="mu(this)" >Northwestern Polytechnical University, China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="313" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:panweihh@163.com"><span class="coloringspan" id="314" onmousedown="md(this)" onmouseup="mu(this)" >panweihh@163.com</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<br>
+				<span class="coloringspan" id="315" onmousedown="md(this)" onmouseup="mu(this)" >ID: CSS-07</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0"><span class="coloringspan" id="316" onmousedown="md(this)" onmouseup="mu(this)" >ZDCF:A improved DCF solution of IEEE 802.11</span><br>
+				<span class="coloringspan" id="317" onmousedown="md(this)" onmouseup="mu(this)" >Jianli Zhang, Zhiyi Fang, Yunlong Zhang, Yongbo Ma&nbsp;</span> </p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="318" onmousedown="md(this)" onmouseup="mu(this)" >Jilin University, China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="319" onmousedown="md(this)" onmouseup="mu(this)" >zhang-sunshine@hotmail.com</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<br>
+				<span class="coloringspan" id="320" onmousedown="md(this)" onmouseup="mu(this)" >ID: CSS-09</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0"><span class="coloringspan" id="321" onmousedown="md(this)" onmouseup="mu(this)" >Fuzzy Decision Tree Based Inference 
+				Technology for Spam Behavior Recognition</span><br>
+				<span class="coloringspan" id="322" onmousedown="md(this)" onmouseup="mu(this)" >Meizhen Wang, Zhitang Li and Sheng Zhong&nbsp;</span> </p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="323" onmousedown="md(this)" onmouseup="mu(this)" >Huazhong University of Science and 
+				Technology, China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="324" onmousedown="md(this)" onmouseup="mu(this)" >mzwang@mail.hust.edu.cn</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<br>
+				<span class="coloringspan" id="325" onmousedown="md(this)" onmouseup="mu(this)" >ID: CSS-10</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0"><span class="coloringspan" id="326" onmousedown="md(this)" onmouseup="mu(this)" >Dynamic Forensics based on Intrusion 
+				Tolerance</span><br>
+				<span class="coloringspan" id="327" onmousedown="md(this)" onmouseup="mu(this)" >Lin Chen, Zhitang Li, Lan Liu, Cuixia Gao</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="328" onmousedown="md(this)" onmouseup="mu(this)" >Huazhong University of Science and 
+				Technology, China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:chenlin@mail.hust.edu.cn">
+				<span class="coloringspan" id="329" onmousedown="md(this)" onmouseup="mu(this)" >chenlin@mail.hust.edu.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="330" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span><br>
+				<span class="coloringspan" id="331" onmousedown="md(this)" onmouseup="mu(this)" >ID: CSS-11</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="332" onmousedown="md(this)" onmouseup="mu(this)" >An Identity-based Restricted Deniable Authentication Protocol&nbsp;</span> <br>
+				<span class="coloringspan" id="333" onmousedown="md(this)" onmouseup="mu(this)" >Chengyu Fan, Shijie Zhou and Fagen Li</span> </p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="334" onmousedown="md(this)" onmouseup="mu(this)" >Southwest University, China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="335" onmousedown="md(this)" onmouseup="mu(this)" >chengy.fan@gmail.com</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0"><span class="coloringspan" id="336" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="337" onmousedown="md(this)" onmouseup="mu(this)" >ID: CSS-51</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0"><span class="coloringspan" id="338" onmousedown="md(this)" onmouseup="mu(this)" >Grey Theory Based Nodes Risk Assessment in 
+				P2P Networks&nbsp;</span> <br>
+				<span class="coloringspan" id="339" onmousedown="md(this)" onmouseup="mu(this)" >Fu Cai Tang Fugui Cui Yongquan Liu Ming Peng Bing</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="340" onmousedown="md(this)" onmouseup="mu(this)" >Huazhong 
+				University of Science &amp; Technology</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:stand_fucai@126.com">
+				<span class="coloringspan" id="341" onmousedown="md(this)" onmouseup="mu(this)" >stand_fucai@126.com</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="342" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="343" onmousedown="md(this)" onmouseup="mu(this)" >ID: CSS-115</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="344" onmousedown="md(this)" onmouseup="mu(this)" >A Method of in-Depth-Defense for Network 
+				Security Based on Immunity Principles</span><br>
+				<span class="coloringspan" id="345" onmousedown="md(this)" onmouseup="mu(this)" >Yaping Jiang, Jianhua Zhou, Yong Gan, Zengyu Cai</span> </p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="346" onmousedown="md(this)" onmouseup="mu(this)" >Zhengzhou University of Light Industry, China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="347" onmousedown="md(this)" onmouseup="mu(this)" >yapingjiang@163.com</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="348" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="349" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="350" onmousedown="md(this)" onmouseup="mu(this)" >ID:CSS-119</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="351" onmousedown="md(this)" onmouseup="mu(this)" >A Case Study: File Access Privacy Control 
+				Using Filter Hook Driver</span><br>
+				<span class="coloringspan" id="352" onmousedown="md(this)" onmouseup="mu(this)" >Aiguo He, Tomohiro Ohdaira \</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="353" onmousedown="md(this)" onmouseup="mu(this)" >Aizu University, Japan</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="354" onmousedown="md(this)" onmouseup="mu(this)" >aiguo@u-aizu.ac.jp</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="355" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="356" onmousedown="md(this)" onmouseup="mu(this)" >ID: CSS-213</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="357" onmousedown="md(this)" onmouseup="mu(this)" >Extended PEG Algorithm for high rate LDPC 
+				codes</span><br>
+				<span class="coloringspan" id="358" onmousedown="md(this)" onmouseup="mu(this)" >Zhiheng Zhou, Xiangxue Li, Dong Zheng, Kefei Chen, Jianhua Li</span> </p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="359" onmousedown="md(this)" onmouseup="mu(this)" >Shanghai Jiao Tong University, China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="360" onmousedown="md(this)" onmouseup="mu(this)" >supercancel@sjtu.edu.cn</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="361" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="362" onmousedown="md(this)" onmouseup="mu(this)" >ID: CSS-271</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="363" onmousedown="md(this)" onmouseup="mu(this)" >A Business-oriented Fault Localization 
+				Approach Using Digraph</span><br>
+				<span class="coloringspan" id="364" onmousedown="md(this)" onmouseup="mu(this)" >Lianzhong Liu, Chunfang Li, YanPing Zhang</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="365" onmousedown="md(this)" onmouseup="mu(this)" >Beijing University of Aeronautics and 
+				Astronautics, China</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:lcf1974@126.com">
+				<span class="coloringspan" id="366" onmousedown="md(this)" onmouseup="mu(this)" >lcf1974@126.com</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="367" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="368" onmousedown="md(this)" onmouseup="mu(this)" >ID: CSS-275</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="369" onmousedown="md(this)" onmouseup="mu(this)" >Development of ISEE: An Information Security 
+				Engineering Environment</span><br>
+				<span class="coloringspan" id="370" onmousedown="md(this)" onmouseup="mu(this)" >Jingde Cheng, Yuichi Goto, Daisuke Horie, Junichi Miura, Toshio 
+				Kasahara, and Ahmad Iqbal</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="371" onmousedown="md(this)" onmouseup="mu(this)" >Saitama University, Japan</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:cheng@ics.saitama-u.ac.jp">
+				<span class="coloringspan" id="372" onmousedown="md(this)" onmouseup="mu(this)" >cheng@ics.saitama-u.ac.jp</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="373" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="374" onmousedown="md(this)" onmouseup="mu(this)" >ID: CSS-218</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="375" onmousedown="md(this)" onmouseup="mu(this)" >Fault-Tolerant K-Connectivity Overlay for 
+				Unstructured P2P Network</span><br>
+				<span class="coloringspan" id="376" onmousedown="md(this)" onmouseup="mu(this)" >Shen Ling, Wu Wei</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="377" onmousedown="md(this)" onmouseup="mu(this)" >218, Beijing University of Aeronautics and 
+				Astronautics, China &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:shenling@vrlab.buaa.edu.cn">
+				<span class="coloringspan" id="378" onmousedown="md(this)" onmouseup="mu(this)" >shenling@vrlab.buaa.edu.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="379" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="380" onmousedown="md(this)" onmouseup="mu(this)" >ID: CSS-235</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="381" onmousedown="md(this)" onmouseup="mu(this)" >Distributed Transfer Network Learning Based 
+				Intrusion Detection</span><br>
+				<span class="coloringspan" id="382" onmousedown="md(this)" onmouseup="mu(this)" >Shuiping Gou, Yuqin Wang, Licheng Jiao, Jing Feng, Yao Yao</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="383" onmousedown="md(this)" onmouseup="mu(this)" >Xidian University, China</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="384" onmousedown="md(this)" onmouseup="mu(this)" >wyq_127@163.com</span></p>
+				<p class="MsoNormal" align="left" style="text-align: left; text-autospace: none">
+				<span lang="EN-US"><span class="coloringspan" id="385" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span></p>
+				<h2 style="text-align:justify;text-justify:inter-ideograph">
+				<span lang="EN-US" style="font-size: 14.0pt; line-height: 173%; font-weight: normal">
+				<span onclick="return false" style="text-decoration:underline; color:blue" name="The_2009_International_Workshop_on_Architecture_Support_on_Virtualization_Techniques_(IWASVT2009)">
+				<span class="coloringspan" id="386" onmousedown="md(this)" onmouseup="mu(this)" >The 2009 International Workshop on Architecture Support on 
+				Virtualization Techniques (IWASVT2009)</span></span></span></h2>
+				<p class="MsoNormal"><b>
+				<span lang="EN-US" style="font-size:14.0pt;font-family:
+TimesNewRoman"><span class="coloringspan" id="387" onmousedown="md(this)" onmouseup="mu(this)" >Accepted papers (fixed)</span></span></b></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="388" onmousedown="md(this)" onmouseup="mu(this)" >ID: IWASVT-01</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="389" onmousedown="md(this)" onmouseup="mu(this)" >A Simple Cache Partitioning Approach in a 
+				Virtualized Environment</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="390" onmousedown="md(this)" onmouseup="mu(this)" >Xinxin Jin, Haogang Chen, Xiaolin Wang, Zhenlin Wang, Xiang Wen, 
+				Yingwei Luo, Xiaoming Li</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="391" onmousedown="md(this)" onmouseup="mu(this)" >Peking University, China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="392" onmousedown="md(this)" onmouseup="mu(this)" >lyw@pku.edu.cn</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="393" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="394" onmousedown="md(this)" onmouseup="mu(this)" >ID: IWASVT-02</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="395" onmousedown="md(this)" onmouseup="mu(this)" >Using Pcache to speedup interpretation in 
+				dynamic binary translation</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="396" onmousedown="md(this)" onmouseup="mu(this)" >Wei Chen, Hongyi Lu, Li Shen, Zhiying Wang 
+				and Nong Xiao</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="397" onmousedown="md(this)" onmouseup="mu(this)" >National University of Defense Technology, 
+				China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:chenwei@nudt.edu.cn">
+				<span class="coloringspan" id="398" onmousedown="md(this)" onmouseup="mu(this)" >chenwei@nudt.edu.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="399" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="400" onmousedown="md(this)" onmouseup="mu(this)" >ID: IWASVT-04</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="401" onmousedown="md(this)" onmouseup="mu(this)" >Block-based In-Place Replacement Strategy for 
+				x86 Sensitive Instructions in Virtual Machine</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="402" onmousedown="md(this)" onmouseup="mu(this)" >Yusong Tan, Weihua Zhang and Qingbo Wu</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="403" onmousedown="md(this)" onmouseup="mu(this)" >National University of Defense Technology, 
+				China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="404" onmousedown="md(this)" onmouseup="mu(this)" >National University of Defense Technology, 
+				China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:yusong.tan@gmail.com">
+				<span class="coloringspan" id="405" onmousedown="md(this)" onmouseup="mu(this)" >yusong.tan@gmail.com</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="406" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="407" onmousedown="md(this)" onmouseup="mu(this)" >ID: IWASVT-05</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="408" onmousedown="md(this)" onmouseup="mu(this)" >Luvalley-lite: an effort to balance re-use 
+				and re-coding</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="409" onmousedown="md(this)" onmouseup="mu(this)" >Xiaojian Liu, Xiaodong Yi and Yi Ren</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="410" onmousedown="md(this)" onmouseup="mu(this)" >National University of Defense Technology, 
+				China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="411" onmousedown="md(this)" onmouseup="mu(this)" >aleck_liu@163.com</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="412" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="413" onmousedown="md(this)" onmouseup="mu(this)" >ID: IWASVT-06</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="414" onmousedown="md(this)" onmouseup="mu(this)" >An Virtualized Self-Adaptive Parallel 
+				Programming Framwork for Heterogeneous High Productivity 
+				Computers</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="415" onmousedown="md(this)" onmouseup="mu(this)" >Hua Cheng, Zuoning Chen, Fengbin Qi, Chaoqun 
+				Dong and Laiwang Cheng</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="416" onmousedown="md(this)" onmouseup="mu(this)" >JiangNan Institute of Computing Technology, 
+				China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:chenghua@ncic.ac.cn">
+				<span class="coloringspan" id="417" onmousedown="md(this)" onmouseup="mu(this)" >chenghua@ncic.ac.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="418" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="419" onmousedown="md(this)" onmouseup="mu(this)" >ID: IWASVT-08</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="420" onmousedown="md(this)" onmouseup="mu(this)" >System Monitoring and Controlling Mechanism 
+				based on Hypervisor</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="421" onmousedown="md(this)" onmouseup="mu(this)" >Qingbo Wu, Chuguang Wang and Yusong Tan</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="422" onmousedown="md(this)" onmouseup="mu(this)" >National University of Defense Technology, 
+				China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="423" onmousedown="md(this)" onmouseup="mu(this)" >gcwworld@gmail.com</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="424" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="425" onmousedown="md(this)" onmouseup="mu(this)" >ID: IWASVT-292</span> </p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="426" onmousedown="md(this)" onmouseup="mu(this)" >A Parallel Gibbs Sampling Algorithm for Motif 
+				Finding on GPU</span><br>
+				<span class="coloringspan" id="427" onmousedown="md(this)" onmouseup="mu(this)" >Linbin Yu, Yun Xu</span> </p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="428" onmousedown="md(this)" onmouseup="mu(this)" >University of Science and Technology, China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:yulinbin@gmail.com">
+				<span class="coloringspan" id="429" onmousedown="md(this)" onmouseup="mu(this)" >yulinbin@gmail.com</span></span><span class="coloringspan" id="430" onmousedown="md(this)" onmouseup="mu(this)" >;</span>
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:lbyu@mail.ustc.edu.cn">
+				<span class="coloringspan" id="431" onmousedown="md(this)" onmouseup="mu(this)" >lbyu@mail.ustc.edu.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="432" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="433" onmousedown="md(this)" onmouseup="mu(this)" >ID: IWASVT-227</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="434" onmousedown="md(this)" onmouseup="mu(this)" >Data Management: The Spirit to Pursuit Peak 
+				Performance on Many-Core Processor</span><br>
+				<span class="coloringspan" id="435" onmousedown="md(this)" onmouseup="mu(this)" >Yongbin Zhou</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="436" onmousedown="md(this)" onmouseup="mu(this)" >ybzhou@gmail.com</span> </p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="437" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="438" onmousedown="md(this)" onmouseup="mu(this)" >ID: IWASVT-240</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="439" onmousedown="md(this)" onmouseup="mu(this)" >Using GPU to Accelerate Cache Simulation</span><br>
+				<span class="coloringspan" id="440" onmousedown="md(this)" onmouseup="mu(this)" >Han Wan, Xiaopeng Gao, Zhiqiang Wang, Yi Li</span> </p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="441" onmousedown="md(this)" onmouseup="mu(this)" >Beijing University of Aeronautics and 
+				Astronautics, China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:wanhan@cse.buaa.edu.cn">
+				<span class="coloringspan" id="442" onmousedown="md(this)" onmouseup="mu(this)" >wanhan@cse.buaa.edu.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="443" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="444" onmousedown="md(this)" onmouseup="mu(this)" >ID: IWASVT-160</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span lang="EN-US"><span class="coloringspan" id="445" onmousedown="md(this)" onmouseup="mu(this)" >Evaluation Method of Synchronization for 
+				Shared-Memory On-Chip Many-Core Processor</span><br>
+				<span class="coloringspan" id="446" onmousedown="md(this)" onmouseup="mu(this)" >Fenglong Song, Zhiyong Liu, Dongrui Fan, He Huang, Nan Yuan, Lei 
+				Yu, Junchao Zhang</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span lang="EN-US"><span class="coloringspan" id="447" onmousedown="md(this)" onmouseup="mu(this)" >Institute of Computing Technology, Chinese 
+				Academy of Sciences, China</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span lang="EN-US">
+				<span onclick="return false" style="text-decoration:underline; color:blue" style="color: blue; text-decoration: underline; text-underline: single" href="mailto:songfenglong@ict.ac.cn">
+				<span style="color: windowtext; text-decoration: none">
+				<span class="coloringspan" id="448" onmousedown="md(this)" onmouseup="mu(this)" >songfenglong@ict.ac.cn</span></span></span></span><i><span lang="EN-US" style="font-family: Arial"><span class="coloringspan" id="449" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span></i></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span lang="EN-US" style="font-family: Arial"><span class="coloringspan" id="450" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="451" onmousedown="md(this)" onmouseup="mu(this)" >ID: IWASVT-187</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="452" onmousedown="md(this)" onmouseup="mu(this)" >Related task scheduling research based on virtual clusters and 
+				partitioning of task</span><br>
+				<span class="coloringspan" id="453" onmousedown="md(this)" onmouseup="mu(this)" >Hong Liang, Changzhen Xing, Xuedong Qi, Chang Liu</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="454" onmousedown="md(this)" onmouseup="mu(this)" >China University of Petroleum</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:xingyun323@163.com"><span class="coloringspan" id="455" onmousedown="md(this)" onmouseup="mu(this)" >xingyun323@163.com</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none"><b>
+				<span lang="EN-US" style="font-size:14.0pt;font-family:TimesNewRoman">
+				<span onclick="return false" style="text-decoration:underline; color:blue" name="The_1st_International_Workshop_on_Workflow_Management_in_Service_and_Cloud_Computing_(WMSC2009)">
+				<span class="coloringspan" id="456" onmousedown="md(this)" onmouseup="mu(this)" >The 1st International Workshop on Workflow Management in Service 
+				and Cloud Computing (WMSC2009)</span></span></span></b></p>
+				<p class="MsoNormal" style="text-autospace:none"><b>
+				<span lang="EN-US" style="font-size:14.0pt;font-family:TimesNewRoman">
+				<span class="coloringspan" id="457" onmousedown="md(this)" onmouseup="mu(this)" >Accepted papers (fixed)</span></span></b></p>
+				<p class="MsoNormal" style="text-autospace:none">
+				<span lang="EN-US"><span class="coloringspan" id="458" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="459" onmousedown="md(this)" onmouseup="mu(this)" >Paper ID: WMSC02</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="460" onmousedown="md(this)" onmouseup="mu(this)" >Workflow based Approach for Eliminating Redundancy in Virtual 
+				Enterprising</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="461" onmousedown="md(this)" onmouseup="mu(this)" >Reggie Davidrajuh</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="462" onmousedown="md(this)" onmouseup="mu(this)" >University of Stavanger, Norway</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:reggie.davidrajuh@uis.no"><span class="coloringspan" id="463" onmousedown="md(this)" onmouseup="mu(this)" >reggie.davidrajuh@uis.no</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="464" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="465" onmousedown="md(this)" onmouseup="mu(this)" >Paper ID: WMSC04</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="466" onmousedown="md(this)" onmouseup="mu(this)" >A Web Based Workflow System for Distributed Atmospheric Data 
+				Processing</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="467" onmousedown="md(this)" onmouseup="mu(this)" >Jie Cheng, Xiaoguang Lin, Yuanchun Zhou, Jianhui Li</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="468" onmousedown="md(this)" onmouseup="mu(this)" >Computer Network Information Center, Chinese Academy of 
+				Sciences, China</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:jiecumt@gmail.com"><span class="coloringspan" id="469" onmousedown="md(this)" onmouseup="mu(this)" >jiecumt@gmail.com</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="470" onmousedown="md(this)" onmouseup="mu(this)" >{lxg, yczhou,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:lijh}@sdb.cnic.cn"><span class="coloringspan" id="471" onmousedown="md(this)" onmouseup="mu(this)" >lijh}@sdb.cnic.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="472" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="473" onmousedown="md(this)" onmouseup="mu(this)" >Paper ID: WMSC05</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="474" onmousedown="md(this)" onmouseup="mu(this)" >A Quality Optimization Method for Service Process Model</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="475" onmousedown="md(this)" onmouseup="mu(this)" >Haiyan Zhao, Jian Cao, Xiaohan Sun</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="476" onmousedown="md(this)" onmouseup="mu(this)" >University of Shanghai for Science and Technology, China</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:zhaohaiyan1992@sina.com.cn">
+				<span class="coloringspan" id="477" onmousedown="md(this)" onmouseup="mu(this)" >zhaohaiyan1992@sina.com.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="478" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="479" onmousedown="md(this)" onmouseup="mu(this)" >Paper ID: WMSC06</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="480" onmousedown="md(this)" onmouseup="mu(this)" >A Global QoS-driven Evaluation Strategy for Web Services 
+				Composition</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="481" onmousedown="md(this)" onmouseup="mu(this)" >Xuyun Zhang,Wanchun Dou</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="482" onmousedown="md(this)" onmouseup="mu(this)" >State Key Laboratory for Novel Software Technology, Nanjing 
+				University, China</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:xyzhanggz@gmail.com"><span class="coloringspan" id="483" onmousedown="md(this)" onmouseup="mu(this)" >xyzhanggz@gmail.com</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:douwc@nju.edu.cn"><span class="coloringspan" id="484" onmousedown="md(this)" onmouseup="mu(this)" >douwc@nju.edu.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="485" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="486" onmousedown="md(this)" onmouseup="mu(this)" >Paper ID: WMSC07</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="487" onmousedown="md(this)" onmouseup="mu(this)" >Workflow Model Performance Analysis Concerning Instance Dwelling 
+				Times Distribution</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="488" onmousedown="md(this)" onmouseup="mu(this)" >Liu Sheng, Fan Yushun</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="489" onmousedown="md(this)" onmouseup="mu(this)" >Department of Automation, Tsinghua University, China</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:liusheng@tsinghua.edu.cn">
+				<span class="coloringspan" id="490" onmousedown="md(this)" onmouseup="mu(this)" >liusheng@tsinghua.edu.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="491" onmousedown="md(this)" onmouseup="mu(this)" >fanyus@tsinghua.edu.cn</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="492" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="493" onmousedown="md(this)" onmouseup="mu(this)" >Paper ID: WMSC09</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="494" onmousedown="md(this)" onmouseup="mu(this)" >An Adaptive Scheduler for Enhancing the Efficiency of 
+				Multi-engine BPM system</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="495" onmousedown="md(this)" onmouseup="mu(this)" >SUN Jun-Yi, LI Hou-Fu, HAN Yan-Bo</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="496" onmousedown="md(this)" onmouseup="mu(this)" >Institute of Computing Technology, Chinese Academy of Sciences, 
+				China</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:sunjunyi@software.ict.ac.cn">
+				<span class="coloringspan" id="497" onmousedown="md(this)" onmouseup="mu(this)" >sunjunyi@software.ict.ac.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:lhfsday@software.ict.ac.cn">
+				<span class="coloringspan" id="498" onmousedown="md(this)" onmouseup="mu(this)" >lhfsday@software.ict.ac.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:yhan@ict.ac.cn"><span class="coloringspan" id="499" onmousedown="md(this)" onmouseup="mu(this)" >yhan@ict.ac.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="500" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="501" onmousedown="md(this)" onmouseup="mu(this)" >Paper ID: WMSC11</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="502" onmousedown="md(this)" onmouseup="mu(this)" >Completion Time Estimation for Instances of Generalized 
+				Well-formed Workflow</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="503" onmousedown="md(this)" onmouseup="mu(this)" >Zuoxian Nie, Xin-hua JIANG, Jian-cheng LIU, Haiyan Yang</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="504" onmousedown="md(this)" onmouseup="mu(this)" >School of Information Science and Engineering, Central South 
+				University, China</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:zxnie@163.com"><span class="coloringspan" id="505" onmousedown="md(this)" onmouseup="mu(this)" >zxnie@163.com</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="506" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="507" onmousedown="md(this)" onmouseup="mu(this)" >Paper ID: WMSC12</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="508" onmousedown="md(this)" onmouseup="mu(this)" >Research on services selection based on credible alliance in Web 
+				services combination</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="509" onmousedown="md(this)" onmouseup="mu(this)" >Chunhua Hu, Xiaohong Chen,Jianxun Liu, Jibo Liu</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="510" onmousedown="md(this)" onmouseup="mu(this)" >School of computer and electronic engineering, Hunan University 
+				of Commerce, Changsha 410205, China</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:Huchunhua777@163.com"><span class="coloringspan" id="511" onmousedown="md(this)" onmouseup="mu(this)" >Huchunhua777@163.com</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="512" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="513" onmousedown="md(this)" onmouseup="mu(this)" >Paper ID: WMSC13</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="514" onmousedown="md(this)" onmouseup="mu(this)" >Generation of Web Knowledge Flow for Personalized Services</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="515" onmousedown="md(this)" onmouseup="mu(this)" >Jie Yu, Xiangfeng Luo, Feiyue Ye, Yongmei Lei</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="516" onmousedown="md(this)" onmouseup="mu(this)" >Joint Lab of Next-Generation Internet Interactive Computing, 
+				Shanghai University, China</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="517" onmousedown="md(this)" onmouseup="mu(this)" >{jieyu, luoxf, lei,</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:yefy}@shu.edu.cn">
+				<span class="coloringspan" id="518" onmousedown="md(this)" onmouseup="mu(this)" >yefy}@shu.edu.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="519" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="520" onmousedown="md(this)" onmouseup="mu(this)" >Paper ID: WMSC15</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="521" onmousedown="md(this)" onmouseup="mu(this)" >A Multiple QoS Constrained Scheduling Strategy of Multiple 
+				Workflows for Cloud Computing</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="522" onmousedown="md(this)" onmouseup="mu(this)" >Meng Xu, Lizhen Cui, Haiyang Wang</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="523" onmousedown="md(this)" onmouseup="mu(this)" >School of Computer Science and Technology, Shandong University, 
+				China</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:xumeng_wf@163.com"><span class="coloringspan" id="524" onmousedown="md(this)" onmouseup="mu(this)" >xumeng_wf@163.com</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:clz@sdu.edu.cn"><span class="coloringspan" id="525" onmousedown="md(this)" onmouseup="mu(this)" >clz@sdu.edu.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:why@sdu.edu.cn"><span class="coloringspan" id="526" onmousedown="md(this)" onmouseup="mu(this)" >why@sdu.edu.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="527" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="528" onmousedown="md(this)" onmouseup="mu(this)" >Paper ID: WMSC16</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="529" onmousedown="md(this)" onmouseup="mu(this)" >Change Sequence Mining in Context-Aware Scientific Workflow</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="530" onmousedown="md(this)" onmouseup="mu(this)" >Yi Wang, Jian Cao, Minglu Li</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="531" onmousedown="md(this)" onmouseup="mu(this)" >Department of Computer Science and Engineering, Shanghai Jiao 
+				Tong University, China</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:wangsuper@sjtu.org"><span class="coloringspan" id="532" onmousedown="md(this)" onmouseup="mu(this)" >wangsuper@sjtu.org</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="533" onmousedown="md(this)" onmouseup="mu(this)" >{cao-jian, li-ml</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:}@cs.sjtu.edu.cn"><span class="coloringspan" id="534" onmousedown="md(this)" onmouseup="mu(this)" >}@cs.sjtu.edu.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="535" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="536" onmousedown="md(this)" onmouseup="mu(this)" >Paper ID: WMSC21</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="537" onmousedown="md(this)" onmouseup="mu(this)" >A Time Exception Handling Algorithm of Temporal Workflow</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="538" onmousedown="md(this)" onmouseup="mu(this)" >Ting Xie, Yang Yu, Guoshen Kuang</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="539" onmousedown="md(this)" onmouseup="mu(this)" >Department of Computer Science��Sun Yat-Sen University, China</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:yuy@mail.sysu.edu.cn"><span class="coloringspan" id="540" onmousedown="md(this)" onmouseup="mu(this)" >yuy@mail.sysu.edu.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="541" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="542" onmousedown="md(this)" onmouseup="mu(this)" >Paper ID: WMSC22</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="543" onmousedown="md(this)" onmouseup="mu(this)" >A Visual Tool for Modeling Instance-Aspect in Workflow</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="544" onmousedown="md(this)" onmouseup="mu(this)" >Jianxun Liu, Zefeng Zhu, Jinjun Chen, Yiping Wen</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="545" onmousedown="md(this)" onmouseup="mu(this)" >Knowledge Grid Lab,Hunan Unviersity of Science and Technology, 
+				Hunan 411201, China</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:ljx529@gmail.com"><span class="coloringspan" id="546" onmousedown="md(this)" onmouseup="mu(this)" >ljx529@gmail.com</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="547" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="548" onmousedown="md(this)" onmouseup="mu(this)" >Paper ID: WMSC23</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="549" onmousedown="md(this)" onmouseup="mu(this)" >A Domain Specific Language and Workflow Execution Engine to 
+				Enable Dynamic Workflows</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="550" onmousedown="md(this)" onmouseup="mu(this)" >Engine;G.St：urmer, J.Mangler, E.Schikuta</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="551" onmousedown="md(this)" onmouseup="mu(this)" >Faculty of Computer Science,University of Vienna, Austria</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:a0302949@unet.univie.ac.atjuergen.mangler@univie.ac.aterich.schikuta@univie.ac.at">
+				<span class="coloringspan" id="552" onmousedown="md(this)" onmouseup="mu(this)" >a0302949@unet.univie.ac.at</span><br>
+				<span class="coloringspan" id="553" onmousedown="md(this)" onmouseup="mu(this)" >juergen.mangler@univie.ac.at</span><br>
+				<span class="coloringspan" id="554" onmousedown="md(this)" onmouseup="mu(this)" >erich.schikuta@univie.ac.at</span></span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="555" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="556" onmousedown="md(this)" onmouseup="mu(this)" >ID: WMSC-102</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="557" onmousedown="md(this)" onmouseup="mu(this)" >Composition and Reduction of Web Service Based on Dynamic Timed 
+				Colored Petri Nets</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="558" onmousedown="md(this)" onmouseup="mu(this)" >Yaojun Han, Xuemei Luo</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="559" onmousedown="md(this)" onmouseup="mu(this)" >Tongji University, Shanghai International Studies University, 
+				China</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="560" onmousedown="md(this)" onmouseup="mu(this)" >yjhan@shisu.edu.cn</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="561" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="562" onmousedown="md(this)" onmouseup="mu(this)" >ID: WMSC-232&nbsp;</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="563" onmousedown="md(this)" onmouseup="mu(this)" >Adaptive Processor Allocation with Estimated Job Execution Time 
+				in Heterogeneous Computing Grid</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="564" onmousedown="md(this)" onmouseup="mu(this)" >Kuo-Chan Huang, Kuan-Po Lai, Hsi-Ya Chang</span> </p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="565" onmousedown="md(this)" onmouseup="mu(this)" >National Taichung University, Taiwan, China</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="566" onmousedown="md(this)" onmouseup="mu(this)" >kchuang@mail.ntcu.edu.tw</span></p>
+				<p class="MsoNormal" align="left" style="text-align: left; text-autospace: none">
+				<span lang="EN-US"><span class="coloringspan" id="567" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0"><b>
+				<span lang="EN-US" style="font-size:14.0pt;font-family:TimesNewRoman">
+				<span onclick="return false" style="text-decoration:underline; color:blue" name="The_International_Workshop_on_Distributed_Systems,_Algorithms_and_Applications_(DSAA_2009)_Accepted_papers_(pending)">
+				<span class="coloringspan" id="568" onmousedown="md(this)" onmouseup="mu(this)" >The International Workshop on Distributed Systems, Algorithms 
+				and Applications (DSAA 2009)</span><br>
+				<span class="coloringspan" id="569" onmousedown="md(this)" onmouseup="mu(this)" >Accepted papers (fixed)</span></span></span></b><span lang="EN-US"><br>
+				<br>
+				<span class="coloringspan" id="570" onmousedown="md(this)" onmouseup="mu(this)" >　</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="571" onmousedown="md(this)" onmouseup="mu(this)" >ID: DSAA-226</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="572" onmousedown="md(this)" onmouseup="mu(this)" >Optimizing Message Passing Programs Based on 
+				Task Section Duplication</span><br>
+				<span class="coloringspan" id="573" onmousedown="md(this)" onmouseup="mu(this)" >Yin Ye, Zhihui Du, Song Hao</span> </p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="574" onmousedown="md(this)" onmouseup="mu(this)" >Tsinghua University, China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:leafsilver@163.com">
+				<span class="coloringspan" id="575" onmousedown="md(this)" onmouseup="mu(this)" >leafsilver@163.com</span></span><span class="coloringspan" id="576" onmousedown="md(this)" onmouseup="mu(this)" >;</span>
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:duzh@tsinghua.edu.cn">
+				<span class="coloringspan" id="577" onmousedown="md(this)" onmouseup="mu(this)" >duzh@tsinghua.edu.cn</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="578" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="579" onmousedown="md(this)" onmouseup="mu(this)" >ID: DSAA-186</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="580" onmousedown="md(this)" onmouseup="mu(this)" >A task-pool parallel I/O paradigm for an I/O 
+				intensive application</span><br>
+				<span class="coloringspan" id="581" onmousedown="md(this)" onmouseup="mu(this)" >Jianjiang Li, Lin Yan, Zhe Gao, Dan Hei</span> </p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="582" onmousedown="md(this)" onmouseup="mu(this)" >University of Science and Technology Beijing, 
+				China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:yanlinchn@gmail.com">
+				<span class="coloringspan" id="583" onmousedown="md(this)" onmouseup="mu(this)" >yanlinchn@gmail.com</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="584" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="585" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="586" onmousedown="md(this)" onmouseup="mu(this)" >ID: DSAA-211</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="587" onmousedown="md(this)" onmouseup="mu(this)" >Extended Combination Testing: Generates Array 
+				Test Suite</span><br>
+				<span class="coloringspan" id="588" onmousedown="md(this)" onmouseup="mu(this)" >Xiaodong Xie, Yansheng Lu</span> </p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="589" onmousedown="md(this)" onmouseup="mu(this)" >Huazhong University of Science and 
+				Technology, China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:longwarbow@126.com">
+				<span class="coloringspan" id="590" onmousedown="md(this)" onmouseup="mu(this)" >longwarbow@126.com</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="591" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="592" onmousedown="md(this)" onmouseup="mu(this)" >ID: DSAA-221</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="593" onmousedown="md(this)" onmouseup="mu(this)" >SimSync: A Table-based Constraint Processing 
+				Language for Synchronization Control</span><br>
+				<span class="coloringspan" id="594" onmousedown="md(this)" onmouseup="mu(this)" >Ke Huang, Zhihong Li, Benjamin Koo, Tianju Wang</span> </p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="595" onmousedown="md(this)" onmouseup="mu(this)" >Tsinghua University, China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:huangk07@gmail.com">
+				<span class="coloringspan" id="596" onmousedown="md(this)" onmouseup="mu(this)" >huangk07@gmail.com</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="597" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="598" onmousedown="md(this)" onmouseup="mu(this)" >ID: DSAA-252</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="599" onmousedown="md(this)" onmouseup="mu(this)" >The Conditional Diagnosability of Twisted 
+				cubes under the Comparison Model</span><br>
+				<span class="coloringspan" id="600" onmousedown="md(this)" onmouseup="mu(this)" >Shuming Zhou</span> </p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="601" onmousedown="md(this)" onmouseup="mu(this)" >Fujian Normal University, China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="602" onmousedown="md(this)" onmouseup="mu(this)" >zhoushuming@fjnu.edu.cn</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="603" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="604" onmousedown="md(this)" onmouseup="mu(this)" >ID: DSAA-191</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="605" onmousedown="md(this)" onmouseup="mu(this)" >Proving Total Correctness of Refinement Based 
+				on Tableau</span><br>
+				<span class="coloringspan" id="606" onmousedown="md(this)" onmouseup="mu(this)" >Xiaolei Gao, Huaikou Miao</span> </p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="607" onmousedown="md(this)" onmouseup="mu(this)" >Dongguan University of Technology, China</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:xiaoleigao@163.com"><span class="coloringspan" id="608" onmousedown="md(this)" onmouseup="mu(this)" >xiaoleigao@163.com</span></span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="609" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="610" onmousedown="md(this)" onmouseup="mu(this)" >ID: DSAA-206</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0">
+				<span class="coloringspan" id="611" onmousedown="md(this)" onmouseup="mu(this)" >Multi-Source Traffic Data Fusion Method Based on Regulation and 
+				Reliability</span><br>
+				<span class="coloringspan" id="612" onmousedown="md(this)" onmouseup="mu(this)" >Xinhong Wu, Hai Jin</span> </p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="613" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="614" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="615" onmousedown="md(this)" onmouseup="mu(this)" >ID: DSAA-242</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="616" onmousedown="md(this)" onmouseup="mu(this)" >Semi-Automatic transformation of sequential 
+				code to distributed code using Model Driven Architecture 
+				approach</span><br>
+				<span class="coloringspan" id="617" onmousedown="md(this)" onmouseup="mu(this)" >siamak najjar karimi, Saeed Parsa</span> </p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="618" onmousedown="md(this)" onmouseup="mu(this)" >Islamic Azad University Shabestar Branch, 
+				Iran</span></p>
+				<p class="MsoNormal" style="text-autospace:none; margin-top:0; margin-bottom:0">
+				<span class="coloringspan" id="619" onmousedown="md(this)" onmouseup="mu(this)" >siyamak.karimi@gmail.com</span></p>
+				<p class="MsoNormal" style="text-autospace: none; margin-top: 0; margin-bottom: 0"><span class="coloringspan" id="620" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal"><span lang="EN-US"><span class="coloringspan" id="621" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></span></p>
+				<p class="MsoNormal">
+				<span class="coloringspan" id="622" onmousedown="md(this)" onmouseup="mu(this)" >　</span></p>
+				<p class="MsoNormal">
+				<span class="coloringspan" id="623" onmousedown="md(this)" onmouseup="mu(this)" >　</span>

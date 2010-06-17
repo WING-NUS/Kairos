@@ -1,0 +1,931 @@
+<HTML>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.cikm2008.org^posters.php_2009-08-05__14-32-47.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^www.cikm2008.org^posters.php_2009-08-05__14-32-47.yaml created on Wed Aug 05 17:31:40 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<TITLE>CIKM 2008 | Posters</TITLE>
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+<link rel="shortcut icon" href="http://www.cikm2008.org/favicon.ico">
+<link rel="stylesheet" type="text/css" href="cikm.css">
+
+</HEAD>
+<body onload="on_load()" onkeyup="on_key_up(event)" BGCOLOR=#FFFFFF LEFTMARGIN=0 TOPMARGIN=0 MARGINWIDTH=0 MARGINHEIGHT=0><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<!-- ImageReady Slices (logo.ai) -->
+<div id="wrapper">
+  <div id="logo">
+  	<div id="title">  	<span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >ACM 17th Conference on Information and Knowledge Management</span>
+  	
+  	
+  	</div>
+  	
+  	<div id="subtitle">
+  	 <span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Napa Valley Marriott Hotel & Spa: Napa Valley, California</span><br />
+  	<span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >October 26-30, 2008</span></div>
+  
+  </div>
+  
+  
+  
+ 	 <div id="nav">  
+  		<dl>
+
+  			<dt><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >CIKM 2009</span></dt>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ischool.drexel.edu/cikm2009/about/index.asp"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >CIKM 2009</span></span> </dd>
+
+
+  			<dt><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Participants</span></dt>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="index.php"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span> </dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="news.php"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >News</span></span></dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="themes.php"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Themes</span></span></dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="important_dates.php"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></dd>  			 	
+				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="registration.php"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></dd>
+  			 	<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="call_for_participation.php"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Call for Participation</span></span></dd>
+  			 	<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="student_travel_support.php"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Student Travel</span></span></dd>
+
+
+  			 
+  			<dt><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></dt>
+  				 <dd><span onclick="return false" style="text-decoration:underline; color:blue" href="/files/CIKM2008OpeningPresentation.pdf"><span class="announcement"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Opening Presentation</span></span></span></dd>
+  				 <dd><span onclick="return false" style="text-decoration:underline; color:blue" href="/files/cikm_program.pdf"><span class="announcement"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Program PDF</span></span></span></dd>
+  				 <dd><span onclick="return false" style="text-decoration:underline; color:blue" href="accepted_papers.php#bestpaper"><span class="announcement"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Best Paper & Poster</span></span></span></dd>
+  				 
+  				 <dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.flickr.com/photos/tags/cikm2008/"><span class="announcement"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Photo Stream</span></span></span></dd>
+  				
+  				 <dd><span onclick="return false" style="text-decoration:underline; color:blue" href="videos.php"><span class="announcement"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Free Presentation Videos & Slides</span></span></span></dd>
+  				
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="schedule.php"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Schedule</span></span></dd>
+  				 <dd><span onclick="return false" style="text-decoration:underline; color:blue" href="keynote_speakers.php"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Speakers</span></span></dd>  	
+  		  		<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="accepted_papers.php"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Papers</span></span> </dd>
+  		  		<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="posters.php"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Posters</span></span> </dd>
+  				 <dd><span onclick="return false" style="text-decoration:underline; color:blue" href="workshops.php"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></dd>
+  				 <dd><span onclick="return false" style="text-decoration:underline; color:blue" href="tutorials.php"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Tutorials</span></span></dd>
+  				 <dd><span onclick="return false" style="text-decoration:underline; color:blue" href="industry_event.php"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Industry Event</span></span></dd>  
+  				 <dd><span onclick="return false" style="text-decoration:underline; color:blue" href="panels.php"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Panels</span></span></dd>
+  				 <dd><span onclick="return false" style="text-decoration:underline; color:blue" href="opening_reception.php"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Opening Reception</span></span></dd>  
+  				 <dd><span onclick="return false" style="text-decoration:underline; color:blue" href="banquet.php"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Banquet</span></span></dd>  				 
+
+  				
+
+  			<dt><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Contributors</span></dt>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="call_for_papers.php"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></span> </dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="call_for_tutorials.php"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Call for Tutorials</span></span> </dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="call_for_workshops.php"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Call for Workshops</span></span> </dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="sponsorship.php"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Call for Sponsorship</span></span> </dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="how_to_submit.php"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >How to Submit</span></span></dd>  			
+
+  			<dt><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Location</span></dt>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="location.php"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Conference Site</span></span></dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="local_information.php"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Accomodation</span></span></dd>
+
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="napa_valley.php"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Napa Valley</span></span></dd>
+  			 	<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="travel.php"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Travel</span></span></dd>
+
+  			<dt><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >About Us</span></dt>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="organizers.php"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Organizers</span></span> </dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="history.php"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >History</span></span> </dd>
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="program_committee.php"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></span> </dd>
+
+  				<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="contact.php"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Contact Us</span></span></dd>
+			
+			<p>
+			<dd><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cikm2008.org/RSS"><img onmousedown="imd(this)" src="images/feed-icon-14x14.png" border="0"> <span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >RSS 2.0 Feed</span></span></dd>
+			
+		</dl>
+  
+	  </div>
+    
+
+ 
+ <div id="content-text">
+  
+ <h1><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Posters</span></h1>
+
+
+
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="top"></span>
+
+
+<ul>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="#IRPosters"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Information Retrieval</span></span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="#KMPosters"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Knowledge Management</span><a></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="#DBPosters"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >Databases</span></span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="#IndPosters"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Industry</span></span></li>
+
+</ul>
+
+<h3><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Best Poster Award</span></h3>
+
+<p><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >A best poster award will be given to the authors of the best poster. The best poster will be determined as follows: Each conference participant will receive pocket money, $100 in fake money, as part of their registration package. Each poster will be assigned a "tip-jar" (an envelope), where conference participants can deposit tips, i.e., part of their pocket money. At the end of the poster day, each poster author turns in his/her tip-jar to the registration desk. The author must insure that the money is counted and the total entered on the envelope; envelopes with no totals will be assign a total of zero. The five posters with the most "tips" will be considered for the best poster award. One will be selected by the best poster committee as the best poster. The best poster award will be presented during the closing ceremony of the main conference.</span></p>
+
+
+<p><span onclick="return false" style="text-decoration:underline; color:blue" href="poster_guidelines.php"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Poster Guidelines</span></span> <span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >for participants.</span></p>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="IRPosters"></span>
+
+
+<h3><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Information Retrieval Posters</span></h3>
+<p><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >"An Approximate String Matching Approach for Handling Incorrectly Typed URLs"</span> <br />
+<i><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Mihai Stroe, Radu Berinde, Cosmin Negruseri, Dan Popovici</span></i> <span class="number"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >(60)</span></span></p>
+
+<p><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >"Speed up Semantic Search in P2P Networks"</span> <br />
+<i><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Wang Qiang, Rui Li, Lei Chen, Jie Lian, Tamer Ozsu</span></i> <span class="number"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >(69)</span></span></p>
+
+<p><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >"Re-Considering Collaborative Filtering Parameters in the Context of New Data"</span> <br />
+<i><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Adele Howe, Ryan Forbes</span></i> <span class="number"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >(75)</span></span></p>
+
+<p><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >"Natural Language Retrieval of Grocery Products"</span> <br />
+<i><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Petteri Nurmi, Eemil Lagerspetz, Wray Buntine, Patrik Floreen, Joonas Kukkonen, Peter Peltonen</span></i> <span class="number"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >(90)</span></span></p>
+
+<p><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >"Improve the Effectiveness of the Opinion Retrieval and Opinion Polarity Classification"</span> <br />
+<i><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Wei Zhang, Lifeng Jia, Clement Yu, Weiyi Meng</span></i> <span class="number"><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >(95)</span></span></p>
+
+<p><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >"Search Based Forecasting of Ad Volume in Contextual Advertising"</span> <br />
+<i><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Xuerui Wang, Andrei Broder, Marcus Fontoura, Vanja Josifovski</span></i> <span class="number"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >(103)</span></span></p>
+
+
+
+<p><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >"Efficient Estimation of the Size of Text Deep Web Data Source"</span> <br />
+<i><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Jianguo Lu</span></i> <span class="number"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >(144)</span></span></p>
+
+
+
+<p><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >"An Extension of PLSA for Document Clustering"</span> <br />
+<i><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Young-Min Kim, Jean-Francois Pessiot, Massih Amini, Patrick Gallinari</span></i> <span class="number"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >(221)</span></span></p>
+
+
+<p><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >"A GeoReferencing multistage method for locating geographic context in Web search"</span> <br />
+<i><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Alvaro Zubizarreta, Pablo de la Fuente, Jose M. Cantera, Mario Arias, Jorge Cabrero, Guido Garcia, Cesar Llamas, Jesus Vegas</span></i> <span class="number"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >(242)</span></span></p>
+
+<p><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >"Online Spam-Blog Detection Through Blog Search"</span> <br />
+<i><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Linhong Zhu, Aixin Sun, Byron Choi</span></i> <span class="number"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >(245)</span></span></p>
+
+<p><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >"A Meta-Learning Approach for Robust Rank Learning"</span> <br />
+<i><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Vitor Carvalho, Jonathan Elsas, William Cohen, Jaime Carbonell</span></i> <span class="number"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >(256)</span></span></p>
+
+<p><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >"Incorporating Place Name Extents into Geo-IR Ranking"</span> <br />
+<i><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Hiroyuki Toda, Norihito Yasuda, Yumiko Matsuura, Ryoji Kataoka</span></i> <span class="number"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >(280)</span></span></p>
+
+<p><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >"A Latent Variable Model for Query Expansion Using the Hidden Markov Model"</span> <br />
+<i><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Qiang Huang, Dawei Song</span></i> <span class="number"><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >(286)</span></span></p>
+
+<p><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >"A Survey of Pre-Retrieval Query Performance Predictors"</span> <br />
+<i><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Claudia Hauff, Djoerd Hiemstra, Franciska de Jong</span></i> <span class="number"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >(291)</span></span></p>
+
+<p><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >"Modeling Document Features for Expert Finding"</span> <br />
+<i><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Jianhan Zhu, Dawei Song, Stefan Rueger, Jimmy Huang</span></i> <span class="number"><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >(339)</span></span></p>
+
+<p><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >"The Effect of Contextualization at Different Granularity Levels in Content-oriented XML Retrieval"</span> <br />
+<i><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Paavo Arvola, Jaana Kekalainen, Marko Junkkari</span></i> <span class="number"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >(341)</span></span></p>
+
+
+
+<p><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >"Nested Region Algebra Extended with Variables for Tag-Annotated Text Search"</span> <br />
+<i><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Katsuya Masuda, Junichi Tsujii</span></i> <span class="number"><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >(403)</span></span></p>
+
+<p><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >"Efficient Mining of Named Entity Transliteration Equivalents from Large Comparable Corpora"</span> <br />
+<i><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Raghavendra Udupa, Saravanan K., Kumaran A., Jagadeesh Jagarlamudi</span></i> <span class="number"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >(435)</span></span></p>
+
+<p><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >"Estimating Retrieval Effectiveness using Rank Distributions"</span> <br />
+<i><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Vishwa Vinay, Ingemar Cox, Natasa Milic-Frayling</span></i> <span class="number"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >(478)</span></span></p>
+
+<p><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >"Searching the Wikipedia with contextual information"</span> <br />
+<i><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >Antti Ukkonen, Carlos Castillo, Debora Donato, Aristides Gionis</span></i> <span class="number"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >(481)</span></span></p>
+
+<p><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >"Winnowing-Based Text Clustering"</span> <br />
+<i><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Javier Parapar, çlvaro Barreiro</span></i> <span class="number"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >(496)</span></span></p>
+
+
+
+<p><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >"Domain-Independent Filtering of Web Pages"</span> <br />
+<i><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Binyamin Rosenfeld, Ronen Feldman, Lyle Ungar</span></i> <span class="number"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >(533)</span></span></p>
+
+
+<p><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >"Semi-supervised Ranking Aggregation"</span> <br />
+<i><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Shouchun Chen, Fei Wang, Yaangqiu Song, Changshui Zhang</span></i> <span class="number"><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >(544)</span></span></p>
+
+<p><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >"Exploiting tagging context for ranking algorithms in folksonomy systems"</span> <br />
+<i><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Fabian Abel, Nicola Henze, Daniel Krause</span></i> <span class="number"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >(548)</span></span></p>
+
+<p><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >"Evaluating Topic Models for Information Retrieval"</span> <br />
+<i><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Xing Yi, James Allan</span></i> <span class="number"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >(560)</span></span></p>
+
+<p><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >"Entity-Based Query Reformulation Using Wikipedia"</span> <br />
+<i><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Yang Xu, Fan Ding, Bin Wang</span></i> <span class="number"><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >(1093)</span></span></p>
+
+<p><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >"Passage Relevance Models for Genomics Search"</span> <br />
+<i><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Jay Urbain, Ophir Frieder, Nazli Goharian</span></i> <span class="number"><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >(587)</span></span></p>
+
+<p><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >"Using Current Browsing Context to Improve Search Relevance"</span> <br />
+<i><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Mandar Rahurkar, Silviu Cucerzan</span></i> <span class="number"><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >(590)</span></span></p>
+
+<p><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >"Cross-Document Cross-Lingual Coreference Retrieval"</span> <br />
+<i><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Elif Aktolga, Marc-Allen Cartright, James Allan</span></i> <span class="number"><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >(708)</span></span></p>
+
+<p><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >"A Novel Statistical Chinese Language Model and Its Application in Pinyin-to-Character Conversion"</span> <br />
+<i><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Bo Lin, Jun Zhang</span></i> <span class="number"><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >(716)</span></span></p>
+
+<p><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >"Using a graph-based ontological user profile for personalizing search"</span> <br />
+<i><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >mariam daoud, lynda tamine-lechani, mohand boughanem</span></i> <span class="number"><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >(721)</span></span></p>
+
+<p><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >"Measuring the Stability of User Preferences"</span> <br />
+<i><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Yang Sun, Huajing Li, Isaac G. Councill, wang-chien Lee, C. Lee Giles</span></i> <span class="number"><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >(729)</span></span></p>
+
+
+<p><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >"An Adaptive Crawler to Retrieve Hidden-Web Data"</span> <br />
+<i><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Karane Vieira, Luciano Barbosa, Juliana Freire, Altigran Silva</span></i> <span class="number"><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >(761)</span></span></p>
+
+<p><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >"Utilization of Navigational Queries for Result Caching and Presentation in Search Engines"</span> <br />
+<i><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Rifat Ozcan, Ismail Altingovde, Ozgur Ulusoy</span></i> <span class="number"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >(768)</span></span></p>
+
+<p><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >"Investigating External Corpus and Clickthrough Statistics for Query Expansion in the Legal Domain"</span> <br />
+<i><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Tonya Custis, Khalid Al-Kofahi</span></i> <span class="number"><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >(785)</span></span></p>
+
+<p><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >"ShopSmart: Making Recommendations based on Technical Specifications and User Feedback"</span> <br />
+<i><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Alexander Yates, James Joseph, Alexander Cohn, Nick Sillick, Ana-Maria Popescu</span></i> <span class="number"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >(802)</span></span></p>
+
+
+<p><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >"Trust; Authority and Popularity in Social Information Retrieval"</span> <br />
+<i><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >Gabriella Kazai, Natasa Milic-Frayling</span></i> <span class="number"><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >(817)</span></span></p>
+
+<p><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >"Integrating Clustering and Multi-Document Summarization to Improve Document Understanding"</span> <br />
+<i><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Dingding Wang, Shenghuo Zhu, Yun Chi, Tao Li</span></i> <span class="number"><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >(826)</span></span></p>
+
+<p><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >"Answering General Time-Sensitive Queries"</span> <br />
+<i><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Wisam Dakka, Luis Gravano, Panagiotis Ipeirotis</span></i> <span class="number"><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >(837)</span></span></p>
+
+
+
+
+<p><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >"Search-based Query Suggestion"</span> <br />
+<i><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >Jiang-Ming Yang, Rui Cai, Feng Jing, Shuo Wang, Lei Zhang, Wei-Ying Ma</span></i> <span class="number"><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >(966)</span></span></p>
+
+<p><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >"A Spam Resistant Family of Concavo-Convex Ranks for Link Analysis"</span> <br />
+<i><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >Sreangsu Acharyya, Joydeep Ghosh</span></i> <span class="number"><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >(981)</span></span></p>
+
+<p><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >"Corpus Microsurgery: Criteria Optimization for Medical Cross-Language IR"</span> <br />
+<i><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Monica Rogati, Yiming Yang, Jaime Carbonell</span></i> <span class="number"><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >(990)</span></span></p>
+
+<p><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >"Metadata Extraction and Indexing for Map Search in Web Documents"</span> <br />
+<i><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Tan Qingzhao, Prasenjit Mitra, C. Lee Giles</span></i> <span class="number"><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >(1002)</span></span></p>
+
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="#top"><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >top</span></span>
+</p>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="KMPosters"></span>
+
+
+<h3><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Knowledge Management Posters</span></h3>
+
+<p><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >"Group-based Learning -- A Boosting Approach"</span> <br />
+<i><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Weijian Ni, Jun Xu, Hang Li, Yalou Huang</span></i> <span class="number"><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >(23)</span></span></p>
+
+<p><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >"Overlapping Community Structure Detection and Evolution in Networks"</span> <br />
+<i><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >nan du, bin wu, bai wang</span></i> <span class="number"><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >(218)</span></span></p>
+
+<p><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >"Collaborative Partitioning with Maximum User Satisfaction"</span> <br />
+<i><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Fred Annexstein, Svetlana Strunjas</span></i> <span class="number"><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >(96)</span></span></p>
+
+<p><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >"Boosting Social Annotations Using Propagation"</span> <br />
+<i><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Shenghua Bao, Bohai Yang, Ben Fei, Shengliang Xu, Zhong Su, Yong Yu</span></i> <span class="number"><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >(148)</span></span></p>
+
+<p><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >"Estimating Real-valued Characteristics of Criminals from their Recorded Crimes"</span> <br />
+<i><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Richard Bache, Fabio Crestani</span></i> <span class="number"><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >(584)</span></span></p>
+
+<p><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >"Effective Pattern Taxonomy Mining in Text Documents"</span> <br />
+<i><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Yuefeng Li, Sheng-Tang Wu, Xiaohui Tao</span></i> <span class="number"><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >(193)</span></span></p>
+
+<p><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >"Incorporating Topical Support Documents into a Small Training Set in Text Categorization"</span> <br />
+<i><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Kyung Soon Lee</span></i> <span class="number"><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >(199)</span></span></p>
+
+<p><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >"An Integration Strategy for mining product features and opinions"</span> <br />
+<i><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Miao Qingliang, Qiudan Li, Ruwei Dai</span></i> <span class="number"><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >(205)</span></span></p>
+
+<p><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >"Efficient Frequent Pattern Mining over Data Streams"</span> <br />
+<i><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >Syed Tanbeer, Chowdhury Ahmed, Byeong-Soo Jeong, Young-Koo Lee</span></i> <span class="number"><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >(210)</span></span></p>
+
+<p><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >"GHOST: An Effective Graph-based Framework for Name Distinction"</span> <br />
+<i><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >Xiaoming Fan, Jianyong Wang, Bing Lv, Lizhu Zhou, Wei Hu</span></i> <span class="number"><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >(219)</span></span></p>
+
+<p><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >"Coreference Resolution using Expressive Logic Models"</span> <br />
+<i><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Ki Chan, Wai Lam, Xiaofeng Yu</span></i> <span class="number"><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >(237)</span></span></p>
+
+<p><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >"Extracting Non-Redundant Association Rules from Multi-Level Datasets"</span> <br />
+<i><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Gavin Shaw, Yue Xu, Shlomo Geva</span></i> <span class="number"><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >(238)</span></span></p>
+
+<p><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >"Exploiting context to detect Sensitive Information in Call Center conversations"</span> <br />
+<i><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >Tanveer Faruquie, Sumit Negi, Anup Kumar Chalamalla, L. Venkata Subramaniam</span></i> <span class="number"><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >(250)</span></span></p>
+
+<p><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >"Study to Predict Social Annotations"</span> <br />
+<i><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Ming-Hung Hsu, Hsin-Hsi Chen</span></i> <span class="number"><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >(258)</span></span></p>
+
+<p><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >"Pattern-based Semantic Class Discovery with Multi-Membership Support"</span> <br />
+<i><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >Shuming Shi, Xiaokang Liu, Ji-Rong Wen</span></i> <span class="number"><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >(259)</span></span></p>
+
+<p><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >"Large Maximal Cliques Enumeration in Large Sparse Graphs"</span> <br />
+<i><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Natwar Modani, Kuntal Dey</span></i> <span class="number"><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >(263)</span></span></p>
+
+<p><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >"Detecting significant distinguishing sets among bi-clusters"</span> <br />
+<i><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Faris Alqadah, Raj Bhatnagar</span></i> <span class="number"><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >(307)</span></span></p>
+
+<p><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >"Summarization of Social Activity over Time: People; Actions and Concepts in Dynamic Networks "</span> <br />
+<i><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >Yu-Ru Lin, Hari Sundaram, Aisling Kelliher</span></i> <span class="number"><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >(344)</span></span></p>
+
+<p><span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >"Multi-scale Characterization of Social Network Dynamics in the Blogosphere"</span> <br />
+<i><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Munmun De Choudhury, Hari Sundaram, Ajita John, Doree Duncan Seligmann</span></i> <span class="number"><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >(363)</span></span></p>
+
+<p><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >"Semi-supervised Text Categorization by Active Search"</span> <br />
+<i><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >Zenglin Xu, Rong Jin, Kaizhu Huang, Michael R. Lyu, Irwin King</span></i> <span class="number"><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >(413)</span></span></p>
+
+<p><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >"Clustering Multi-way data via Adaptive Subspace Iteration"</span> <br />
+<i><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >Wei Peng, Tao Li, Bo Shao</span></i> <span class="number"><span class="coloringspan" id="250" onmousedown="md(this)" onmouseup="mu(this)" >(418)</span></span></p>
+
+<p><span class="coloringspan" id="251" onmousedown="md(this)" onmouseup="mu(this)" >"Semi-Supervised Metric Learning by Maximizing Constraint Margin"</span> <br />
+<i><span class="coloringspan" id="252" onmousedown="md(this)" onmouseup="mu(this)" >Fei Wang, Shouchun Chen, Tao Li, Changshui Zhang</span></i> <span class="number"><span class="coloringspan" id="253" onmousedown="md(this)" onmouseup="mu(this)" >(431)</span></span></p>
+
+<p><span class="coloringspan" id="254" onmousedown="md(this)" onmouseup="mu(this)" >"Using Tag Semantic Network for Keyphrase Extraction in Blogs"</span> <br />
+<i><span class="coloringspan" id="255" onmousedown="md(this)" onmouseup="mu(this)" >Lizhen Qu, Iryna Gurevych, Christof MŸller</span></i> <span class="number"><span class="coloringspan" id="256" onmousedown="md(this)" onmouseup="mu(this)" >(461)</span></span></p>
+
+<p><span class="coloringspan" id="257" onmousedown="md(this)" onmouseup="mu(this)" >"A Coarse-grain Grid-based Subspace Clustering Method for Online Multi-dimensional Data Streams "</span> <br />
+<i><span class="coloringspan" id="258" onmousedown="md(this)" onmouseup="mu(this)" >Jae Woo Lee, Won Suk Lee</span></i> <span class="number"><span class="coloringspan" id="259" onmousedown="md(this)" onmouseup="mu(this)" >(471)</span></span></p>
+
+<p><span class="coloringspan" id="260" onmousedown="md(this)" onmouseup="mu(this)" >"On Quantifying Changes in Time Varying Data"</span> <br />
+<i><span class="coloringspan" id="261" onmousedown="md(this)" onmouseup="mu(this)" >Rohan Choudhary, Sameep Mehta, Amitabha Bagchi</span></i> <span class="number"><span class="coloringspan" id="262" onmousedown="md(this)" onmouseup="mu(this)" >(519)</span></span></p>
+
+<p><span class="coloringspan" id="263" onmousedown="md(this)" onmouseup="mu(this)" >"Handling Implicit Locality Evidence for Geographic IR"</span> <br />
+<i><span class="coloringspan" id="264" onmousedown="md(this)" onmouseup="mu(this)" >Nuno Cardoso, M‡rio J. Gaspar da Silva, Diana Santos</span></i> <span class="number"><span class="coloringspan" id="265" onmousedown="md(this)" onmouseup="mu(this)" >(522)</span></span></p>
+
+<p><span class="coloringspan" id="266" onmousedown="md(this)" onmouseup="mu(this)" >"Fast Spatial Co-location Mining With Optimal Candidate Generation"</span> <br />
+<i><span class="coloringspan" id="267" onmousedown="md(this)" onmouseup="mu(this)" >Zhongshan Lin, SeungJin Lim</span></i> <span class="number"><span class="coloringspan" id="268" onmousedown="md(this)" onmouseup="mu(this)" >(566)</span></span></p>
+
+<p><span class="coloringspan" id="269" onmousedown="md(this)" onmouseup="mu(this)" >"Graph decomposition of terminology graphs for Domain Knowledge Acquisition"</span> <br />
+<i><span class="coloringspan" id="270" onmousedown="md(this)" onmouseup="mu(this)" >Fidelia Ibekwe-SanJuan, Eric SanJuan, Michael Vogeley</span></i> <span class="number"><span class="coloringspan" id="271" onmousedown="md(this)" onmouseup="mu(this)" >(630)</span></span></p>
+
+<p><span class="coloringspan" id="272" onmousedown="md(this)" onmouseup="mu(this)" >In the Development of a Spanish MetaMap</span><br />
+<i><span class="coloringspan" id="273" onmousedown="md(this)" onmouseup="mu(this)" >Francisco Carrero, Jose Carlos Cortizo, Jose Maria Gomez Hidalgo, Manuel de Buenaga</span></i>
+<span class="number"><span class="coloringspan" id="274" onmousedown="md(this)" onmouseup="mu(this)" >(635)</span></span> </p>
+
+
+
+<p><span class="coloringspan" id="275" onmousedown="md(this)" onmouseup="mu(this)" >"Representative Entry Selection for Profiling Blogs"</span> <br />
+<i><span class="coloringspan" id="276" onmousedown="md(this)" onmouseup="mu(this)" >Jinfeng Zhuang, Steven C.H. Hoi, Aixin Sun, Rong Jin</span></i> <span class="number"><span class="coloringspan" id="277" onmousedown="md(this)" onmouseup="mu(this)" >(665)</span></span></p>
+
+<p><span class="coloringspan" id="278" onmousedown="md(this)" onmouseup="mu(this)" >"Efficient Web Matrix Processing based on Dual Reordering"</span> <br />
+<i><span class="coloringspan" id="279" onmousedown="md(this)" onmouseup="mu(this)" >Hsu Chih-Ming, Ming-Syan Chen</span></i> <span class="number"><span class="coloringspan" id="280" onmousedown="md(this)" onmouseup="mu(this)" >(808)</span></span></p>
+
+<p><span class="coloringspan" id="281" onmousedown="md(this)" onmouseup="mu(this)" >"Semi-supervised Document Clustering with Simultaneous Text Representation and Categorization"</span> <br />
+<i><span class="coloringspan" id="282" onmousedown="md(this)" onmouseup="mu(this)" >Yanhua Chen, Lijun Wang, Ming Dong</span></i> <span class="number"><span class="coloringspan" id="283" onmousedown="md(this)" onmouseup="mu(this)" >(772)</span></span></p>
+
+<p><span class="coloringspan" id="284" onmousedown="md(this)" onmouseup="mu(this)" >"Hierarchical Co-Clustering Based on Entropy Splitting"</span> <br />
+<i><span class="coloringspan" id="285" onmousedown="md(this)" onmouseup="mu(this)" >Feng Pan</span></i> <span class="number"><span class="coloringspan" id="286" onmousedown="md(this)" onmouseup="mu(this)" >(783)</span></span></p>
+
+<p><span class="coloringspan" id="287" onmousedown="md(this)" onmouseup="mu(this)" >"A Novel Email Abstraction Scheme for Spam Detection"</span> <br />
+<i><span class="coloringspan" id="288" onmousedown="md(this)" onmouseup="mu(this)" >Chi-Yao Tseng, Ming-Syan Chen, Pin-Chieh Sung</span></i> <span class="number"><span class="coloringspan" id="289" onmousedown="md(this)" onmouseup="mu(this)" >(801)</span></span></p>
+
+<p><span class="coloringspan" id="290" onmousedown="md(this)" onmouseup="mu(this)" >"Tag-Based Filtering for Personalized Bookmark Recommendations"</span> <br />
+<i><span class="coloringspan" id="291" onmousedown="md(this)" onmouseup="mu(this)" >Pavan Kumar Vatturi, Werner Geyer, Casey Dugan, Michael Muller, Beth Brownholtz</span></i> <span class="number"><span class="coloringspan" id="292" onmousedown="md(this)" onmouseup="mu(this)" >(811)</span></span></p>
+
+<p><span class="coloringspan" id="293" onmousedown="md(this)" onmouseup="mu(this)" >"CoreEx: Heuristic Content Extraction from Online News Articles"</span> <br />
+<i><span class="coloringspan" id="294" onmousedown="md(this)" onmouseup="mu(this)" >Jyotika Prasad, Andreas Paepcke</span></i> <span class="number"><span class="coloringspan" id="295" onmousedown="md(this)" onmouseup="mu(this)" >(832)</span></span></p>
+
+<p><span class="coloringspan" id="296" onmousedown="md(this)" onmouseup="mu(this)" >"Scalable Complex Pattern Search in Sequential Data "</span> <br />
+<i><span class="coloringspan" id="297" onmousedown="md(this)" onmouseup="mu(this)" >Kaghazian Leila, Reza Sadri, Dennis McLeod</span></i> <span class="number"><span class="coloringspan" id="298" onmousedown="md(this)" onmouseup="mu(this)" >(834)</span></span></p>
+
+<p><span class="coloringspan" id="299" onmousedown="md(this)" onmouseup="mu(this)" >"Categorizing Bloggers' Interests: Methods and Applications"</span> <br />
+<i><span class="coloringspan" id="300" onmousedown="md(this)" onmouseup="mu(this)" >Jiahui Liu, Larry Birnbaum, Bryan Pardo</span></i> <span class="number"><span class="coloringspan" id="301" onmousedown="md(this)" onmouseup="mu(this)" >(902)</span></span></p>
+
+<p><span class="coloringspan" id="302" onmousedown="md(this)" onmouseup="mu(this)" >"Learning a Probabilistic Semantic Model from Heterogeneous Social Networks for Link Prediction"</span> <br />
+<i><span class="coloringspan" id="303" onmousedown="md(this)" onmouseup="mu(this)" >Chunying Zhou, Huajun Chen</span></i> <span class="number"><span class="coloringspan" id="304" onmousedown="md(this)" onmouseup="mu(this)" >(909)</span></span></p>
+
+<p><span class="coloringspan" id="305" onmousedown="md(this)" onmouseup="mu(this)" >"Combining Concept Hierarchies and Statistical Topic Models"</span> <br />
+<i><span class="coloringspan" id="306" onmousedown="md(this)" onmouseup="mu(this)" >Chaitanya Chemudugunta, Padhraic Smyth, Mark Steyvers</span></i> <span class="number"><span class="coloringspan" id="307" onmousedown="md(this)" onmouseup="mu(this)" >(967)</span></span></p>
+
+<p><span class="coloringspan" id="308" onmousedown="md(this)" onmouseup="mu(this)" >"Closing the Loop in Webpage Understanding"</span> <br />
+<i><span class="coloringspan" id="309" onmousedown="md(this)" onmouseup="mu(this)" >Chunyu Yang, Yong Cao, Zaiqing Nie, Jie Zhou, Ji-Rong Wen</span></i> <span class="number"><span class="coloringspan" id="310" onmousedown="md(this)" onmouseup="mu(this)" >(1017)</span></span></p>
+
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="#top"><span class="coloringspan" id="311" onmousedown="md(this)" onmouseup="mu(this)" >top</span></span>
+</p>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="DBPosters"></span>
+
+<h3><span class="coloringspan" id="312" onmousedown="md(this)" onmouseup="mu(this)" >Database Posters</span></h3>
+
+
+<p><span class="coloringspan" id="313" onmousedown="md(this)" onmouseup="mu(this)" >"Privacy-preserving data publishing for horizontally partitioned databases"</span> <br />
+<i><span class="coloringspan" id="314" onmousedown="md(this)" onmouseup="mu(this)" >Pawel Jurczyk, Li Xiong</span></i> <span class="number"><span class="coloringspan" id="315" onmousedown="md(this)" onmouseup="mu(this)" >(93)</span></span></p>
+
+<p><span class="coloringspan" id="316" onmousedown="md(this)" onmouseup="mu(this)" >"CE2--Towards a Large Scale Hybrid Search Engine with Integrated Ranking Support"</span> <br />
+<i><span class="coloringspan" id="317" onmousedown="md(this)" onmouseup="mu(this)" >Haofen Wang, Thanh Tran</span></i> <span class="number"><span class="coloringspan" id="318" onmousedown="md(this)" onmouseup="mu(this)" >(143)</span></span></p>
+
+
+<p><span class="coloringspan" id="319" onmousedown="md(this)" onmouseup="mu(this)" >"Scaling up Duplicate Detection in Graph Data"</span> <br />
+<i><span class="coloringspan" id="320" onmousedown="md(this)" onmouseup="mu(this)" >Melanie Herschel, Felix Naumann</span></i> <span class="number"><span class="coloringspan" id="321" onmousedown="md(this)" onmouseup="mu(this)" >(169)</span></span></p>
+
+
+<p><span class="coloringspan" id="322" onmousedown="md(this)" onmouseup="mu(this)" >"ROAD: An Efficient Framework for Location Dependent Spatial Queries on Road Networks"</span> <br />
+<i><span class="coloringspan" id="323" onmousedown="md(this)" onmouseup="mu(this)" >Ken C. K. Lee, wang-chien Lee, baihua zheng</span></i> <span class="number"><span class="coloringspan" id="324" onmousedown="md(this)" onmouseup="mu(this)" >(182)</span></span></p>
+
+<p><span class="coloringspan" id="325" onmousedown="md(this)" onmouseup="mu(this)" >"View and Index Selection for Query-Performance Improvement: Quality-Centered Algorithms and Heurist"</span> <br />
+<i><span class="coloringspan" id="326" onmousedown="md(this)" onmouseup="mu(this)" >Maxim Kormilitsin, Rada Chirkova, Yahya Fathi, Matthias Stallmann</span></i> <span class="number"><span class="coloringspan" id="327" onmousedown="md(this)" onmouseup="mu(this)" >(302)</span></span></p>
+
+<p><span class="coloringspan" id="328" onmousedown="md(this)" onmouseup="mu(this)" >"SQL Extension for Exploring Multiple Tables"</span> <br />
+<i><span class="coloringspan" id="329" onmousedown="md(this)" onmouseup="mu(this)" >Sung Jin Kim, Junghoo (John) Cho</span></i> <span class="number"><span class="coloringspan" id="330" onmousedown="md(this)" onmouseup="mu(this)" >(347)</span></span></p>
+
+
+<p><span class="coloringspan" id="331" onmousedown="md(this)" onmouseup="mu(this)" >"PBFilter: Indexing Flash-Resident Data through Partitioned Summaries"</span> <br />
+<i><span class="coloringspan" id="332" onmousedown="md(this)" onmouseup="mu(this)" >Shaoyi Yin, Philippe Pucheral, Xiaofeng Meng</span></i> <span class="number"><span class="coloringspan" id="333" onmousedown="md(this)" onmouseup="mu(this)" >(486)</span></span></p>
+
+<p><span class="coloringspan" id="334" onmousedown="md(this)" onmouseup="mu(this)" >"Efficient Processing of Probabilistic Spatio-Temporal Range Queries over Moving Objects"</span> <br />
+<i><span class="coloringspan" id="335" onmousedown="md(this)" onmouseup="mu(this)" >Bruce Chung, wang-chien Lee, Arbee Chen</span></i> <span class="number"><span class="coloringspan" id="336" onmousedown="md(this)" onmouseup="mu(this)" >(576)</span></span></p>
+
+<p><span class="coloringspan" id="337" onmousedown="md(this)" onmouseup="mu(this)" >"Data Degradation: Making Private Data Less Sensitive Over Time"</span> <br />
+<i><span class="coloringspan" id="338" onmousedown="md(this)" onmouseup="mu(this)" >Nicolas Anciaux, Luc Bouganim, Harold J. W. van Heerde, Philippe Pucheral, Peter M. G. Apers</span> </i> <span class="number"><span class="coloringspan" id="339" onmousedown="md(this)" onmouseup="mu(this)" >(604)</span></span></p>
+
+<p><span class="coloringspan" id="340" onmousedown="md(this)" onmouseup="mu(this)" >"A Light Weighted Damage Tracking Quarantine and Recovery Scheme for Mission-Critical Database System"</span> <br />
+<i><span class="coloringspan" id="341" onmousedown="md(this)" onmouseup="mu(this)" >Kun Bai</span></i> <span class="number"><span class="coloringspan" id="342" onmousedown="md(this)" onmouseup="mu(this)" >(673)</span></span></p>
+
+<p><span class="coloringspan" id="343" onmousedown="md(this)" onmouseup="mu(this)" >"Query Optimization in XML-Based Information Integration"</span> <br />
+<i><span class="coloringspan" id="344" onmousedown="md(this)" onmouseup="mu(this)" >Dongfeng Chen, Rada Chirkova, Maxim Kormilitsin, Fereidoon Sadri, Timo Salo</span></i> <span class="number"><span class="coloringspan" id="345" onmousedown="md(this)" onmouseup="mu(this)" >(679)</span></span></p>
+
+<p><span class="coloringspan" id="346" onmousedown="md(this)" onmouseup="mu(this)" >"Estimating the Number of Answers with Guarantees for Structured Queries in P2P Databases"</span> <br />
+<i><span class="coloringspan" id="347" onmousedown="md(this)" onmouseup="mu(this)" >Marcel Karnstedt, Kai-Uwe Sattler, Michael Hass, Manfred Hauswirth, Brahmananda Sapkota, Roman Schmidt</span></i> <span class="number"><span class="coloringspan" id="348" onmousedown="md(this)" onmouseup="mu(this)" >(722)</span></span></p>
+
+<p><span class="coloringspan" id="349" onmousedown="md(this)" onmouseup="mu(this)" >"Efficient Evaluation of Generalized Tree-Pattern Queries on XML Streams"</span> <br />
+<i><span class="coloringspan" id="350" onmousedown="md(this)" onmouseup="mu(this)" >xiaoying wu, Dimitri Theodoratos</span></i> <span class="number"><span class="coloringspan" id="351" onmousedown="md(this)" onmouseup="mu(this)" >(790)</span></span></p>
+
+<p><span class="coloringspan" id="352" onmousedown="md(this)" onmouseup="mu(this)" >"Characterization of TPC-H Queries for a Column-Oriented Database on a Dual-Core AMD Athlon Processor"</span> <br />
+<i><span class="coloringspan" id="353" onmousedown="md(this)" onmouseup="mu(this)" >Pranav Vaidya, Jaehwan John Lee</span></i> <span class="number"><span class="coloringspan" id="354" onmousedown="md(this)" onmouseup="mu(this)" >(796)</span></span></p>
+
+
+<p><span class="coloringspan" id="355" onmousedown="md(this)" onmouseup="mu(this)" >"Energy-Efficient Skyline Query Processing and Maintenance in Sensor Networks"</span> <br />
+<i><span class="coloringspan" id="356" onmousedown="md(this)" onmouseup="mu(this)" >Weifa Liang, Baichen Chen, Jeffrey Xu</span></i> <span class="number"><span class="coloringspan" id="357" onmousedown="md(this)" onmouseup="mu(this)" >(896)</span></span></p>
+
+<p><span class="coloringspan" id="358" onmousedown="md(this)" onmouseup="mu(this)" >"Table Summarization with the Help of Domain Lattices"</span> <br />
+<i><span class="coloringspan" id="359" onmousedown="md(this)" onmouseup="mu(this)" >K. Selcuk Candan, Huiping Cao, Yan Qi, Maria Luisa Sapino</span></i> <span class="number"><span class="coloringspan" id="360" onmousedown="md(this)" onmouseup="mu(this)" >(907)</span></span></p>
+
+<p><span class="coloringspan" id="361" onmousedown="md(this)" onmouseup="mu(this)" >"Protecting Location Privacy against Location-Dependent Attack in Mobile Services"</span> <br />
+<i><span class="coloringspan" id="362" onmousedown="md(this)" onmouseup="mu(this)" >Xiao Pan, Jianliang Xu, Xiaofeng Meng</span></i> <span class="number"><span class="coloringspan" id="363" onmousedown="md(this)" onmouseup="mu(this)" >(1018)</span></span></p>
+
+
+
+<p><span class="coloringspan" id="364" onmousedown="md(this)" onmouseup="mu(this)" >"Polyhedral Transformation for Indexed Rank Order Correlation Queries"</span> <br />
+<i><span class="coloringspan" id="365" onmousedown="md(this)" onmouseup="mu(this)" >Philon Nguyen, Nematollaah Shiri</span></i> <span class="number"><span class="coloringspan" id="366" onmousedown="md(this)" onmouseup="mu(this)" >(1072)</span></span></p>
+
+<p><span class="coloringspan" id="367" onmousedown="md(this)" onmouseup="mu(this)" >"Workload-Based Optimization of Integration Processes"</span> <br />
+<i><span class="coloringspan" id="368" onmousedown="md(this)" onmouseup="mu(this)" >Matthias Boehm, Dirk Habich, Wolfgang Lehner, Uwe Wloka</span></i> <span class="number"><span class="coloringspan" id="369" onmousedown="md(this)" onmouseup="mu(this)" >(1077)</span></span></p>
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="#top"><span class="coloringspan" id="370" onmousedown="md(this)" onmouseup="mu(this)" >top</span></span>
+</p>
+
+<span onclick="return false" style="text-decoration:underline; color:blue" name="IndPosters"></span>
+
+
+<h3><span class="coloringspan" id="371" onmousedown="md(this)" onmouseup="mu(this)" >Industry Posters</span></h3>
+<p><span class="coloringspan" id="372" onmousedown="md(this)" onmouseup="mu(this)" >"Transaction Reordering with Application to Synchronized Scans"</span> <br />
+<i><span class="coloringspan" id="373" onmousedown="md(this)" onmouseup="mu(this)" >Gang Luo, Jeffrey Naughton, Curt Ellmann, Michael Watzke</span></i> <span class="number"><span class="coloringspan" id="374" onmousedown="md(this)" onmouseup="mu(this)" >(66)</span></span></p>
+
+
+<p><span class="coloringspan" id="375" onmousedown="md(this)" onmouseup="mu(this)" >"Yizkor Books: A Voice for the Silent Past"</span> <br />
+<i><span class="coloringspan" id="376" onmousedown="md(this)" onmouseup="mu(this)" >Jason Soo, Rebecca Cathey, Ophir Frieder, Michlean Amir, Gideon Frieder</span></i> <span class="number"><span class="coloringspan" id="377" onmousedown="md(this)" onmouseup="mu(this)" >(718)</span></span></p>
+
+
+
+<p>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="#top"><span class="coloringspan" id="378" onmousedown="md(this)" onmouseup="mu(this)" >top</span></span>
+</p>
+
+
+
+
+ 
+    </div>
+
+ <div id="sponsors"> 
+ 	
+ 	<dt><span class="coloringspan" id="379" onmousedown="md(this)" onmouseup="mu(this)" >Gold Supporters</span></dt>
+	
+ 	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ir-facility.org"><img onmousedown="imd(this)" src="images/irf-logo-sm.png" border="0"></span>
+<p>
+ 	 <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.microsoft.com/"><img onmousedown="imd(this)" src="images/ms-logo.gif" border="0"></span>
+  	<p>
+  	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.searchme.com/"><img onmousedown="imd(this)" src="images/searchme_logo.jpg" border="0"></span>
+
+  	<dt><span class="coloringspan" id="380" onmousedown="md(this)" onmouseup="mu(this)" >Silver Supporters</span></dt>
+ 	 <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.advertising.com/"><img onmousedown="imd(this)" src="images/advertising_new.gif" border="0"></span>
+  	<p>
+  	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ask.com/"><img onmousedown="imd(this)" src="images/sm_ask.png" border="0"></span>
+  	<p>
+  	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://labs.ebay.com/"><img onmousedown="imd(this)" src="images/ebay-logo.gif" border="0"></span>
+  	<p>
+  	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://careers.yahoo.com/"><img onmousedown="imd(this)" src="images/yahoo_research.jpg" border="0"></span>
+
+  	
+  	
+  	<dt><span class="coloringspan" id="381" onmousedown="md(this)" onmouseup="mu(this)" >Bronze Supporters</span></dt>
+ 	 <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.a9.com/"><img onmousedown="imd(this)" src="images/a9.gif" border="0"></span>
+  	<p>
+ 	 <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.jseri.com/"><img onmousedown="imd(this)" src="images/jseri-logo-sm.png" border="0"></span>
+  	<p>
+ 	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.umbc.edu"><img onmousedown="imd(this)" src="images/umbc_150.jpg" border="0"></span>
+  	<p>
+ 	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cngl.ie"><img onmousedown="imd(this)" src="images/cngl.gif" border="0"></span>
+  	<p>
+ 	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.exalead.com"><img onmousedown="imd(this)" src="images/exalead.jpg" border="0"></span>
+ 	<p>
+ 	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.linkedin.com"><img onmousedown="imd(this)" src="images/linkedin.jpg" border="0"></span>
+ 	<p>
+ 	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.turn.com"><img onmousedown="imd(this)" src="images/turn.jpg" border="0"></span>
+
+
+	
+	
+  	<dt><span class="coloringspan" id="382" onmousedown="md(this)" onmouseup="mu(this)" >Video Supporter</span></dt>
+ 	 <span onclick="return false" style="text-decoration:underline; color:blue" href="http://videolectures.net/"><img onmousedown="imd(this)" src="images/video_lectures.jpg" border="0"></span>
+	
+	<br />
+	<br />
+	
+  	<dt><span class="coloringspan" id="383" onmousedown="md(this)" onmouseup="mu(this)" >Book Exhibits</span></dt>
+ 	 <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.cambridge.org/us/"><img onmousedown="imd(this)" src="images/cambridge.jpg" border="0"></span>
+	
+	<p>
+ 	 <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.springer.com/"><img onmousedown="imd(this)" src="images/springer.jpg" border="0"></span>
+
+
+
+	
+	
+	
+	<dt><span class="coloringspan" id="384" onmousedown="md(this)" onmouseup="mu(this)" >Local Organization</span></dt>
+	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.acm.org/"><img onmousedown="imd(this)" src="images/acm_1s_grad_pos.png" border="0"></span>
+ 	<p>
+ 	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.sigweb.org/"><img onmousedown="imd(this)" src="images/sigweb.gif" border="0"></span>
+  	<p>
+ 	<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.sigir.org/"><img onmousedown="imd(this)" src="images/sigir_logo.png" border="0"></span>
+ 
+ </div> 
+
+
+  
+	<div id="footer"><center>
+<span class="coloringspan" id="385" onmousedown="md(this)" onmouseup="mu(this)" >October 26-30, 2008: Napa Valley Marriott Hotel & Spa, 3425 Solano Avenue, Napa, CA 94558</span>
+<br />
+<span class="coloringspan" id="386" onmousedown="md(this)" onmouseup="mu(this)" >&copy; CIKM 2007 - 2008</span>

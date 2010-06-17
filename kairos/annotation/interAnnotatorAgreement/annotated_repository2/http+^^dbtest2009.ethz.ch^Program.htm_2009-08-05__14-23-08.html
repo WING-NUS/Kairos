@@ -1,0 +1,628 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" dir="ltr" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:m="http://schemas.microsoft.com/office/2004/12/omml">
+
+<!-- #BeginTemplate "master.dwt" -->
+
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session1/2/annotation/annotated_repository/http+^^dbtest2009.ethz.ch^Program.htm_2009-08-05__14-23-08.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session1/2/annotation/annotated_repository/http+^^dbtest2009.ethz.ch^Program.htm_2009-08-05__14-23-08.yaml created on Thu Aug 13 13:45:33 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<!-- #BeginEditable "doctitle" -->
+<title>Program</title>
+<!-- #EndEditable -->
+<link rel="stylesheet" type="text/css" title="CSS" href="styles/style1.css" media="screen" />
+<style type="text/css">
+
+.style1 {
+	font-size: xx-large;
+}
+.style2 {
+	text-align: center;
+}
+.style3 {
+	color: #333333;
+}
+.style4 {
+	background-color: #FFFFFF;
+}
+.style5 {
+	border: 0px;
+	height: 600px;
+}
+.style6 {
+	border-left: 1px gray dashed;
+	border-top:1px gray dashed;
+}
+.style8 {
+	font-size: x-large;
+}
+.style9 {
+	font-size: x-large;
+	text-decoration: underline;
+}
+.style10 {
+	border-width: 0px;
+}
+.style11 {
+	border-top:1px gray dashed;
+
+}
+
+.style12 {
+	font-size: small;
+}
+
+</style>
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<!-- Begin Container -->
+<div id="container">
+	<!-- Begin Masthead -->
+	<div id="masthead" style="width: 798px">
+		<table style="width: 100%" class="style4">
+			<tr>
+				<td style="width: 145px" class="style2">
+		<img onmousedown="imd(this)" src="images/DBTest2008_BR.JPG" alt="" /><div class="style2">
+				</div>
+
+		<span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+				<td><strong><span class="style1">
+				<span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Second International Workshop on</span><br />
+				<span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Testing Database Systems</span></span></strong><br />
+				<br />
+				<span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Co-located with</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.sigmod09.org"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >ACM SIGMOD 2009</span></span><br />
+				<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.sigmod09.org">
+				<img onmousedown="imd(this)" alt="SIGMOD 2009" height="65" longdesc="SIGMOD 2009" src="images/logo_sigmod_providence.gif" width="270" class="style10" /></span><br />
+				</td>
+			</tr>
+		</table>
+	</div>
+	<!-- End Masthead -->
+	<!-- Begin Page Content -->
+	<div style="width: 800px">
+		<table cellspacing="0" cellpadding="0" class="style5" style="width: 99%">
+			<tr>
+				<td valign="top" class="style11">
+					<!-- Begin Sidebar -->
+					<div id="sidebar" style="left: -5px; top: 0px; width: 140px">
+					<ul>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="index.htm"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Welcome to DBTest 2009</span></span> </li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="Program.htm"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></span></li>						
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="PaperSubmission.htm"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Paper Submission</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="ImportantDates.htm"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="Committee.htm"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Program Committee</span></span></li>
+						<li><span onclick="return false" style="text-decoration:underline; color:blue" href="WorkshopChairs.htm"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Contact the Chairs</span></span></li>						
+					</ul>
+					<h4><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Previous Events</span></h4>
+						<p>
+						<span onclick="return false" style="text-decoration:underline; color:blue" href="http://research.microsoft.com/en-us/um/redmond/events/dbtest2008/">
+						<span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >DBTest 2008</span></span></p>
+
+					</div>
+					<!-- End Sidebar -->
+					<br />
+				</td>
+				<td valign="top" class="style6">
+					<!-- Begin Content -->
+					<div id="content">
+					<!-- #BeginEditable "content" -->
+					<h2><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Program</span></h2>
+                                        <table style="width: 100%">
+
+						<tr>
+							<td style="width: 85px"><i><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings:</span></i></td>
+							<td><i><span onclick="return false" style="text-decoration:underline; color:blue" href="./proceedings/proceedings.zip"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >download</span></span><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >(password protected)</span></i></td>
+						</tr>
+						<tr>
+							<td style="width: 85px"><strong><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >9:45-10:15</span></strong></td>
+							<td><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Breakfast</span> </td>
+						</tr>
+						<tr>
+							<td style="width: 85px"><strong><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >10:15-10:30</span></strong></td>
+							<td><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >DBTest Welcome</span></td>
+
+						</tr>
+						<tr>
+							<td style="width: 85px"><strong><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >10:30-12:00</span></strong></td>
+							<td><span onclick="return false" style="text-decoration:underline; color:blue" href="#Session_1"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Session 1: DBMS and SQL Testing</span></span> </td>
+						</tr>
+						<tr>
+
+							<td style="width: 85px"><strong><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >12:00-13:15</span></strong></td>
+							<td><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Lunch break</span></td>
+						</tr>
+                                                <tr>
+							<td style="width: 85px"><strong><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >13:15-14:15</span></strong></td>
+							<td><span onclick="return false" style="text-decoration:underline; color:blue" href="#Invited_Speaker"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk: Testing Large-Scale Distributed Storage Systems</span></span></td>
+						</tr>
+						<tr>
+							<td style="width: 85px"><strong><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >14:15-15:45</span></strong></td>
+							<td><span onclick="return false" style="text-decoration:underline; color:blue" href="#Session_2"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Session 2: Test Tools</span></span></td>
+						</tr>
+
+						<tr>
+							<td style="width: 85px"><strong><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >15:00-16:15</span></strong></td>
+							<td><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Coffee break</span></td>
+						</tr>
+						<tr>
+							<td style="width: 85px"><strong><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >16:15-17:45</span></strong></td>
+							<td><span onclick="return false" style="text-decoration:underline; color:blue" href="#Session_3"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Session 3: Potpourri - Benchmarking, Tuning, and Application Testing</span></span></td>
+						</tr>
+					</table>
+
+<h3><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></h3>
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="Invited_Speaker"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talk: Testing Large-Scale Distributed Storage Systems (James Corbett, Storage Testing Group, Google)</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="./slides/keynote.ppt"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >[slides]</span>  </span></h3>
+
+<p>
+<span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Google develops and maintains some of the largest distributed storage
+systems in the world. Often these systems span thousands of machines
+across many data centers and must provide reliable service in the face
+of disk/machine failures, server crashes, and network outages. Testing
+these systems can be extremely challenging, especially at scale.  In
+this talk, we give an overview of the Google storage stack, the
+difficulties of testing it, and the process we use for quality
+assurance. We identify six best practices that have proven invaluable
+in our efforts to provide a robust storage service, and look forward
+to the challenges that remain.</span>
+
+<br/>
+<br/>
+
+<span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Bio: James Corbett is a Senior Software Engineer in the Storage Testing
+Group at Google, where he has worked since 2004. He got his PhD from the University of
+Massachusetts in Amherst in 1992 and was a professor of Information and Computer Science 
+at the University of Hawaii from 1992-2000.</span>
+</p>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="Session_1"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Session 1: DBMS and SQL Testing</span></span></h3>
+<ul>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./proceedings/paper09.pdf"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >InProcDiskSim: Testing Database Recovery on Commodity Disk Drives (long*)</span></span><span onclick="return false" style="text-decoration:underline; color:blue" href="./slides/paper09.ppt"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >[slides]</span>  </span>
+<br/><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Robin Dhamankar, Hanuma Kodavalla / Microsoft Corporartion</span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./proceedings/paper12.pdf"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Testing on a Budget: Integrating E-Business Certification into Oracle DB Testing (long*)</span></span><span onclick="return false" style="text-decoration:underline; color:blue" href="./slides/paper12.ppt"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >[slides]</span>  </span>
+<br/><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >Mohamet Zait, Allison Lee, Khaled Yagoub, Ravi Sahani, Holly Casaletto, Lokesh Kumar / Oracle USA</span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./proceedings/paper19.pdf"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Case study: Experiences on SQL language fuzz testing (long*)</span></span><span onclick="return false" style="text-decoration:underline; color:blue" href="./slides/paper19.ppt"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >[slides]</span>  </span>
+<br/><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Raul Garcia / Microsoft Corporartion</span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./proceedings/paper13.pdf"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Validating the Oracle SQL Engine (short*)</span></span><span onclick="return false" style="text-decoration:underline; color:blue" href="./slides/paper13.ppt"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >[slides]</span>  </span>
+<br/><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Allison Lee, Mohamet Zait, Thierry Cruanes, Rafi Ahmed, Yali Zhu / Oracle USA</span></li>
+</ul>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="Session_2"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Session 2: Test Tools</span></span></h3>
+<ul>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./proceedings/paper04.pdf"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Finding Min-Repros in Database Software (long*)</span></span><span onclick="return false" style="text-decoration:underline; color:blue" href="./slides/paper04.ppt"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >[slides]</span>  </span>
+<br/><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Nicolas Bruno / Microsoft Research, Rimma V. Nehme / Purdue University</span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./proceedings/paper02.pdf"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Query-Aware Shrinking Test Databases (long*)</span></span><span onclick="return false" style="text-decoration:underline; color:blue" href="./slides/paper02.ppt"><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >[slides]</span>  </span>
+<br/><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Javier Tuya, Jose Suarez-Cabal, Claudio de la Riva / Universidad de Oviedo, Departamento de Informatica</span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./proceedings/paper07.pdf"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Selection of Customers for Operational and Usage Profiling (long*)</span></span><span onclick="return false" style="text-decoration:underline; color:blue" href="./slides/paper07.pdf"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >[slides]</span>  </span>
+<br/><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >A.V. Miranskyy, E. Cialini, D. Godwin / IBM Canada Ltd.</span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./proceedings/paper11.pdf"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Real Application Testing with Database Replay (short*)</span></span><span onclick="return false" style="text-decoration:underline; color:blue" href="./slides/paper11.ppt"><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >[slides]</span>  </span>
+<br/><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Yujun Wang, Supiti Buranawatanachoke, Romain Colle, Karl Dias, Leonidas Galanis, Stratos Papadomanolakis, Uri Shaft / Oracle USA</span></li>
+</ul>
+
+<h3><span onclick="return false" style="text-decoration:underline; color:blue" name="Session_3"><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >Session 3: Potpourri</span></span></h3>
+<ul>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./proceedings/paper18.pdf"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >How is the Weather tomorrow? Towards a Benchmark for the Cloud (long*)</span></span><span onclick="return false" style="text-decoration:underline; color:blue" href="./slides/paper18.ppt"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >[slides]</span>  </span>
+<br/><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Carsten Binnig, Donald Kossmann, Tim Kraska, Simon Loesing / Systems Group, Department of Computer Science, ETH Zurich</span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./proceedings/paper03.pdf"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Towards Workflow-Driven Database System Workload Modeling (short*)</span></span><span onclick="return false" style="text-decoration:underline; color:blue" href="./slides/paper03.ppt"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >[slides]</span>  </span>
+<br/><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Du Naiqiao / School of Software, Tsinghua University</span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./proceedings/paper16.pdf"><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Query Interactions in Database Workloads (short*)</span></span><span onclick="return false" style="text-decoration:underline; color:blue" href="./slides/paper16.ppt"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >[slides]</span>  </span>
+<br/><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Mumtaz Ahmad, Ashraf Aboulnaga / University of Waterloo</span>
+<br/><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Shivnath Babu / Duke University</span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./proceedings/paper14.pdf"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Automated SQL Tuning through Trial and (Sometimes) Error (short*)</span></span><span onclick="return false" style="text-decoration:underline; color:blue" href="./slides/paper14.ppt"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >[slides]</span>  </span>
+<span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Herodotos Herodotou, Shivnath Babu / Duke University</span></li>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="./proceedings/paper01.pdf"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >White-Box Testing for Database-driven Applications: A Requirements Analysis (short*)</span></span><span onclick="return false" style="text-decoration:underline; color:blue" href="./slides/paper01.pdf"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >[slides]</span>  </span>
+<span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Klaus Haller, COMIT AG</span></li>
+
+</ul>
+
+<p style="font-weight:bold"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >*) Session Information:</span></p>
+<ul>
+<li><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Long presentations have a slot of 25 minutes (20 min. for presentation and 5 minutes for a discussion).</span> <li/>
+<li><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Short presentations have a slot of 15 minutes (13 min. for presentation and 2 minutes for a short discussion).</span></li>
+</ul>
+					<!-- #EndEditable -->
+					</div>
+				</td>
+				<td valign="top" class="style6">
+					<div id="logos" style="left: -7px; top: 0px; height: 496px; width: 151px" class="style2">
+						<br />
+						<span class="style9"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></span><span class="style8"><br />
+						</span>
+						<br class="style12" />
+						<span class="style8">
+						<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.oracle.com">
+						<img onmousedown="imd(this)" src="images/oracle.jpg" width="150" class="style10" /></span></span><br/>
+						<br class="style12" />
+						<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ibm.com/software/data/">
+						<img onmousedown="imd(this)" src="images/thumbnailCATZKQWA.jpg" width="120" class="style10" /></span><br />
+						<br class="style12" />
+						<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.microsoft.com/sql/default.mspx">
+						<img onmousedown="imd(this)" alt="Microsoft SQL Server" src="images/ms_sql_logo[2].jpg" width="165" class="style10" /></span><br />
+						<br class="style12" />
+						<span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.sybase.com">
+						<img onmousedown="imd(this)" alt="Sybase Logo" height="51" longdesc="Sybase Logo" src="images/sybase_logo.jpg" width="150" class="style10" /></span>
+						
+					</div>
+						
+				</td>
+			</tr>
+			<tr>
+				<td valign="top" class="style11">
+					<span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+				<td valign="top" class="style6">
+					<span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+				<td valign="top" class="style6">
+					<span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >&nbsp;</span></td>
+			</tr>
+		</table>
+	<!-- End Content --></div>
+	<!-- End Page Content -->
+	<!-- Begin Footer -->
+	<div id="footer" style="width: 786px">
+		<p class="style2" style="width: 311px"><span class="style3"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >DBTEST 2009</span>

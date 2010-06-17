@@ -1,0 +1,817 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session2/4/annotation/annotated_repository/http+^^www.hipeac.net^industry_workshop4_2009-08-05__14-36-53.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session2/4/annotation/annotated_repository/http+^^www.hipeac.net^industry_workshop4_2009-08-05__14-36-53.yaml created on Thu Aug 13 13:56:26 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+  <title>4th HiPEAC Industrial Workshop on Compilers and Architectures at Robinson College, Cambridge | HiPEAC</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="/sites/all/themes/zen/zen_hipeac/print.css" type="text/css" media="print" />
+
+<link rel="shortcut icon" href="/files/favicon.png" type="image/x-icon" />
+  <style type="text/css" media="all">@import "/modules/book/book.css";</style>
+<style type="text/css" media="all">@import "/modules/node/node.css";</style>
+<style type="text/css" media="all">@import "/modules/poll/poll.css";</style>
+<style type="text/css" media="all">@import "/modules/system/defaults.css";</style>
+<style type="text/css" media="all">@import "/modules/system/system.css";</style>
+<style type="text/css" media="all">@import "/modules/user/user.css";</style>
+<style type="text/css" media="all">@import "/sites/all/modules/cck/content.css";</style>
+<style type="text/css" media="all">@import "/sites/all/modules/event/event.css";</style>
+<style type="text/css" media="all">@import "/sites/all/modules/og/og.css";</style>
+<style type="text/css" media="all">@import "/sites/all/modules/cck/fieldgroup.css";</style>
+<style type="text/css" media="all">@import "/sites/all/modules/panels/css/panels.css";</style>
+<style type="text/css" media="all">@import "/sites/all/themes/zen/zen_hipeac/style.css";</style>
+<style type="text/css" media="all">@import "/sites/all/themes/zen/tabs.css";</style>
+<style type="text/css" media="all">@import "/sites/all/themes/zen/zen_hipeac/html-elements.css";</style>
+<style type="text/css" media="all">@import "/sites/all/themes/zen/zen_hipeac/layout-garland.css";</style>
+<style type="text/css" media="all">@import "/sites/all/themes/zen/zen_hipeac/icons.css";</style>
+<style type="text/css" media="all">@import "/sites/all/themes/zen/zen_hipeac/zen-hipeac.css";</style>
+<style type="text/css" media="all">@import "/sites/all/themes/zen/block-editing.css";</style>
+
+   <script src='http://www.google-analytics.com/urchin.js' type='text/javascript'></script>
+   <script type='text/javascript'>_uacct = 'UA-2857653-1'; urchinTracker(); </script>
+
+  
+  <!--[if IE]>
+    <link rel="stylesheet" href="/sites/all/themes/zen/ie.css" type="text/css">
+          <link rel="stylesheet" href="/sites/all/themes/zen/zen_hipeac/ie.css" type="text/css">
+      <![endif]-->
+  <script type="text/javascript" src="/misc/jquery.js"></script>
+<script type="text/javascript" src="/misc/drupal.js"></script>
+<script type="text/javascript" src="/sites/all/modules/jquery_update/compat.js"></script>
+<script type="text/javascript" src="/sites/all/modules/panels/js/panels.js"></script>
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)" class="not-front not-logged-in node-type-announcement one-sidebar sidebar-left page-industry_workshop4 section-industry_workshop4"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+  <div id="page">
+
+      <div id="navigation" class="menu withprimary ">
+                  <div id="primary" class="clear-block">
+            <ul class="links"><li class="first menu-1-1-276"><span onclick="return false" style="text-decoration:underline; color:blue" href="/" class="menu-1-1-276"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></li>
+<li class="menu-1-2-276"><span onclick="return false" style="text-decoration:underline; color:blue" href="/activities" class="menu-1-2-276"><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Activities</span></span></li>
+<li class="menu-1-3-276"><span onclick="return false" style="text-decoration:underline; color:blue" href="/mobility" class="menu-1-3-276"><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Mobility</span></span></li>
+<li class="menu-1-4-276"><span onclick="return false" style="text-decoration:underline; color:blue" href="/research" class="menu-1-4-276"><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Research</span></span></li>
+<li class="menu-1-5-276"><span onclick="return false" style="text-decoration:underline; color:blue" href="/publications" class="menu-1-5-276"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Publications</span></span></li>
+<li class="menu-1-6-276"><span onclick="return false" style="text-decoration:underline; color:blue" href="/industry" class="menu-1-6-276"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Industry</span></span></li>
+<li class="last menu-1-7-276"><span onclick="return false" style="text-decoration:underline; color:blue" href="/network" class="menu-1-7-276"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >The Network</span></span></li>
+</ul>          </div>
+        
+              </div> <!-- /navigation -->
+     <div class="spacer">
+
+    </div>
+
+
+    <div id="header">
+
+    
+
+
+       <div id="logo-title">
+
+                          <span onclick="return false" style="text-decoration:underline; color:blue" href="/" title="Home" rel="home">
+            <img onmousedown="imd(this)" src="/sites/all/themes/zen/zen_hipeac/logo.png" alt="Home" id="logo" />
+          </span>
+        
+        <div id="name-and-slogan">
+
+        
+                  <div id='site-slogan'>
+            <span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >European Network of Excellence on High Performance and Embedded Architecture and Compilation</span>          </div>
+        
+        </div> <!-- /name-and-slogan -->
+
+      </div> <!-- /logo-title -->
+
+    </div> <!-- /header -->
+         <div id="header-region">
+          <div class="breadcrumb"><span onclick="return false" style="text-decoration:underline; color:blue" href="/"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></div>                  </div> <!-- /header-region -->
+      
+    <div id="container" class="clear-block">
+
+              <div id="sidebar-left" class="column sidebar">
+          
+<div id="block-block-1" class="block block-block region-odd odd region-count-1 count-1">
+
+<div class="top-left"></div>
+<div class="top-right"></div>
+
+<div class="blockinside">
+<p class="notopgap"></p>
+
+
+<div class="block-inner">
+
+  
+  <div class="content">
+    <div  class="fp7imgblock"><center><img onmousedown="imd(this)" src='http://www.hipeac.net/system/files/fp7.png'></center></div>  </div>
+
+  
+
+
+</div>
+
+<p class="nobottomgap"></p>
+
+</div>
+<div class="bottom-left"></div>
+<div class="bottom-right"></div>
+</div> <!-- /block-inner, /block -->
+
+        </div> <!-- /sidebar-left -->
+      
+      <div id="main" class="column"><div id="squeeze" class="clear-block">
+                        <div id="content">
+
+	<div class="top-left"></div>
+	<div class="top-right"></div>
+	<div class="contentinsideleft"><div class="contentinsideright">
+	<div class="contentinside">
+
+	<div class="gap-saver"></div>
+	<p class="notopgap"></p>
+
+                      <h1 class="title"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >4th HiPEAC Industrial Workshop on Compilers and Architectures at Robinson College, Cambridge</span></h1>
+                                                  
+
+
+<div class="node node-type-announcement" id="node-1104">
+
+<div class="ntop-left"></div>
+<div class="ntop-right"></div>
+<div class="insideleft"><div class="insideright">
+<div class="inside">
+
+<div class="gap-saver"></div>
+<p class="notopgap"></p>
+
+<div class="node-inner">
+
+  
+  
+  
+      <div class="submitted">
+      <span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Submitted by</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="/user/533" title="View user profile."><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >ozer</span></span> <span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >on Thu, 16/08/2007 - 08:36.</span>    </div>
+  
+  
+  <div class="content">
+    <div class="announcement-start">
+<em><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >From 19th Nov 07 To 19th Nov 07</span></em>
+</div>
+
+<style>
+<span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >#program{
+  border: 1px gray solid;
+  border-collapse: collapse;
+}
+
+#program td{
+  border: 1px gray solid;
+  padding: 3px;
+}
+
+#program .title{
+  font-style: italic;
+  margin-bottom: 2px;
+  //border-bottom: 1px dotted gray;
+  font-size: 1.1em;
+}
+
+#program .session{
+  font-size: 1em;
+}</span>
+
+</style>
+
+<p style="text-align: center; margin-top: 2em;">
+<strong><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >November 26, 2007</span></strong><br />
+<strong><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Organized by ARM Ltd. in Cambridge, UK</span></strong><br />
+
+</p><br />
+
+
+<h2><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Call for Papers</span></h2>
+
+<p>
+<span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Find the</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="industry_workshop4cfp"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >call for papers</span></span> <span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >here.</span>
+</p><br />
+
+
+<h2><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Program and Presentations</span></h2>
+
+<p>
+<h1 class="smalltitle"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Topics</span></h1>
+<span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >The main focus of this workshop is</span> <a><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >advanced embedded computer architecture</span></span> <span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >and</span> <a><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >compiler technology</span></span><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >. The topics of interest for this workshop include, but are not limited to:</span>
+<ul>
+<li><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Modern embedded architectures</span> 
+<li><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >High-performance low-power architectures</span>
+<li><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Ultra Low Power Circuit and Microarchitecture Design Techniques</span>
+<li><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Reliability and Fault Tolerance</span>
+<li><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >Symmetric/Asymmetric Multicore, multithreading, superscalar, and VLIW architectures</span>
+<li><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Reconfigurable and soft-core computing</span>
+<li><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Compilers and programming tools for modern embedded systems</span>										<li><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Dynamic translation and optimization</span>							
+<li><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Parallel programming and concurrency support for Multicore/multithreaded systems</span>							
+<li><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Performance tools for embedded systems</span>
+<li><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Non-traditional embedded computing systems topics</span>
+</ul>
+</p>
+
+
+<h1 class="smalltitle"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Program</span></h1>
+<br>
+<table id="program">
+<tr><td width = "11%"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >08:30</span></td><td><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Arrival + Registration</span></td></tr>
+
+<tr><td><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >09:00 - 9:10</span></td><td><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Opening</span></td></tr>
+
+<tr><td colspan="2"><div class="session"><strong><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >SESSION 1: Binary, Compiler and Memory Optimization for Embedded Systems</span> </strong></div></td></tr>
+
+<tr><td><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >09:10 - 9:35</span></td><td><div class="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hipeac.net/system/files?file=session1_1.pdf"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >Inter-Block Scoreboard Scheduling in a JIT Compiler for VLIW Processors</span></span></div>
+      <span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >BenoÃ®t Dupont de Dinechin,</span> <em><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >STMicroelectronics</span></em></td></tr>
+
+
+<tr><td><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >09:35 - 10:00</span></td><td><div class="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hipeac.net/system/files?file=session1_2.pdf"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Diablo: a retargetable and extensible link-time rewriter</span></span></div>
+      <span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Dominique Chanet, Jonas Maebe and Koen De Bosschere,</span> <em><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >Ghent University</span></em></td></tr>
+
+
+<tr><td><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >10:00 â€“ 10:25</span></td><td><div class="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hipeac.net/system/files?file=session1_3.ppt"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Automatic mapping to tightly-coupled memories and cache locking</span></span></div>
+      <span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Peter Marwedel, Heiko Falk, Sascha Plazar, Robert Pyka and Lars Wehmeyer,</span> <em><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >University of Dortmund and Informatik Centrum Dortmund (ICD)</span></em></td></tr>
+
+<tr><td><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >10:25 â€“ 10:50</span></td><td><div class="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hipeac.net/system/files?file=session1_4.pdf"><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Program overlays revisited</span></span></div>
+      <span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Benedict R. Gaster,</span> <em><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Clearspeed Tech.</span></em></td></tr>
+
+<tr><td><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >10:50 â€“ 11:20</span></td><td><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >COFFEE BREAK</span></td></tr>
+
+
+<tr><td colspan="2"><div class="session"><strong><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >SESSION 2: Language and Tool Support for Multicore Architectures</span> </strong></span></div></td></tr>
+
+<tr><td><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >11:20 â€“ 11:45</span></td><td><div class="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hipeac.net/system/files?file=session2_1.ppt"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Mapping high performance and mission-critical applications to Embedded Architectures</span></span></div>
+      <span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Philippe Bonnot, Sami Yehia, Arnaud Grasset, Eric Lenormand and Gilbert Edelin,</span> <em><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Thales Research and Technology</span></em></td></tr>
+
+<tr><td><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >11:45 â€“ 12:10</span></td><td><div class="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hipeac.net/system/files?file=session2_2.ppt"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Trace-based performance analysis on Cell BE</span></span></div>
+     <span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Marina Biberstein, Moon S. Chang, Bilha Mendelson, Uzi Shvadron and Javier Turek,</span> <em><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >IBM Haifa</span></em></td></tr>
+
+<tr><td><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >12:10 â€“ 12:35</span></td><td><div class="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hipeac.net/system/files?file=session2_3.ppt"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Auto-parallelisation of Sieve C++ programs</span></span></div>
+     <span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Alastair Donaldson, Colin Riley, Anton Lokhmotov and Andrew Cook,</span> <em><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Codeplay Software and University of Cambridge</span></em></td></tr>
+
+<tr><td><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >12:35 â€“ 13:50</span></td><td><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >LUNCH +</span> <b><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >POSTER SESSION</span></b></td></tr>
+
+
+<tr><td><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >13:50 - 14:35</span></td><td><strong><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Keynote Speech</span></strong>
+<div class="title"> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hipeac.net/system/files?file=keynote.pdf"> <span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >The Wall Ahead is Made of Rubber</span> </span></div>
+<span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Krisztian Flautner, Director of Research,</span> <em><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >ARM</span> </em></td></tr>
+
+<tr><td colspan="2"><div class="session"><strong><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >SESSION 3: Dependable Computing</span></strong></span></div></td></tr>
+
+<tr><td><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >14:35 â€“ 15:00</span></td><td><div class="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hipeac.net/system/files?file=session3_1.pdf"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >A Low Overhead Fault Tolerant Coherence Protocol for CMP Architectures</span></span></div>
+     <span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Ricardo Fernandez-Pascual, Jose M. Garcia, Manuel E. Acacio and Jose Duato,</span> <em><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >University of Murcia and University of Valencia</span></em></td></tr>
+
+<tr><td><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >15:00 â€“ 15:25</span></td><td><div class="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hipeac.net/system/files?file=session3_2.ppt"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Initial Results on the Importance of Protecting Prediction Arrays against Hard-Faults</span></span></div>
+     <span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Veerle Desmet, Yiannakis Sazeides and Costas Vrioni,</span> <em><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Ghent University and University of Cyprus</span></em></td></tr>
+
+<tr><td><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >15:25 â€“ 15:50</span></td><td><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >COFFEE BREAK</span></td></tr>
+
+
+<tr><td colspan="2"><div class="session"><strong><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >SESSION 4: Modeling and Simulation</span></strong></span></div></td></tr>
+
+<tr><td><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >15:50 â€“ 16:15</span></td><td><div class="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hipeac.net/system/files?file=session4_1.pdf"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Simulation tools for Sandblaster multithreaded processor</span></span></div>
+     <span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Sanjay Jinturkar,  Vitaly Kalashnikov, Mayan Moudgill, Gary Nacer and John Glossner,</span> <em><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Sandbridge Technologies</span></em></td></tr>
+
+
+<tr><td><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >16:15 â€“ 16:40</span></td><td><div class="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hipeac.net/system/files?file=session4_2.ppt"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >HySim â€“ Hybrid Application Simulation Approach</span></span></div>
+     <span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >Stefan Kraemer, Lei Gao, Rainer Leupers, Gerd Ascheid and Heinrich Meyr,</span> <em><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >RWTH-Aachen University</span></em></td></tr>
+
+<tr><td><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >16:40 â€“ 17:05</span></td><td><div class="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hipeac.net/system/files?file=session4_3.ppt"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Leveraging Modular Simulation for Systematic Design Space Exploration</span></span></div>
+     <span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Veerle Desmet, Grigori Fursin, Sylvain Girbal and Olivier Temam,</span> <em><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Ghent University and INRIA</span></em></td></tr>
+
+<tr><td><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >17:05 â€“ 17:25</span></td><td><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Coffee Break</span></td></tr>
+
+
+<tr><td colspan="2"><div class="session"><strong><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >SESSION 5: Relevant EU Projects</span></strong></div></td></tr>
+
+<tr><td><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >17:25 â€“ 17:40</span></td><td><div class="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hipeac.net/system/files?file=MilePost.pdf"><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >MilePost</span></span></div>
+     <span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Mike Oâ€™Boyle,</span> <em><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >University of Edinburgh</span></em></td></tr>
+
+<tr><td><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >17:40 â€“ 17:55</span></td><td><div class="title"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.hipeac.net/system/files?file=SARC.ppt"><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >SARC</span></span></div>
+     <span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Georgi N. Gaydadjiev,</span> <em><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >Delft University of Technology</span></em></td></tr>
+
+<tr><td><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >17:55 - 18:00</span></td><td><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Closing</span></td></tr>
+
+</table>
+
+<br>
+<h1 class="smalltitle"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >POSTER SESSION details</span></h1>
+<br>
+<table id="program">
+<tr><td><div class="title"><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >Towards an Energy Efficient Branch Prediction Scheme Using Profiling</span></div>
+     <span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Michael Hicks, Colin Egan, Bruce Christianson and Patrick Quick,</span> <em><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >University of Hertfordshire, UK</span></em>
+<br>
+<br>
+<a><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></span> <span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Dynamic branch predictors account for between
+10% and 40% of a processorâ€™s dynamic power consumption.
+This power cost is proportional to the number of accesses made
+to that dynamic predictor during a programâ€™s execution. In
+this paper we propose the combined use of local delay region
+scheduling and profiling with an original adaptive branch bias
+measurement. The adaptive branch bias measurement takes note
+of the dynamic predictorâ€™s accuracy for a given branch and
+decides whether or not to assign a static prediction for that
+branch. The static prediction and local delay region scheduling
+information is represented as two hint bits in branch instructions.
+We show that, with the combined use of these two methods, the
+number of dynamic branch predictor accesses/updates can be
+reduced by up to 62%. The associated average power saving is
+very encouraging; for the example high-performance embedded
+architecture n average global processor power saving of 6.22%
+is achieved.</span>
+</td>
+</tr>
+
+
+
+<tr><td><div class="title"><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >The ARISE Framework: Extending Processors with Arbitrary Hardware
+Accelerators</span></div>
+    <span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >Nikolaos Vassiliadis, George Theodoridis, and Spiridon Nikolaidis,</span>  <em><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Aristotle University of Thessaloniki, Greece</span></em>
+<br>
+<br>
+<a><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></span> <span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >ARISE introduces a systematic approach for extending
+once a processor to support thereafter the coupling of an
+arbitrary number of Custom Computing Units (CCUs). A
+CCU can be hardwired or reconfigurable unit, while it can
+be utilized following a hybrid, tight and/or loose, model of
+computation. By selecting the appropriate model of
+computation for each part of the application, the complete
+application space can be considered for acceleration,
+resulting to significant increase of performance
+improvements. To support these features we introduce a
+machine organization that allows the co-operation of a
+processor and a set of CCUs. To control the CCUs the
+instruction set of the processor is extended with eight
+instructions. To efficiently incorporate these features to an
+embedded processor, a micro-architecture implementation
+that minimizes the control and communication overhead
+between the processor and the CCUs is introduced. To
+evaluate our proposal we have extended a MIPS processor
+with the ARISE infrastructure and implemented it on a
+Xilinx FPGA and proved that the timing model of the
+processor is not affected. A set of benchmarks were
+implemented on the ARISE evaluation machine.
+Performance results prove that exploiting the hybrid model
+of computation, the ARISE machine achieves performance
+improvements of up to 68% compared to a typical
+approach.</span>
+</td></tr>
+
+<tr><td><div class="title"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Light-Weight SIMD
+Extension for Embedded Processors</span></div>
+   <span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Magnus Sjalander and Per Larsson-Edefors,</span> <em><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Chalmers University of Technology,
+Sweden</span></em>
+
+<br>
+<br>
+<a><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></span> <span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >We present a light-weight SIMD extension for embedded
+general-purpose processors with negligible impact on delay and power
+dissipation. This is achieved by modifying existing functional units, such
+that they support multiple-precision operations and by limiting the number
+of added SIMD instructions. Particularly, a twin-precision multiplier
+is utilized to give support for low-overhead SIMD multiplications. A
+MIPS-R2000-like processor is extended with the proposed light-weight
+SIMD support, and the performance estimates from placed-and-routed
+layouts in a 0.13-Î¼m technology are subsequently analyzed. A SIMDenabled
+version of the EEMBCâ€™s FFT benchmark shows that on top of
+a dramatically reduced memory access activity, the total execution time
+and total energy is reduced by 15% and 14%, respectively.</span>
+</td></tr>
+
+<br>
+<br>
+<a><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></span> 
+</td></tr>
+
+<tr><td><div class="title"><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Filtering drowsy caches to improve
+their performance</span></div>
+   <span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Paolo Bennati and Roberto Giorgi,</span> <em><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >University of Siena, Italy</span></em>
+
+<br>
+<br>
+<a><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></span> <span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Leakage power in data cache memories represents a sizable fraction of total power consumption, and many techniques have been proposed to reduce it. As a matter of fact, during a fixed period of time, only a small subset of cache lines is used. Drowsy technique, for instance, put unused lines to drowsy state in order to save power.
+Our idea is to adaptively select mostly used cache lines in order to maintain mostly used data always available. We found that this can be achieved automatically by using a tiny cache acting as a filter â€œL0â€ cache. Our main contributions are: i) evaluation of filter cache to reduce leakage; ii) improvement of an existing power-saving techniques.
+Our experiments, with complete MiBench suite for ARM based processor, show (in average) 10% improvement in leakage saving and 17% in leakage energy-delay versus drowsy-cache.</span>
+
+</td></tr>
+
+<tr><td><div class="title"><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Parallelization in GCC</span></div>
+   <span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Razya Ladelsky,</span> <em><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >IBM Haifa, Israel</span></em>
+
+<br>
+<br>
+<a><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Abstract:</span></span> <span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >With the emergence of multicore architectures there is a growing need for automatic parallelization, that distributes sequential code into multi threaded code. OpenMP defines language extensions to C, C++, and Fortran for implementing multi-threaded shared memory applications. Generation of such extensions by the compiler relieves programmers from the manual parallelization process. OpenMP specification has been implemented in GCC and integrated into version 4.2. The OpenMP infrastructure together with existent data dependence analyses served as the basic infrastructure for an automatic parallelization optimization implementation recently in GCC. The initial automatic parallelization work was contributed by Sebastian Pop and Zdenek Dvorak, and supports loops whose iterations are independent of each other. We later enhanced these capabilities to support loops with reduction dependence among the iterations, thereby parallelizing additional loops. These auto-parallelization contributions are being incorporated into the upcoming version 4.3. In this talk we summarize the existing OpenMP and data dependence infrastructures in GCC, then describe the current state of automatic parallelization in GCC, demonstrated by some examples. Finally, we discuss future directions of work that may further extend the optimization's applicability.</span>
+
+
+</td></tr>
+
+</table>
+
+
+<br> <br>
+
+<h2><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >Workshop Registration</span></h2>
+<p> <span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >The registration website is open for Hipeac members at</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="node/1105"><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Online Registration</span></span><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >.</span>
+
+<p><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >For people who are not Hipeac members, please</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.arm.com/phpscripts/events/hipeac.php"><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >click here</span></span> <span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >to register.</span></p>
+
+
+
+<h2><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Practical Information</span></h2>
+
+<p>
+<ul>
+<li><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Venue location:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.robinson.cam.ac.uk/"><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Robinson College</span></span></li>
+<ul>
+<li><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >The workshop takes place in the main auditorium:</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.robinson.cam.ac.uk/conferences/facilities/auditorium.php"><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Auditorium Theatre</span></span></li>
+<li> <span onclick="return false" style="text-decoration:underline; color:blue" href="system/files?file=18845.gif"> <span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Map of Cambridge and Robinson College</span></span> <span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >(Larger version)</span>  <br> <br>
+<span onclick="return false" style="text-decoration:underline; color:blue" href="system/files?file=18845.gif">
+<img onmousedown="imd(this)"  alt="Map of Cambridge and Robinson College - Click for larger version" src="system/files?file=18822.gif"/>
+</span></li>
+</ul>
+
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.ukvisas.gov.uk/servlet/Front?pagename=OpenMarket/Xcelerate/ShowPage&c=Page&cid=1006977149962"><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >Visa Information</span></span></li>
+<p>  <span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Please email to</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="mailto:emre.ozer@arm.com"><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Emre Ozer</span></span> <span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >for an invitation letter for Visa applications</span> 
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.robinson.cam.ac.uk/contact/travel.php"><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Travel info</span></span>
+<p><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >How to get to Cambridge by air:</span> 
+<ul>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.stanstedairport.com"><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >London Stansted Airport,</span></span>
+<p><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >a direct train connect</span> <b><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >Stansted Airport (SSD)</span></b> <span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >to</span> <b><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Cambridge (CBG)</span></b> <span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >every hour,</span> <br><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >use</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://ojp1.nationalrail.co.uk/"><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >National Rail Timetables and Journey Planner</span></span></p>
+</li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.heathrowairport.com"><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >London Heathrow Airport,</span></span>
+<p><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >trains run form</span> <b><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >Heathrow Terminals</span> </b><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >(find information about the terminals</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.heathrowairport.com/portal/site/heathrow/menuitem.e87da634aa88e3fba4b12871120103a0/"><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >here</span></span><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >) via London to</span> <b><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >Cambridge (CBG)</span></b><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <br><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >use</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://ojp1.nationalrail.co.uk/"><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >National Rail Timetables and Journey Planner</span></span></p>
+</li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.gatwickairport.com"><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >London Gatwick Airport,</span></span>
+<p><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >trains run form</span> <b> <span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Gatwick Airport (GTW)</span></b> <span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >via London to</span> <b><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >Cambridge (CBG)</span></b><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <br><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >use</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://ojp1.nationalrail.co.uk/"><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >National Rail Timetables and Journey Planner</span></span></p>
+</li>
+<li><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >and</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.london-luton.co.uk/en/"><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >London Luton airport,</span></span>
+<p><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >trains run form</span> <b><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Luton Airport Parkway (LTN)</span></b> <span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >via London to</span> <b><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Cambridge (CBG)</span></b><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >,</span> <br><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >use</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://ojp1.nationalrail.co.uk/"><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >National Rail Timetables and Journey Planner</span></span></p>
+</li>
+</ul>
+<span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >Cambridge is also reachable from all the airports by direct buses, see</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.nationalexpress.com/"><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >National Express Bus website</span></span><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >.</span></p>
+</li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.visitcambridge.org/visitors/"><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Social Program</span></span></li>
+<li><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.visitcambridge.org/visitors/wheretostay.php"><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >Local Accommodations</span></span></li>
+</ul>
+</p>  </div>
+
+      <div class="links">
+      <ul class="links inline"><li class="first last event_calendar"><span onclick="return false" style="text-decoration:underline; color:blue" href="/event/2007/11/19" class="event_calendar"><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >Calendar</span>

@@ -1,0 +1,889 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session1/6/annotation/annotated_repository/http+^^intelligentenvironments.org^conferences^ie09^programme_2009-08-05__14-25-59.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session1/6/annotation/annotated_repository/http+^^intelligentenvironments.org^conferences^ie09^programme_2009-08-05__14-25-59.yaml created on Thu Aug 13 13:48:18 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+    <title>IE09 Conference Programme | Intelligent Environments Conferences</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="shortcut icon" href="/misc/favicon.ico" type="image/x-icon" />
+    <link type="text/css" rel="stylesheet" media="all" href="/modules/aggregator/aggregator.css?a" />
+<link type="text/css" rel="stylesheet" media="all" href="/modules/node/node.css?a" />
+<link type="text/css" rel="stylesheet" media="all" href="/modules/system/defaults.css?a" />
+<link type="text/css" rel="stylesheet" media="all" href="/modules/system/system.css?a" />
+<link type="text/css" rel="stylesheet" media="all" href="/modules/system/system-menus.css?a" />
+<link type="text/css" rel="stylesheet" media="all" href="/modules/user/user.css?a" />
+<link type="text/css" rel="stylesheet" media="all" href="/sites/all/themes/admire_gray/style.css?a" />
+    <script type="text/javascript" src="/misc/jquery.js?a"></script>
+<script type="text/javascript" src="/misc/drupal.js?a"></script>
+<script type="text/javascript" src="/misc/tableheader.js?a"></script>
+<script type="text/javascript">
+<!--//--><![CDATA[//><!--
+jQuery.extend(Drupal.settings, { "basePath": "/", "googleanalytics": { "trackOutgoing": 1, "trackMailto": 1, "trackDownload": 1, "trackDownloadExtensions": "7z|aac|avi|csv|doc|exe|flv|gif|gz|jpe?g|js|mp(3|4|e?g)|mov|pdf|phps|png|ppt|rar|sit|tar|torrent|txt|wma|wmv|xls|xml|zip" } });
+//--><!]]>
+</script>
+    <!--[if lt IE 7]>
+    <style type="text/css" media="all">@import "/sites/all/themes/admire_gray/fix-ie.css";</style>
+    <![endif]-->
+  </head>
+<body onload="on_load()" onkeyup="on_key_up(event)"  class="sidebar-left"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<div id="container">
+<div id="container2">
+
+<div id="header">
+
+<div id="blogdesc">
+       <div id="texttitles">
+	  <h1 class='site-name'><span onclick="return false" style="text-decoration:underline; color:blue" href="/" title="Home"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >Intelligent Environments Conferences</span></span></h1>      </div></div>
+
+
+</div>
+
+<div id="navigation">
+      <ul class="primary_nav1"><li class="menu-115 first"><span onclick="return false" style="text-decoration:underline; color:blue" href="/" title=""><span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></li>
+<li class="menu-140"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences" title=""><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Conferences</span></span></li>
+<li class="menu-141"><span onclick="return false" style="text-decoration:underline; color:blue" href="http://forum.intelligentenvironments.org" title=""><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Forum</span></span></li>
+<li class="menu-282"><span onclick="return false" style="text-decoration:underline; color:blue" href="/content/blogs" title="Blogs"><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Blogs</span></span></li>
+<li class="menu-197 last"><span onclick="return false" style="text-decoration:underline; color:blue" href="/contact" title=""><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Contact</span></span></li>
+</ul></div>
+ <div id="navigation2">
+</div>
+
+<div id="undernavigation">
+</div>
+
+<div id="wrap">
+<div id="leftside">
+<div id="block-menu-menu-ie09" class="clear-block block block-menu">
+
+  <h2 class="blocktitle"><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >IE &#039;09</span></h2>
+
+  <div class="content"><ul class="menu"><li class="collapsed first"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/ie09/specialsessions" title="Special Sessions"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Special Sessions</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/ie09/posters" title="Posters"><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >Posters</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/ie09/doctoral" title="The IE09 Doctoral Colloquium"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Doctoral Colloquium</span></span></li>
+<li class="collapsed"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/ie09/workshops" title="Call for Workshops"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Workshops</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/ie09/invited_speakers" title="Invited Speakers"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Invited Speakers</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/ie09/committee" title=""><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Committee</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/ie09/importantdates" title=""><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Important Dates</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/ie09/submition_instructions" title="Submit a paper"><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Submit a paper</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/ie09/registration" title="Registration"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >Registration</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/ie09/venue" title="Venue"><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Venue</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/ie09/accommodation" title="Accommodation"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Accommodation</span></span></li>
+<li class="leaf active-trail"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/ie09/programme" title="IE09 Conference Programme" class="active"><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Programme</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/ie09/dinner" title="Conference Dinner"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >Conference Dinner</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/ie09/socialevent" title="Social Event"><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Social Event</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/ie09/sponsors" title="Sponsors"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Sponsors</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/ie09/support" title="Conference Support"><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Conference Support</span></span></li>
+<li class="leaf last"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/ie09/blog" title="IE &#039;09 Blog"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Blog</span></span></li>
+</ul></div>
+</div>
+<div id="block-user-1" class="clear-block block block-user">
+
+  <h2 class="blocktitle"><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Navigation</span></h2>
+
+  <div class="content"><ul class="menu"><li class="leaf last"><span onclick="return false" style="text-decoration:underline; color:blue" href="/tracker"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Recent posts</span></span></li>
+</ul></div>
+</div>
+<div id="block-menu-menu-conferences" class="clear-block block block-menu">
+
+  <h2 class="blocktitle"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >Conferences</span></h2>
+
+  <div class="content"><ul class="menu"><li class="leaf first"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/ie09" title="Intelligent Environments 2009 Conference"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >IE&#039;09</span></span></li>
+<li class="leaf last"><span onclick="return false" style="text-decoration:underline; color:blue" href="/conferences/past" title="Past Conferences"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >Past Conferences</span></span></li>
+</ul></div>
+</div>
+<div id="block-menu-menu-iepublications" class="clear-block block block-menu">
+
+  <h2 class="blocktitle"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >IE Publications</span></h2>
+
+  <div class="content"><ul class="menu"><li class="leaf first"><span onclick="return false" style="text-decoration:underline; color:blue" href="/publications/advanced-intelligent-environments" title="IE07 Book on Advanced Intelligent Environments (Springer)"><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >IE07 Book on Advanced Intelligent Environments</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/publications/JPMC" title="IE08 JPMC Special issue (Elsevier)"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >IE08 JPMC Special issue</span></span></li>
+<li class="leaf"><span onclick="return false" style="text-decoration:underline; color:blue" href="/publications/JAISE" title="IE09 JAISE Thematic issue (IOS Press)"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >IE09 JAISE Thematic issue</span></span></li>
+<li class="leaf last"><span onclick="return false" style="text-decoration:underline; color:blue" href="/publications/JPMC-09" title="IE09 JPMC Special issue (Elsevier)"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >IE09 JPMC Special issue</span></span></li>
+</ul></div>
+</div>
+<div id="block-user-0" class="clear-block block block-user">
+
+  <h2 class="blocktitle"><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >User login</span></h2>
+
+  <div class="content"><form action="/conferences/ie09/programme?destination=node%2F44"  accept-charset="UTF-8" method="post" id="user-login-form">
+<div><div class="form-item" id="edit-name-wrapper">
+ <label for="edit-name"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >Username:</span> <span class="form-required" title="This field is required."><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >*</span></span></label>
+ <input type="text" maxlength="60" name="name" id="edit-name" size="15" value="" class="form-text required" />
+</div>
+<div class="form-item" id="edit-pass-wrapper">
+ <label for="edit-pass"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Password:</span> <span class="form-required" title="This field is required."><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >*</span></span></label>
+ <input type="password" name="pass" id="edit-pass"  maxlength="60"  size="15"  class="form-text required" />
+</div>
+<input type="submit" name="op" id="edit-submit" value="Log in"  class="form-submit" />
+<div class="item-list"><ul><li class="first"><span onclick="return false" style="text-decoration:underline; color:blue" href="/user/register" title="Create a new user account."><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Create new account</span></span></li>
+<li class="last"><span onclick="return false" style="text-decoration:underline; color:blue" href="/user/password" title="Request new password via e-mail."><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >Request new password</span></span></li>
+</ul></div><input type="hidden" name="form_build_id" id="form-0cad640ea92cfac5db4e007e9c91cc08" value="form-0cad640ea92cfac5db4e007e9c91cc08"  />
+<input type="hidden" name="form_id" id="edit-user-login-block" value="user_login_block"  />
+
+</div></form>
+</div>
+</div>
+</div>
+
+<div id="contentmiddle">
+
+
+
+
+
+          <div class="breadcrumb"><span onclick="return false" style="text-decoration:underline; color:blue" href="/"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></div>
+
+                    <div id="h2title"><h2><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >IE09 Conference Programme</span></h2>		  </div>
+          
+                                          <div class="node">
+          
+   
+    <div class="content"><p>
+<table style="text-align: left; height: 1252px;" border="1" width="743">
+<tbody style="border-top: 1px solid black;">
+<tr>
+<td colspan="5"><b><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >DAY 1: JULY 20th</span></b></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >9.30</span></td>
+<td><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >10.30</span></td>
+<td></td>
+<td><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >The Future Internet in support of Intelligent Environments</span><br /></td>
+<td><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Marcus Brunner, NEC Europe</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >10.30</span></td>
+<td><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >10.45</span></td>
+<td></td>
+<td><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Coffe Break</span><br /></td>
+<td><br /></td>
+</tr>
+<tr>
+<td rowspan="6"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >10.45</span><i><b><br /></b></i></td>
+<td rowspan="6"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >12.45</span><i><b><br /></b></i></td>
+<td rowspan="6"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Room1</span></td>
+<td><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Assistive and adaptive end-user systems</span><br /></td>
+<td><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >Michael Weber, Ulm University</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >“Let them TalkMaths!” Developing an Intelligent System to Assist Disabled People to Learn and Use Mathematics on Computers through a Speech Interface : the TalkMaths and VoiceCalc Systems</span><br /></td>
+<td><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Angela Wigmore, Gordon Hunter, Eckhard Pfluegel, James Denholm-Price and Vincent Binelli</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >Towards Emotion, Age- and Gender-Aware VoiceXML Applications</span></td>
+<td><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Alexander Schmitt, Tobias Heinroth and Gregor Bertrand</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Enhancing Speech Dialogue Technologies for Ambient Intelligent Environments</span></td>
+<td><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Tobias Heinroth, Alexander Schmitt and Gregor Bertrand</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >CHAD - Constraint Handling Architecture for Dialogue management</span></td>
+<td><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Gregor Bertrand, Tobias Heinroth and Alexander Schmitt</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >The Augmented Dorfladen – Interacting with Real and Virtual Products in Instrumented Shelves</span></td>
+<td><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Michael Schmitz, Elena Minina and Homeira Quraischy</span></td>
+</tr>
+<tr>
+<td rowspan="6"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >10.45</span></td>
+<td rowspan="6"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >12.45</span></td>
+<td rowspan="6"><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >Room2</span></td>
+<td><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Domestic robots and smart device ecologies</span></td>
+<td><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >Alessandro Saffiotti, Orebro University</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >Discovering the home</span></td>
+<td><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >James Dooley, Vic Callaghan, Hani Hagras and Phil Bull</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Assessing Temporal Relationships Between Events in Smart Environments</span></td>
+<td><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Fulvio Mastrogiovanni, Antonello Scalmato, Antonio Sgorbissa and Renato Zaccaria</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Monitoring Domestic Activities with Temporal Constraints and Components</span></td>
+<td><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Marcello Cirillo, Federica Lanzellotto, Federico Pecora and Alessandro Saffiotti</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Instability and Irrationality: Destructive and Constructive Services within Intelligent Environments</span></td>
+<td><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >Simon Egerton, Victor Zamudio, Victor Callaghan and Graham Clarke</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Increasing Reliability in the Development of Intelligent Environments</span></td>
+<td><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Juan Augusto</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >12.45</span></td>
+<td><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >14.00</span></td>
+<td></td>
+<td><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span></td>
+<td></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >14.00</span></td>
+<td><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >15.00</span></td>
+<td></td>
+<td><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Sci-fi prototyping</span></td>
+<td><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Brian David Johnson, Intel Corporation</span></td>
+</tr>
+<tr>
+<td rowspan="5"><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >15.00</span></td>
+<td rowspan="5"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >16.30</span></td>
+<td rowspan="5"><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >Room1</span></td>
+<td><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Novel and emerging technologies 1</span></td>
+<td><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Dolors Royo, Technical University of Catalonia</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >WADS: A Web Anomaly Detection System</span></td>
+<td><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Manuel Garcia-Cervigon and Juan Vazquez</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >A Service Oriented Architecture Combining Agents and Ontologies Towards Pervasive Adaptation</span></td>
+<td><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >Christos Goumopoulos and Achilles Kameas</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Creating an Ambient Intelligent Environment with an Emotion-Aware System</span></td>
+<td><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Sherief Mowafey, Alexander Schmitt, Hani Hagras and Wolfgang Minker</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >A Speech Recognizer Based Intelligent Agent For Ambient Intelligent Environments</span></td>
+<td><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >Amr ElFaham and Hani Hagras</span></td>
+</tr>
+<tr>
+<td rowspan="5"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >15.00</span></td>
+<td rowspan="5"><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >16.30</span></td>
+<td rowspan="5"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Room2</span></td>
+<td><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >Intelligent knowledge-based and agent-based systems 1</span></td>
+<td><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Michael Weber, Ulm University</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >Environmental User Preference Learning for Smart Homes</span></td>
+<td><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Luis Angel San Martín, Víctor Peláez, Roberto González and Antonio Campos</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >Transferring Learned Activities in Smart Environments</span></td>
+<td><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Parisa Rashidi and Diane J. Cook</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >An Approach to Achieve Context-aware Maps: Combining Semantic Web Technology with Sensor Data</span></td>
+<td><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Xiang Su, Jukka Riekki and Sasu Tarkoma</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >A Semantic Framework for Adapting Interactive Systems in Intelligent Environments</span></td>
+<td><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Matthias Bezold</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >16.30</span></td>
+<td><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >16.45</span></td>
+<td></td>
+<td><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >Coffe Break</span></td>
+<td></td>
+</tr>
+<tr>
+<td rowspan="5"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >16.45</span></td>
+<td rowspan="5"><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >18.15</span></td>
+<td rowspan="5"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Room1</span></td>
+<td><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >Novel and emerging technologies 2</span></td>
+<td><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Martin Colley, Essex University</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >An Adaptive Type-2 Fuzzy Logic Based Agent for Multi-Occupant Ambient Intelligent Environments</span></td>
+<td><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Bahaa El-Desouky and Hani Hagras</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >An Intelligent System for Extracting Intro and Outré Times in Songs Using Artificial Neural Networks</span></td>
+<td><span class="coloringspan" id="126" onmousedown="md(this)" onmouseup="mu(this)" >Sarah Elkasrawy, Hani Hagras and Moustafa Nawito</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="127" onmousedown="md(this)" onmouseup="mu(this)" >Decision Support System for Hot Spot Detection</span></td>
+<td><span class="coloringspan" id="128" onmousedown="md(this)" onmouseup="mu(this)" >Esther Salamí, Sol Pedre, Patricia Borenzstejn, Cristina Barrado, Andres Stoliar and Enric Pastor</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="129" onmousedown="md(this)" onmouseup="mu(this)" >An Intelligent Scenario For New Unmanned Aerial Systems</span></td>
+<td><span class="coloringspan" id="130" onmousedown="md(this)" onmouseup="mu(this)" >Joshua Tristancho and Sonia P. Mansilla</span></td>
+</tr>
+<tr>
+<td rowspan="5"><span class="coloringspan" id="131" onmousedown="md(this)" onmouseup="mu(this)" >16.45</span></td>
+<td rowspan="5"><span class="coloringspan" id="132" onmousedown="md(this)" onmouseup="mu(this)" >18.15</span></td>
+<td rowspan="5"><span class="coloringspan" id="133" onmousedown="md(this)" onmouseup="mu(this)" >Room2</span></td>
+<td><span class="coloringspan" id="134" onmousedown="md(this)" onmouseup="mu(this)" >Intelligent knowledge-based and agent-based systems 2</span></td>
+<td><span class="coloringspan" id="135" onmousedown="md(this)" onmouseup="mu(this)" >Achilles Kameas, Hellenic Open University and Computer Technology Institute</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="136" onmousedown="md(this)" onmouseup="mu(this)" >Interleaved Activity Recognition for Smart Home residents</span></td>
+<td><span class="coloringspan" id="137" onmousedown="md(this)" onmouseup="mu(this)" >Geetika Singla, Diane Cook and Aaron Crandall</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="138" onmousedown="md(this)" onmouseup="mu(this)" >Discovering Frequent sets of Actions in Intelligent Environments</span></td>
+<td><span class="coloringspan" id="139" onmousedown="md(this)" onmouseup="mu(this)" >Asier Aztiria, Alberto Izaguirre, Rosa Basagoiti, Juan Carlos Augusto and Diane J. Cook</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="140" onmousedown="md(this)" onmouseup="mu(this)" >Location Aware Distributed Agents in Intelligent Environments</span></td>
+<td><span class="coloringspan" id="141" onmousedown="md(this)" onmouseup="mu(this)" >Brian Hoyle</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="142" onmousedown="md(this)" onmouseup="mu(this)" >Integrating Common Sense in Physically Embedded Intelligent Systems</span></td>
+<td><span class="coloringspan" id="143" onmousedown="md(this)" onmouseup="mu(this)" >Marios Daoutis, Silvia Coradeschi and Amy Loutfi</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="144" onmousedown="md(this)" onmouseup="mu(this)" >20.00</span></td>
+<td></td>
+<td></td>
+<td><span class="coloringspan" id="145" onmousedown="md(this)" onmouseup="mu(this)" >Conference Dinner</span></td>
+<td></td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td></td>
+<td><span class="coloringspan" id="146" onmousedown="md(this)" onmouseup="mu(this)" >Nebulous mechanisms (reading)</span></td>
+<td><span class="coloringspan" id="147" onmousedown="md(this)" onmouseup="mu(this)" >Brian David Johnson, Intel Corporation</span></td>
+</tr>
+</tbody>
+</table>
+</p>
+<p>
+<table style="text-align: left; height: 1252px;" border="1" width="743">
+<tbody style="border-top: 1px solid black;">
+<tr>
+<td colspan="5"><b><span class="coloringspan" id="148" onmousedown="md(this)" onmouseup="mu(this)" >DAY 2: JULY 21st</span></b></td>
+</tr>
+<tr>
+<td rowspan="5"><span class="coloringspan" id="149" onmousedown="md(this)" onmouseup="mu(this)" >9.30</span><i><b><br /></b></i></td>
+<td rowspan="5"><span class="coloringspan" id="150" onmousedown="md(this)" onmouseup="mu(this)" >10.30</span><i><b><br /></b></i></td>
+<td rowspan="5"><span class="coloringspan" id="151" onmousedown="md(this)" onmouseup="mu(this)" >Room1</span><br /></td>
+<td><span class="coloringspan" id="152" onmousedown="md(this)" onmouseup="mu(this)" >Awareness systems</span><br /></td>
+<td><span class="coloringspan" id="153" onmousedown="md(this)" onmouseup="mu(this)" >Achilles Kameas, Hellenic Open University and Computer</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="154" onmousedown="md(this)" onmouseup="mu(this)" >Social connectedness: concept and measurement</span><br /></td>
+<td><span class="coloringspan" id="155" onmousedown="md(this)" onmouseup="mu(this)" >Daan van Bel</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="156" onmousedown="md(this)" onmouseup="mu(this)" >Media Services in Ambient Environments</span><br /></td>
+<td><span class="coloringspan" id="157" onmousedown="md(this)" onmouseup="mu(this)" >Bashar Altakrouri and Andreas Schrader</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="158" onmousedown="md(this)" onmouseup="mu(this)" >Awareness for Fostering Serendipitous Interaction in Public Intelligent Environments</span><br /></td>
+<td><span class="coloringspan" id="159" onmousedown="md(this)" onmouseup="mu(this)" >Ilaria Canova Calori</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="160" onmousedown="md(this)" onmouseup="mu(this)" >Raising Awareness of Energy Consumption in Smart Living Environments</span><br /></td>
+<td><span class="coloringspan" id="161" onmousedown="md(this)" onmouseup="mu(this)" >Anton J. Fercher, Martin Hitz and Gerhard Leitner</span><br /></td>
+</tr>
+<tr>
+<td rowspan="5"><span class="coloringspan" id="162" onmousedown="md(this)" onmouseup="mu(this)" >9.30</span></td>
+<td rowspan="5"><span class="coloringspan" id="163" onmousedown="md(this)" onmouseup="mu(this)" >10.30</span></td>
+<td rowspan="5"><span class="coloringspan" id="164" onmousedown="md(this)" onmouseup="mu(this)" >Room2</span></td>
+<td><span class="coloringspan" id="165" onmousedown="md(this)" onmouseup="mu(this)" >Posters &amp; Doctoral colloquium</span><br /></td>
+<td><span class="coloringspan" id="166" onmousedown="md(this)" onmouseup="mu(this)" >George Roussos, London University</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="167" onmousedown="md(this)" onmouseup="mu(this)" >Cipo_09 / music box [hybrid robotic “organism”]</span><br /></td>
+<td><span class="coloringspan" id="168" onmousedown="md(this)" onmouseup="mu(this)" >Kostas Daflos</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="169" onmousedown="md(this)" onmouseup="mu(this)" >Internalizing Unknown Objects by Means of Perception and Communication in Multi-Agent Systems</span><br /></td>
+<td><span class="coloringspan" id="170" onmousedown="md(this)" onmouseup="mu(this)" >Nikolaos Dipsis</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="171" onmousedown="md(this)" onmouseup="mu(this)" >The Legal Status of Profiles</span><br /></td>
+<td><span class="coloringspan" id="172" onmousedown="md(this)" onmouseup="mu(this)" >Niels van Dijk</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="173" onmousedown="md(this)" onmouseup="mu(this)" >Real time adaptivity from Cybernetics to Intelligent Environments: Rewriting the History of Ubiquitous Computing</span><br /></td>
+<td><span class="coloringspan" id="174" onmousedown="md(this)" onmouseup="mu(this)" >Katja de Vries</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="175" onmousedown="md(this)" onmouseup="mu(this)" >10.30</span></td>
+<td><span class="coloringspan" id="176" onmousedown="md(this)" onmouseup="mu(this)" >10.45</span></td>
+<td></td>
+<td><span class="coloringspan" id="177" onmousedown="md(this)" onmouseup="mu(this)" >Coffe Break</span><br /></td>
+<td><br /></td>
+</tr>
+<tr>
+<td rowspan="6"><span class="coloringspan" id="178" onmousedown="md(this)" onmouseup="mu(this)" >10.45</span></td>
+<td rowspan="6"><span class="coloringspan" id="179" onmousedown="md(this)" onmouseup="mu(this)" >12.45</span></td>
+<td rowspan="6"><span class="coloringspan" id="180" onmousedown="md(this)" onmouseup="mu(this)" >Room1</span></td>
+<td><span class="coloringspan" id="181" onmousedown="md(this)" onmouseup="mu(this)" >Art and design of intelligent hybrid environments</span><br /></td>
+<td><span class="coloringspan" id="182" onmousedown="md(this)" onmouseup="mu(this)" >Dimitris Charitos, University of Athens</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="183" onmousedown="md(this)" onmouseup="mu(this)" >The Art of Mobility: How transdisciplinary artists’ projects are testing the boundaries of mobile media design</span><br /></td>
+<td><span class="coloringspan" id="184" onmousedown="md(this)" onmouseup="mu(this)" >Martin Rieser</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="185" onmousedown="md(this)" onmouseup="mu(this)" >Inhabiting Hybrids: On the Nature of Home Environments</span><br /></td>
+<td><span class="coloringspan" id="186" onmousedown="md(this)" onmouseup="mu(this)" >Ralf Hennig</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="187" onmousedown="md(this)" onmouseup="mu(this)" >Insights into the design of communicative location-based experiences</span><br /></td>
+<td><span class="coloringspan" id="188" onmousedown="md(this)" onmouseup="mu(this)" >Charalampos Rizopoulos and Dimitris Charitos</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="189" onmousedown="md(this)" onmouseup="mu(this)" >Information Places: Defining Settings for Locative Media</span><br /></td>
+<td><span class="coloringspan" id="190" onmousedown="md(this)" onmouseup="mu(this)" >Katharine Willis</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="191" onmousedown="md(this)" onmouseup="mu(this)" >An Application of Swarm Robotics in Architectural Design</span><br /></td>
+<td><span class="coloringspan" id="192" onmousedown="md(this)" onmouseup="mu(this)" >Socrates Yiannoudes</span><br /></td>
+</tr>
+<tr>
+<td rowspan="6"><span class="coloringspan" id="193" onmousedown="md(this)" onmouseup="mu(this)" >10.45</span></td>
+<td rowspan="6"><span class="coloringspan" id="194" onmousedown="md(this)" onmouseup="mu(this)" >12.45</span></td>
+<td rowspan="6"><span class="coloringspan" id="195" onmousedown="md(this)" onmouseup="mu(this)" >Room2</span></td>
+<td><span class="coloringspan" id="196" onmousedown="md(this)" onmouseup="mu(this)" >Pervasive computing</span><br /></td>
+<td><span class="coloringspan" id="197" onmousedown="md(this)" onmouseup="mu(this)" >Fahim Kawsar, Lancaster University</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="198" onmousedown="md(this)" onmouseup="mu(this)" >Plan Recognition in Instrumented Environments</span><br /></td>
+<td><span class="coloringspan" id="199" onmousedown="md(this)" onmouseup="mu(this)" >Michael Schneider</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="200" onmousedown="md(this)" onmouseup="mu(this)" >Synthesizing Datasets for Pervasive Spaces</span><br /></td>
+<td><span class="coloringspan" id="201" onmousedown="md(this)" onmouseup="mu(this)" >Andres Mendez-Vazquez, Sumi Helal and Diane Cook</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="202" onmousedown="md(this)" onmouseup="mu(this)" >Universal Device Access with FreeMote</span><br /></td>
+<td><span class="coloringspan" id="203" onmousedown="md(this)" onmouseup="mu(this)" >Markus Hipp, Thorsten Mahler, Christan Spika and Michael Weber</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="204" onmousedown="md(this)" onmouseup="mu(this)" >User Modeling from Basic Events in Interactive Systems for Intelligent Environments</span><br /></td>
+<td><span class="coloringspan" id="205" onmousedown="md(this)" onmouseup="mu(this)" >Matthias Bezold</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="206" onmousedown="md(this)" onmouseup="mu(this)" >u-Photo Mobile: Interacting with Smart Environments via Clickable Photos on Mobile Phones</span><br /></td>
+<td><span class="coloringspan" id="207" onmousedown="md(this)" onmouseup="mu(this)" >Soko Aoki, Masaki Ito, Junichi Yura, Jin Nakazawa, Kazunori Takashio and Hideyuki Tokuda</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="208" onmousedown="md(this)" onmouseup="mu(this)" >12.45</span></td>
+<td><span class="coloringspan" id="209" onmousedown="md(this)" onmouseup="mu(this)" >14.00</span></td>
+<td></td>
+<td><span class="coloringspan" id="210" onmousedown="md(this)" onmouseup="mu(this)" >Lunch</span><br /></td>
+<td><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="211" onmousedown="md(this)" onmouseup="mu(this)" >14.00</span></td>
+<td><span class="coloringspan" id="212" onmousedown="md(this)" onmouseup="mu(this)" >15.00</span></td>
+<td></td>
+<td><span class="coloringspan" id="213" onmousedown="md(this)" onmouseup="mu(this)" >Wireless sensor networks: the ambient intelligence that will connect the next billion nodes to the Internet</span><br /></td>
+<td><span class="coloringspan" id="214" onmousedown="md(this)" onmouseup="mu(this)" >Carles Montenegro, Universitat Politècnica de Barcelona</span><br /></td>
+</tr>
+<tr>
+<td rowspan="4"><span class="coloringspan" id="215" onmousedown="md(this)" onmouseup="mu(this)" >15.00</span></td>
+<td rowspan="4"><span class="coloringspan" id="216" onmousedown="md(this)" onmouseup="mu(this)" >16.30</span></td>
+<td rowspan="4"><span class="coloringspan" id="217" onmousedown="md(this)" onmouseup="mu(this)" >Room1</span></td>
+<td><span class="coloringspan" id="218" onmousedown="md(this)" onmouseup="mu(this)" >Digital lifestyles</span><br /></td>
+<td><span class="coloringspan" id="219" onmousedown="md(this)" onmouseup="mu(this)" >Victor Callaghan, Essex University</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="220" onmousedown="md(this)" onmouseup="mu(this)" >Emotion-aware intelligent environments: A user perspective</span></td>
+<td><span class="coloringspan" id="221" onmousedown="md(this)" onmouseup="mu(this)" >Iraitz Montalban, Ainara Garzo and Enrique Leon</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="222" onmousedown="md(this)" onmouseup="mu(this)" >Exploring Adjustable Autonomy and Addressing User Concerns in Intelligent Environments</span><br /></td>
+<td><span class="coloringspan" id="223" onmousedown="md(this)" onmouseup="mu(this)" >Matthew Ball, Vic Callaghan, Michael Gardner and Dirk Trossen</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="224" onmousedown="md(this)" onmouseup="mu(this)" >Telco@home: a seamless communication project with a user perspective</span><br /></td>
+<td><span class="coloringspan" id="225" onmousedown="md(this)" onmouseup="mu(this)" >Pino Castrogiovanni, Elena Guercio, Alessandro Marcengo, Giovanni Martini and Amon Rapp</span><br /></td>
+</tr>
+<tr>
+<td rowspan="5"><span class="coloringspan" id="226" onmousedown="md(this)" onmouseup="mu(this)" >15.00</span></td>
+<td rowspan="5"><span class="coloringspan" id="227" onmousedown="md(this)" onmouseup="mu(this)" >16.30</span></td>
+<td rowspan="5"><span class="coloringspan" id="228" onmousedown="md(this)" onmouseup="mu(this)" >Room2</span></td>
+<td><span class="coloringspan" id="229" onmousedown="md(this)" onmouseup="mu(this)" >Network intelligence</span><br /></td>
+<td><span class="coloringspan" id="230" onmousedown="md(this)" onmouseup="mu(this)" >Antionio Barba, Technical University of Catalonia</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="231" onmousedown="md(this)" onmouseup="mu(this)" >Perceptual Evaluation of Radio Signal Quality Degradation</span><br /></td>
+<td><span class="coloringspan" id="232" onmousedown="md(this)" onmouseup="mu(this)" >Sergey Zablotskiy and Thomas Müller</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="233" onmousedown="md(this)" onmouseup="mu(this)" >Localized In-network Detection and Tracking of Phenomena Clouds using Wireless Sensor Networks</span><br /></td>
+<td><span class="coloringspan" id="234" onmousedown="md(this)" onmouseup="mu(this)" >Raja Bose and Sumi Helal</span></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="235" onmousedown="md(this)" onmouseup="mu(this)" >Echo State Network for Occupancy Prediction and Pattern Mining in Intelligent Environments</span><br /></td>
+<td><span class="coloringspan" id="236" onmousedown="md(this)" onmouseup="mu(this)" >Sawsan Mahmoud, Ahmad Lotfi, Sherkat Nasser, Caroline Langensiepen and Taha Osman</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="237" onmousedown="md(this)" onmouseup="mu(this)" >Using Purchase History to Predict Adoption of Mobile Computing</span><br /></td>
+<td><span class="coloringspan" id="238" onmousedown="md(this)" onmouseup="mu(this)" >Derek Stanford</span><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="239" onmousedown="md(this)" onmouseup="mu(this)" >16.30</span></td>
+<td><span class="coloringspan" id="240" onmousedown="md(this)" onmouseup="mu(this)" >16.45</span></td>
+<td></td>
+<td><span class="coloringspan" id="241" onmousedown="md(this)" onmouseup="mu(this)" >Coffe Break</span><br /></td>
+<td><br /></td>
+</tr>
+<tr>
+<td><span class="coloringspan" id="242" onmousedown="md(this)" onmouseup="mu(this)" >17.00</span></td>
+<td></td>
+<td></td>
+<td><span class="coloringspan" id="243" onmousedown="md(this)" onmouseup="mu(this)" >Conference Closing</span><br /></td>
+<td><br /></td>
+</tr>
+</tbody>
+</table>
+</p><table id="attachments" class="sticky-enabled">
+ <thead><tr><th><span class="coloringspan" id="244" onmousedown="md(this)" onmouseup="mu(this)" >Attachment</span></th><th><span class="coloringspan" id="245" onmousedown="md(this)" onmouseup="mu(this)" >Size</span></th> </tr></thead>
+<tbody>
+ <tr class="odd"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://intelligentenvironments.org/sites/default/files/IE09-Program-D1.pdf"><span class="coloringspan" id="246" onmousedown="md(this)" onmouseup="mu(this)" >IE09-Program-D1.pdf</span></span></td><td><span class="coloringspan" id="247" onmousedown="md(this)" onmouseup="mu(this)" >225.39 KB</span></td> </tr>
+ <tr class="even"><td><span onclick="return false" style="text-decoration:underline; color:blue" href="http://intelligentenvironments.org/sites/default/files/IE09-Program-D2.pdf"><span class="coloringspan" id="248" onmousedown="md(this)" onmouseup="mu(this)" >IE09-Program-D2.pdf</span></span></td><td><span class="coloringspan" id="249" onmousedown="md(this)" onmouseup="mu(this)" >224.92 KB</span>

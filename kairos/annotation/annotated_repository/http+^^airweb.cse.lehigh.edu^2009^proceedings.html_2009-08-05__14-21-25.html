@@ -1,0 +1,684 @@
+﻿<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="/Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^airweb.cse.lehigh.edu^2009^proceedings.html_2009-08-05__14-21-25.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath( savefile );
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for /Users/myd/thesis/project/nutch/parsePaperMetadata/annotation/annotated_repository/http+^^airweb.cse.lehigh.edu^2009^proceedings.html_2009-08-05__14-21-25.yaml created on Wed Aug 05 17:31:01 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+	<title>Proceedings - Adversarial Information Retrieval on the Web (AIRWeb'09)</title>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+	<link rel="stylesheet" type="text/css" href="style.css" />
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)"><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+
+<div id="wrapper-menu-top">
+<div id="menu-top">
+ <div class="location"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >April 21, 2009 &mdash; Madrid, Spain.</span></div>
+	<span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >﻿</span><ul>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2009/" title="Home"><span><span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="archive.html" title="Archive"><span><span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >Archive</span></span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings.html" title="Proceedings"><span><span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></span></span></li>
+	<li><span onclick="return false" style="text-decoration:underline; color:blue" href="contact.html" title="Contact"><span><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >Contact</span></span></span></li>
+</ul>
+</div><!--menu-top-->
+</div><!--wrapper-menu-top-->
+
+<div id="wrapper-header">
+<div id="header">
+<div id="wrapper-header2">
+<div id="wrapper-header3">
+	<h1><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >AIRWeb 2009:</span><br /><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >Fifth International Workshop on Adversarial Information Retrieval on the Web</span></h1>
+</div>
+</div>
+</div>
+</div>
+
+<div id="wrapper-content">
+<div id="wrapper-menu-page">
+	<div id="menu-page">
+	<span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >﻿</span><h3><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >AIRWeb'09</span></h3>
+	<ul>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="index.html" title="Home"><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >Home</span></span></li>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="archive.html" title="Archive"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Archive</span></span></li>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings.html" title="Proceedings"><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></span></li>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="contact.html" title="Contact"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Contact</span></span></li>
+	</ul>
+	
+	<h3><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >Past Workshops</span></h3>
+	<ul>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2008/"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >AIRWeb'08</span><br/><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >Beijing, China</span></span></li>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2007/"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >AIRWeb'07</span><br/><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >Banff, Canada</span></span></li>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2006/"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >AIRWeb'06</span><br/><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >Seattle, USA</span></span></li>
+		<li><span onclick="return false" style="text-decoration:underline; color:blue" href="/2005/"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >AIRWeb'05</span><br/><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >Chiba, Japan</span></span></li>
+	</ul>
+	<p class="sponsor"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >Organized with:</span><br/><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www2009.org/"><img onmousedown="imd(this)" border="0" src="images/www2009madrid_v1.jpg" alt="WWW2009" /></span></p>
+	
+</div><!--menu-page-->
+</div>
+<div id="content">
+	
+<h1><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings</span></h1>
+
+<p><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Proceedings of the 5th international workshop on Adversarial Information Retrieval on the Web, Madrid, Spain, April 21, 2009.  
+The</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="http://portal.acm.org/toc.cfm?id=1531914"><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >workshop proceedings</span></span> <span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >were published as a volume in the ACM International Conference Proceedings with ISBN</span> 
+<span onclick="return false" style="text-decoration:underline; color:blue" href="http://portal.acm.org/toc.cfm?id=1531914"><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >978-1-60558-438-6</span></span><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >.</span></p>
+
+<h2><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >Invited Talks</span></h2>
+
+<p class="paper">
+<span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >The Potential for Research and Development in Adversarial Information Retrieval &mdash;</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="presc" href="slides/Davison-AIRWeb2009-Keynote.pdf"><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><br />
+<span class="authors"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >Brian D. Davison</span> </span>
+</p>
+
+<p class="paper">
+<span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >Web Spam Challenges: Looking Backward and Forward &mdash;</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="presc" href="slides/castillo-challenges.pdf"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><br />
+<span class="authors"><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >Carlos Castillo</span></span>
+</p>
+
+<h2><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Temporal Analysis</span></h2>
+
+<p class="paper">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="papers/p1-dai.pdf" class="pdf"><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >Looking into the Past to Better Classify Web Spam</span></span> <span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >&mdash;</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="presc" href="slides/Dai-LookingintothePasttoBetterClassifyWeb.pdf"><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><br />
+<span class="authors"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Na Dai, Brian D. Davison and Xiaoguang Qi</span></span>
+</p>
+<div class="abstract">
+<span onclick="return false" style="text-decoration:underline; color:blue" class="doi" href="http://doi.acm.org/10.1145/1531914.1531916"><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >Pages 1-8, http://doi.acm.org/10.1145/1531914.1531916</span></span>
+<span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Web spamming techniques aim to achieve undeserved rankings in
+search results. Research has been widely conducted on identifying
+such spam and neutralizing its influence. However, existing spam
+detection work only considers current information. We argue that
+historical web page information may also be important in spam
+classification. In this paper, we use content features from historical
+versions of web pages to improve spam classification. We use
+supervised learning techniques to combine classifiers based on
+current page content with classifiers based on temporal features.
+Experiments on the WEBSPAM-UK2007 dataset show that our
+approach improves spam classification F-measure performance by
+30% compared to a baseline classifier which only considers current
+page content.</span></div>
+<p class="paper">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="papers/p9-chung.pdf" class="pdf"><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >A Study of Link Farm Distribution and Evolution Using a Time Series of Web Snapshots</span></span> <span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >&mdash;</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="presc" href="slides/airweb2009_chung.pdf"><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><br />
+<span class="authors"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >Young-joo Chung, Masashi Toyoda and Masaru Kitsuregawa</span></span>
+</p>
+<div class="abstract">
+<span onclick="return false" style="text-decoration:underline; color:blue" class="doi" href="http://doi.acm.org/10.1145/1531914.1531917"><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >Pages 9-16, http://doi.acm.org/10.1145/1531914.1531917</span></span>
+<span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >In this paper, we study the overall link-based spam structure
+and its evolution which would be helpful for the development
+of robust analysis tools and research for Web spamming as a
+social activity in the cyber space. First, we use strongly connected
+component (SCC) decomposition to separate many
+link farms from the largest SCC, so called the core. We
+show that denser link farms in the core can be extracted by
+node filtering and recursive application of SCC decomposition
+to the core. Surprisingly, we can find new large link
+farms during each iteration and this trend continues until at
+least 10 iterations. In addition, we measure the spamicity
+of such link farms. Next, the evolution of link farms is examined
+over two years. Results show that almost all large
+link farms do not grow anymore while some of them shrink,
+and many large link farms are created in one year.</span>
+</div>
+<p class="paper">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="papers/p17-erdelyi.pdf" class="pdf"><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >Web Spam Filtering in Internet Archives</span></span><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >&mdash;</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="presc" href="slides/erdelyi-timeline-spam-pres.pdf"><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><br />
+<span class="authors"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Mikl&oacute;s Erd&eacute;lyi, Andr&aacute;s A. Bencz&uacute;r, Julien Masanes and D&aacute;vid Sikl&oacute;si</span></span>
+</p>
+<div class="abstract">
+<span onclick="return false" style="text-decoration:underline; color:blue" class="doi" href="http://doi.acm.org/10.1145/1531914.1531918"><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >Pages 17-20, http://doi.acm.org/10.1145/1531914.1531918</span></span>
+<span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >While Web spam is targeted for the high commercial value of topranked
+search-engine results, Web archives observe quality deterioration
+and resource waste as a side effect. So far Web spam filtering
+technologies are rarely used by Web archivists but planned in the
+future as indicated in a survey with responses from more than 20
+institutions worldwide. These archives typically operate on a modest
+level of budget that prohibits the operation of standalone Web
+spam filtering but collaborative efforts could lead to a high quality
+solution for them.
+In this paper we illustrate spam filtering needs, opportunities and
+blockers for Internet archives via analyzing several crawl snapshots
+and the difficulty of migrating filter models across different
+crawls via the example of the 13 .uk snapshots performed
+by UbiCrawler that include WEBSPAM-UK2006 and WEBSPAM-UK2007.</span>
+</div>
+
+
+
+
+<h2><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >Content Analysis</span></h2>
+
+<p class="paper">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="papers/p21-martinez-romo.pdf" class="pdf"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Web Spam Identification Through Language Model Analysis</span></span><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >&mdash;</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="presc" href="slides/juaner09airweb-pres.pdf"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><br />
+<span class="authors"><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >Juan Martinez-Romo and Lourdes Araujo</span></span>
+</p>
+<div class="abstract">
+<span onclick="return false" style="text-decoration:underline; color:blue" class="doi" href="http://doi.acm.org/10.1145/1531914.1531920"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >Pages 21-28, http://doi.acm.org/10.1145/1531914.1531920</span></span>
+<span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >This paper applies a language model approach to different
+sources of information extracted from a Web page, in order
+to provide high quality indicators in the detection of
+Web Spam. Two pages linked by a hyperlink should be
+topically related, even though this were a weak contextual
+relation. For this reason we have analysed different sources
+of information of a Web page that belongs to the context of
+a link and we have applied Kullback-Leibler divergence on
+them for characterising the relationship between two linked
+pages. Moreover, we combine some of these sources of information
+in order to obtain richer language models. Given
+the different nature of internal and external links, in our
+study we also distinguished these types of links getting a
+significant improvement in classification tasks. The result
+is a system that improves the detection of Web Spam on
+two large and public datasets such as WEBSPAM-UK2006 and
+WEBSPAM-UK2007.</span>
+</div>
+<p class="paper">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="papers/p29-katayama.pdf"  class="pdf"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >An Empirical Study on Selective Sampling in Active Learning for Splog Detection</span></span> <span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >&mdash;</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="presc" href="slides/Katayam-active_learning_blog_spam.pdf"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><br />
+<span class="authors"><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >Taichi Katayama, Takehito Utsuro, Yuuki Sato, Takayuki Yoshinaka, Yasuhide Kawada and Tomohiro Fukuhara</span></span>
+</p>
+<div class="abstract">
+<span onclick="return false" style="text-decoration:underline; color:blue" class="doi" href="http://doi.acm.org/10.1145/1531914.1531921"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Pages 29-36, http://doi.acm.org/10.1145/1531914.1531921</span></span>
+<span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >This paper studies how to reduce the amount of human supervision
+for identifying splogs / authentic blogs in the context
+of continuously updating splog data sets year by year.
+Following the previous works on active learning, against the
+task of splog / authentic blog detection, this paper empirically
+examines several strategies for selective sampling in
+active learning by Support Vector Machines (SVMs). As a
+confidence measure of SVMs learning, we employ the distance
+from the separating hyperplane to each test instance,
+which have been well studied in active learning for text classification.
+Unlike those results of applying active learning
+to text classification tasks, in the task of splog / authentic
+blog detection of this paper, it is not the case that adding
+least confident samples performs best.</span>
+</div>
+<p class="paper">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="papers/p37-biro.pdf"  class="pdf"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >Linked Latent Dirichlet Allocation in Web Spam Filtering</span></span> <span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >&mdash;</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="presc" href="slides/Siklosi-LinkedLDA.pdf"><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><br />
+<span class="authors"><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >Istv&aacute;n B&iacute;r&oacute;, D&aacute;vid Sikl&oacute;si, J&aacute;cint Szab&oacute; and Andr&aacute;s Bencz&uacute;r</span></span>
+</p>
+<div class="abstract">
+<span onclick="return false" style="text-decoration:underline; color:blue" class="doi" href="http://doi.acm.org/10.1145/1531914.1531922"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Pages 37-40, http://doi.acm.org/10.1145/1531914.1531922</span></span>
+<span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >Latent Dirichlet allocation (LDA) (Blei, Ng, Jordan 2003)
+is a fully generative statistical language model on the content
+and topics of a corpus of documents. In this paper
+we apply an extension of LDA for web spam classification.
+Our linked LDA technique takes also linkage into account:
+topics are propagated along links in such a way that the
+linked document directly influences the words in the linking
+document. The inferred LDA model can be applied for
+classification as dimensionality reduction similarly to latent
+semantic indexing. We test linked LDA on the WEBSPAM-UK2007
+corpus. By using BayesNet classifier, in terms of
+the AUC of classification, we achieve 3% improvement over
+plain LDA with BayesNet, and 8% over the public link features
+with C4.5. The addition of this method to a log-odds
+based combination of strong link and content baseline classifiers
+results in a 3% improvement in AUC. Our method
+even slightly improves over the best Web Spam Challenge
+2008 result.</span>
+</div>
+
+
+<h2><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Social Spam</span></h2>
+
+<p class="paper">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="papers/p41-markines.pdf"  class="pdf"><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >Social Spam Detection</span></span> <span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >&mdash;</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="slides/Markines-social_spam.pdf" class="presc"><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><br />
+<span class="authors"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Benjamin Markines, Ciro Cattuto and Filippo Menczer</span></span>
+</p>
+<div class="abstract">
+<span onclick="return false" style="text-decoration:underline; color:blue" class="doi" href="http://doi.acm.org/10.1145/1531914.1531924"><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >Pages 41-48, http://doi.acm.org/10.1145/1531914.1531924</span></span>
+<span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >The popularity of social bookmarking sites has made them prime
+targets for spammers. Many of these systems require an administrator’s
+time and energy to manually filter or remove spam. Here
+we discuss the motivations of social spam, and present a study
+of automatic detection of spammers in a social tagging system.
+We identify and analyze six distinct features that address various
+properties of social spam, finding that each of these features provides
+for a helpful signal to discriminate spammers from legitimate
+users. These features are then used in various machine learning
+algorithms for classification, achieving over 98% accuracy in detecting
+social spammers with 2% false positives. These promising
+results provide a new baseline for future efforts on social spam. We
+make our dataset publicly available to the research community.</span>
+</div>
+<p class="paper">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="papers/p49-neubauer.pdf" class="pdf"><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >Tag Spam Creates Large Non-Giant Connected Components</span></span> <span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >&mdash;</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="presc" href="slides/airweb_neubauer.pdf"><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><br />
+<span class="authors"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Nicolas Neubauer, Robert Wetzker and Klaus Obermayer</span></span>
+</p>
+<div class="abstract">
+<span onclick="return false" style="text-decoration:underline; color:blue" class="doi" href="http://doi.acm.org/10.1145/1531914.1531925"><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >Pages 49-52, http://doi.acm.org/10.1145/1531914.1531925</span></span>
+<span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Spammers in social bookmarking systems try to mimick
+bookmarking behaviour of real users to gain the attention
+of other users or search engines. Several methods have been
+proposed for the detection of such spam, including domain specific 
+features (like URL terms) or similarity of users to
+previously identified spammers. However, as shown in our
+previous work, it is possible to identify a large fraction of
+spam users based on purely structural features. The hypergraph
+connecting documents, users, and tags can be decomposed
+into connected components, and any large, but non-giant
+components turned out to be almost entirely inhabited
+by spam users in the examined dataset. Here, we test
+to what degree the decomposition of the complete hypergraph
+is really necessary, examining the component structure
+of the induced user/document and user/tag graphs.
+While the user/tag graph's connectivity does not help in
+classifying spammers, the user/document graph's connectivity
+is already highly informative. It can however be augmented
+with connectivity information from the hypergraph.
+In our view, spam detection based on structural features, like
+the one proposed here, requires complex adaptation strategies
+from spammers and may complement other, more traditional
+detection approaches.</span>
+</div>
+
+
+
+
+<h2><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >Spam Research Collections</span></h2>
+
+<p class="paper">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="papers/p53-jones.pdf"  class="pdf"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Nullification Test Collections for Web Spam and SEO</span></span> 
+<span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >&mdash;</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="presc" href="slides/Jones-Nullification_test_collections_for_web_spam_an.pdf"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><br />
+<span class="authors"><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >Timothy Jones, David Hawking, Ramesh Sankaranarayana and Nick Craswell</span></span>
+</p>
+<div class="abstract">
+<span onclick="return false" style="text-decoration:underline; color:blue" class="doi" href="http://doi.acm.org/10.1145/1531914.1531927"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Pages 53-60, http://doi.acm.org/10.1145/1531914.1531927</span></span>
+<span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >Research in the area of adversarial information retrieval has
+been facilitated by the availability of the UK-2006/UK-2007
+collections, comprising crawl data, link graph, and spam labels.
+However, research into nullifying the negative effect
+of spam or excessive search engine optimisation (SEO) on
+the ranking of non-spam pages is not well supported by
+these resources. Nor is the study of cloaking techniques
+or of click spam. Finally, the domain-restricted nature of a
+.uk crawl means that only parts of link-farm icebergs may
+be visible in these crawls. We introduce the term nullification 
+which we define as "preventing problem pages from
+negatively affecting search results". We show some important
+differences between properties of current .uk-restricted
+crawls and those previously reported for the Web as a whole.
+We identify a need for an adversarial IR collection which is
+not domain-restricted and which is supported by a set of
+appropriate query sets and (optimistically) user-behaviour
+data. The billion-page unrestricted crawl being conducted
+by CMU (web09-bst) and which will be used in the 2009
+TREC Web Track is assessed as a possible basis for a new
+AIR test collection. We discuss the pros and cons of its scale,
+and the feasibility of adding resources such as query lists to
+enhance the utility of the collection for AIR research.</span>
+</div>
+<p class="paper">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="papers/p61-benczur.pdf"  class="pdf"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >Web Spam Challenge Proposal for Filtering in Archives</span></span><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >&mdash;</span> <span onclick="return false" style="text-decoration:underline; color:blue" class="presc" href="slides/erdelyi-challenge-position-pres.pdf"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >slides</span></span><br />
+<span class="authors"><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >Andr&aacute;s A. Bencz&uacute;r, Mikl&oacute;s Erd&eacute;lyi, Julien Masanes and D&aacute;vid Sikl&oacute;si</span></span>
+</p>
+<div class="abstract">
+<span onclick="return false" style="text-decoration:underline; color:blue" class="doi" href="http://doi.acm.org/10.1145/1531914.1531928"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Pages 61-62, http://doi.acm.org/10.1145/1531914.1531928</span></span>
+<span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >In this paper we propose new tasks for a possible future Web Spam
+Challenge motivated by the needs of the archival community. The
+Web archival community consists of several relatively small institutions
+that operate independently and possibly over different top
+level domains (TLDs). Each of them may have a large set of historic
+crawls. Efficient filtering would hence require (1) enhanced
+use of the time series of domain snapshots and (2) collaboration by
+transferring models across different TLDs. Corresponding Challenge
+tasks could hence include the distribution of crawl snapshot
+data for feature generation as well as classification of unlabeled
+new crawls of the same or even different TLDs.</span>
+</div>
+
+
+
+</div>
+</div>
+
+<div id="wrapper-footer">
+<div id="footer">
+<span onclick="return false" style="text-decoration:underline; color:blue" href="design.html"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Web Design Credits</span></span> <span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >|</span> <span onclick="return false" style="text-decoration:underline; color:blue" href="contact.html"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Contact Organizers</span>

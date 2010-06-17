@@ -1,0 +1,467 @@
+﻿<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head><!-- BEGIN COLORING -->
+<script type="text/javascript">
+isIE = document.all;
+topDivTag = isIE ? "body" : "html";
+hotObject = "";
+undoObject = "";
+undoImage = "";
+cantSave = false;
+
+var savefile="D:/experiment/session1/6/annotation/annotated_repository/http+^^iis.ipipan.waw.pl^2009^proceedings.html_2009-08-05__14-25-45.yaml";
+var annotationLayer = null;
+var span_start_index; // where the mouse starts
+var span_end_index; // where the mouse ends
+var spanAnnotations = new Array(); // annotations to be saved
+var spans = new Array(); // shortcut variable
+var undo_span_bg = new Array(); // undo bg buffer
+var undo_span_annot = new Array(); // undo annotation buffer
+var undo_span_start_index;
+var undo_span_end_index;
+var backgrounds = new Array(); // original background color
+
+var pivot_tmp = new Array(); // for swapping
+
+var image_start_index; // where the mouse starts
+var image_end_index; // where the mouse ends
+// assumes image borders are uniform on all four sides
+var hot_image_border = ""; // for current hot image
+var hot_image_border_color = "";
+var hot_image_border_style = "";
+var undo_image_annot = new Array(); // undo annotation buffer
+var undo_image_borders = new Array(); // undo border width buffer
+var undo_image_border_style = new Array(); // undo border style
+var undo_image_border_color = new Array(); // undo border color
+var imageAnnotations = new Array(); // annotations to be saved
+
+function tbMouseDown(e){
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  hotDiv=isIE ? event.srcElement : e.target;
+  while (hotDiv != null && hotDiv.id!="titleBar" && hotDiv.tagName != topDivTag){
+    hotDiv=isIE ? hotDiv.parentElement : hotDiv.parentNode;
+  }
+  if (hotDiv.id=="titleBar"){
+    offsetx=isIE ? event.clientX : e.clientX;
+    offsety=isIE ? event.clientY : e.clientY;
+    nowX=parseInt(annotationLayer.style.left);
+    nowY=parseInt(annotationLayer.style.top);
+    if (isNaN(nowX)) { nowX = 0; }
+    if (isNaN(nowY)) { nowY = 0; }
+    ddEnabled=true;
+    document.onmousemove=dd;
+    document.onmouseup=Function("ddEnabled=false");
+  }
+}
+
+function dd(e){
+  if (!ddEnabled) return;
+  var left=isIE ? "" + (nowX+event.clientX-offsetx) + "px" : "" + (nowX+e.clientX-offsetx) + "px";
+  var top = isIE ? "" + (nowY+event.clientY-offsety) + "px" : "" + (nowY+e.clientY-offsety) + "px";
+  annotationLayer.style.left = left;
+  annotationLayer.style.top = top;
+  return false;
+}
+
+function cancel_annotation(){
+  if (hotObject == "span") {
+    for (i = span_start_index; i <= span_end_index; i++) {
+      spans[i].style.backgroundColor = backgrounds[i];
+      hotObject = "null"
+    }
+  } else if (hotObject == "image") {
+    image = document.images[image_end_index];
+    image.border = hot_image_border;
+    image.style.borderColor = hot_image_border_color;
+    image.style.borderStyle = hot_image_border_style;
+    hotObject = "null"
+    image_end_index = null;
+  }
+  hide_annotation_pane();
+}
+
+function hide_annotation_pane(){
+  span_start_index = null;
+  annotationLayer.style.visibility="hidden";
+}
+
+function show_annotation_pane(){
+  annotationLayer.style.visibility="visible";
+}
+
+function on_load() {
+  annotationLayer=isIE ? document.all.theLayer : document.getElementById("theLayer");
+  var els = document.getElementsByTagName("span");
+  var elsLen = els.length;
+  var pattern = new RegExp("(^|\s)coloringspan(\s|$)");
+  for (i = 0, j = 0; i < elsLen; i++) {
+    if (pattern.test(els[i].className) ) {
+      j = els[i].id;
+      spans[j] = els[i];
+      backgrounds[j] = els[i].style.background;
+      spanAnnotations[j] = "na";
+    }
+  }
+  if (document.images) {
+    // populate undo data - simpler than spans as only one at a time
+    for (i = 0; i < document.images.length; i++) {
+      var image = document.images[i];
+      imageAnnotations[i] = "na";
+      undo_image_borders[i] = image.border;
+      undo_image_border_style[i] = image.style.borderStyle;
+      undo_image_border_color[i] = image.style.borderColor;
+    }
+  }
+
+  refresh();
+}
+
+function on_key_up(e) {
+  if (annotationLayer == null) {
+    ;
+  } else if (annotationLayer.style.visibility == "visible") {
+    annot_pane_key_press(e); // pane visible
+  } else {
+    general_key_press(e) // pane invisible
+  } 
+}
+
+function annot_pane_key_press(e) {
+  if (e.keyCode >= 48 && e.keyCode <= 57) {
+    if (e.keyCode == 49) {
+      done("title","purple")
+    } else if (e.keyCode == 50) {
+      done("author","orange")
+    } else if (e.keyCode == 51) {
+      done("authorWithAffiliation","blue")
+    } else if (e.keyCode == 52) {
+      done("affiliation","green")
+  }
+  } else if (e.keyCode == 88) { // "x" close
+    cancel_annotation();
+  } else if (e.keyCode == 82) { // "r" refresh
+    refresh();
+    alert("annotations all refreshed!");
+  } else if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+    cancel_annotation();
+  }
+}
+
+function general_key_press(e) {
+  if (e.keyCode == 85) { // "u" undo
+    undo();
+    save_annotations();
+  } else if (e.keyCode == 82) { // "r" refresh
+    alert("annotations all refreshed!");
+    refresh();
+  }
+}
+
+function lookupColor(annotation) {
+  if (annotation == 'title') {
+      return ('purple');
+    } else if (annotation == 'author') {
+      return ('orange');
+    } else if (annotation == 'authorWithAffiliation') {
+      return ('blue');
+    } else if (annotation == 'affiliation') {
+      return ('green');
+  }
+}
+
+function refresh() {
+  for (i = 0; i <= backgrounds.length; i++) {
+    if (spans[i] == null || spans[i] == 'na') { ; }
+    else { spans[i].style.backgroundColor = backgrounds[i]; }
+  }
+  for (i = 0; i <= document.images.length; i++) {
+    if (imageAnnotations[i] == null || imageAnnotations[i] == 'na') { ; }
+    else { 
+      var bg_color = lookupColor(imageAnnotations[i]);
+      var image = document.images[i];
+      image.style.borderColor = bg_color;
+      image.style.borderStyle = 'solid';
+      image.border = 5;
+    }
+  }
+}
+
+function undo() {
+  if (undoObject == "span") {
+    for (i = undo_span_start_index; i <= undo_span_end_index; i++) {
+      pivot_tmp[i] = backgrounds[i];
+      backgrounds[i] = undo_span_bg[i];
+      undo_span_bg[i] = pivot_tmp[i];
+
+      pivot_tmp[i] = spanAnnotations[i];
+      spanAnnotations[i] = undo_span_annot[i];
+      undo_span_annot[i] = pivot_tmp[i];
+
+      spans[i].style.backgroundColor = backgrounds[i];
+    }
+  } else if (undoObject == "image") {
+    var image = document.images[undoImage];
+    var tmp = imageAnnotations[i];
+    imageAnnotations[i] = undo_image_annot[i];
+    undo_image_annot[i] = tmp;
+
+    tmp = image.border;
+    image.border = undo_image_borders[undoImage];
+    undo_image_borders[undoImage] = tmp;
+
+    tmp = image.style.borderColor;
+    image.style.borderColor = undo_image_border_color[undoImage];
+    undo_image_border_color[undoImage] = tmp;
+
+    tmp = image.style.borderStyle;
+    image.style.borderStyle = undo_image_border_style[undoImage];
+    undo_image_border_style[undoImage] = tmp;
+  }
+}
+
+function save_annotations() {
+  try {
+    
+   savefile = savefile.replace(new RegExp(/\//g), "\\\\");
+
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+    var file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsILocalFile);
+    file.initWithPath(savefile);
+    if ( file.exists() == false ) { 
+      try {
+        file.create( Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 420 ); 
+      } catch (e) {
+        alert("Permission to save file was denied.");
+      }
+    }
+    var outputStream = Components.classes["@mozilla.org/network/file-output-stream;1"].createInstance( Components.interfaces.nsIFileOutputStream );
+    outputStream.init( file, 0x04 | 0x08 | 0x20, 420, 0 );
+    var buf = "# Coloring annotation file for D:/experiment/session1/6/annotation/annotated_repository/http+^^iis.ipipan.waw.pl^2009^proceedings.html_2009-08-05__14-25-45.yaml created on Thu Aug 13 13:48:14 +0800 2009 \n# Coloring version 1.6\n"
+    outputStream.write(buf, buf.length);
+    var spansBuf = spanAnnotations.join("\n  - ");
+    var imagesBuf = imageAnnotations.join("\n  - ");
+    var output = "";
+    if (spansBuf != "") { output += "Spans:\n  - " + spansBuf + "\n"; }
+    if (imagesBuf != "") { output += "Images:\n  - " + imagesBuf + "\n"; }
+    outputStream.write(output, output.length);
+    outputStream.close();
+  } catch (e) {
+    if (!cantSave) {
+      alert("Saving annotations will not work. The save path was specified incorrectly.  Proceed at your own risk.");
+    }
+    cantSave = true
+  }
+}
+
+function md(obj) { // mouse_down (for spans)
+  span_start_index = parseInt(obj.id);
+}
+
+function mu(obj) { // mouse up (for spans)
+  // save stuff out
+  hotObject = "span";
+  span_end_index = parseInt(obj.id);
+  if (span_end_index < span_start_index) {
+    span_end_index = span_start_index;
+    span_start_index = obj.id
+  }
+  for (i = span_start_index; i <= span_end_index; i++) {
+    spans[i].style.backgroundColor = "cyan";
+  }
+  show_annotation_pane();
+}
+
+function imd(obj) { // mouse down (for images)
+  var image = null
+  if (document.images) { 
+    if (document.images[image_end_index] == obj) { 
+      // already highlighted, turn off 
+      cancel_annotation();
+    } else {
+      // to be annotated
+      hotObject = "image";
+      for (i=0; i < document.images.length; i++) {
+        if (document.images[i] == obj) {
+          image_end_index = i;
+          image = document.images[i];
+          break;
+        }
+      } 
+      hot_image_border = image.border;
+      hot_image_border_color = image.style.borderColor;
+      hot_image_border_style = image.style.borderStyle;
+      image.border = 5;
+      image.style.borderColor = 'cyan';
+      image.style.borderStyle = 'dotted';
+      show_annotation_pane();
+    }
+  }
+}
+
+function imu(obj) { ; }
+function imv(obj) { ; } 
+
+function done(annotation,bg_color) {
+  if (hotObject == "span") { // annotate span
+    for (i = span_start_index; i <= span_end_index; i++) {
+      undo_span_bg[i] = backgrounds[i];
+      undo_span_annot[i] = spanAnnotations[i];
+      spanAnnotations[i] = annotation;
+      backgrounds[i] = bg_color;
+      spans[i].style.backgroundColor = bg_color;
+    }
+    undo_span_start_index = span_start_index;
+    undo_span_end_index = span_end_index;
+    undoObject = "span";
+  } else if (hotObject == "image") { // annotate image
+    var i = image_end_index;
+    var image = document.images[i];
+    undo_image_borders[i] = hot_image_border;
+    undo_image_border_color[i] = hot_image_border_color;
+    undo_image_border_style[i] = hot_image_border_style;
+    imageAnnotations[i] = annotation;
+    image.style.borderStyle = 'solid';
+    image.style.borderColor = bg_color;
+    image.border = 2;
+    image_end_index = null;
+    undoObject = "image";
+    undoImage = i;
+  }
+  // reset
+  hide_annotation_pane();
+  save_annotations();
+  hotObject = null;
+}
+</script>
+<!-- END COLORING -->
+
+<title>IIS 2009</title>
+<LINK REL="stylesheet" TYPE="text/css" HREF="../style.css">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+</head>
+
+<body onload="on_load()" onkeyup="on_key_up(event)" BGCOLOR=#FFFFFF><!-- BEGIN COLORING -->
+
+<div id="theLayer" style="position:fixed;width:300;left:100;top:100;visibility:hidden;z-index:1000">
+<table border="0" width="250" bgcolor="#424242" cellspacing="0" cellpadding="5">
+<tr>
+<td width="100%">
+  <table border="0" width="100%" cellspacing="0" cellpadding="0" height="36">
+  <tr>
+  <td id="titleBar" style="cursor:move" width="100%" onmousedown="tbMouseDown(event)" onmouseup="alert('off'); ddEnabled=false">
+<font face="Arial" color="#FFFFFF">Annotate selection as...</font>
+  </td><td valign="top"><font color="#ffffff" size="2" face="arial" style="text-decoration:none">(<a href="#" onClick="cancel_annotation();return false" style="color: white">X</a>)</font>
+  </td></tr>
+  <tr><td width="100%"><font color="#ffffff" face="arial">(u)ndo (r)efresh e(x)it (1-4)colors</font></td></tr>
+  <tr><td width="100%" bgcolor="#FFFFFF" style="padding:4px" colspan="2">
+<span class="palette" onclick="done('title','purple')" style="background-color: purple"> (1) title</span><br/>
+<span class="palette" onclick="done('author','orange')" style="background-color: orange"> (2) author</span><br/>
+<span class="palette" onclick="done('authorWithAffiliation','blue')" style="background-color: blue"> (3) authorWithAffiliation</span><br/>
+<span class="palette" onclick="done('affiliation','green')" style="background-color: green"> (4) affiliation</span><br/>
+</td></tr></table></td></tr></table>
+</div><!-- END COLORING --></span>
+<div align="center">
+<table cellspacing="0" cellpadding="0" border="0" width="651">
+
+<tr>
+<!--
+<td valign="top">
+	<img onmousedown="imd(this)" SRC="images/logo.jpg" WIDTH=149 HEIGHT=66>
+</td>
+-->
+<td valign="top">
+	<img onmousedown="imd(this)" SRC="images/banner.jpg" WIDTH=651 HEIGHT=97>
+</td>
+</tr>
+
+<tr>
+<td height="6">
+	<img onmousedown="imd(this)" SRC="images/bar.jpg" WIDTH=651 HEIGHT=6>
+</td>
+</tr>
+
+<TR>
+<TD align="center">
+<!-- tutaj tekst strony --------------------------------------------------------------------------------------------------------------------------------------- -->
+<TABLE BORDER="0" CELLPADDING="0" CELLSPACING="0" bgcolor="white">
+<TR>
+<TD VALIGN="top" ALIGN="center"> 
+<TABLE WIDTH="651">
+<TR>
+<TD align="left">
+
+<SPAN CLASS="CHAPTER"><span class="coloringspan" id="1" onmousedown="md(this)" onmouseup="mu(this)" >CONFERENCE PROCEEDINGS</span></SPAN> <BR><BR><BR>
+<div align="left">
+<b><span onclick="return false" style="text-decoration:underline; color:blue" href="http://www.exit.pl/iis2.htm" 
+onMouseOver="window.status='The book'; return true" 
+onMouseOut="window.status=' '">
+<span class="coloringspan" id="2" onmousedown="md(this)" onmouseup="mu(this)" >Recent Advances in Intelligent Information Systems</span><br>
+<span class="coloringspan" id="3" onmousedown="md(this)" onmouseup="mu(this)" >M. A. Kłopotek, A. Przepiórkowski, S. T. Wierzchoń, K. Trojanowski (Eds.)</span><br>
+<span class="coloringspan" id="4" onmousedown="md(this)" onmouseup="mu(this)" >776 pages</span><br>
+<span class="coloringspan" id="5" onmousedown="md(this)" onmouseup="mu(this)" >ISBN  978-83-60434-59-8</span>
+</span></b><br>
+</div>
+<BR><BR>
+<ul>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-03.pdf"><span class="coloringspan" id="6" onmousedown="md(this)" onmouseup="mu(this)" >LogicalFormBanks, the Next Generation of Semantically Annotated Corpora: Key Issues in Construction Methodology</span></span></i><span class="coloringspan" id="7" onmousedown="md(this)" onmouseup="mu(this)" >, Ant&oacute;nio Branco</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-04.pdf"><span class="coloringspan" id="8" onmousedown="md(this)" onmouseup="mu(this)" >An Intelligent Internet Shop-Assistant Recognizing a Customer Personality for Improving Man-Machine Interactions</span></span></i><span class="coloringspan" id="9" onmousedown="md(this)" onmouseup="mu(this)" >, Adrian Horzyk, Stanisaw Magierski, and Grzegorz Miklaszewski</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-05.pdf"><span class="coloringspan" id="10" onmousedown="md(this)" onmouseup="mu(this)" >Ontology-Based Content Extraction from Polish Biobibliographical Lexicon</span></span></i><span class="coloringspan" id="11" onmousedown="md(this)" onmouseup="mu(this)" >, Wojciech Jaworski</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-06.pdf"><span class="coloringspan" id="12" onmousedown="md(this)" onmouseup="mu(this)" >Multilingual Features of Complex Valency Frames</span></span></i><span class="coloringspan" id="13" onmousedown="md(this)" onmouseup="mu(this)" >, Karel Pala and Ale&scaron; Hor&aacute;k</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-07.pdf"><span class="coloringspan" id="14" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Construction of the Polish Nominal Lexicon for the OpenCyc Ontology</span></span></i><span class="coloringspan" id="15" onmousedown="md(this)" onmouseup="mu(this)" >, Aleksander Pohl</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-09.pdf"><span class="coloringspan" id="16" onmousedown="md(this)" onmouseup="mu(this)" >A Morphosyntactic Rule-Based Brill Tagger for Polish</span></span></i><span class="coloringspan" id="17" onmousedown="md(this)" onmouseup="mu(this)" >, Szymon Acedański and Konrad Gołuchowski</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-10.pdf"><span class="coloringspan" id="18" onmousedown="md(this)" onmouseup="mu(this)" >Named Entity Recognition in Machine Anonymization</span></span></i><span class="coloringspan" id="19" onmousedown="md(this)" onmouseup="mu(this)" >, Filip Graliński, Krzysztof Jassem, Michał Marcińczuk, and Paweł Wawrzyniak</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-11.pdf"><span class="coloringspan" id="20" onmousedown="md(this)" onmouseup="mu(this)" >EBMT Experiments for the English-Romanian Language Pair</span></span></i><span class="coloringspan" id="21" onmousedown="md(this)" onmouseup="mu(this)" >, Elena Irimia</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-12.pdf"><span class="coloringspan" id="22" onmousedown="md(this)" onmouseup="mu(this)" >Facing The Machine Translation Babel in CLIR - Can MT Metrics Help in Choosing CLIR Resources?</span></span></i><span class="coloringspan" id="23" onmousedown="md(this)" onmouseup="mu(this)" >, Kimmo Kettunen</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-14.pdf"><span class="coloringspan" id="24" onmousedown="md(this)" onmouseup="mu(this)" >The TiGer Dependency Bank in Prolog format</span></span></i><span class="coloringspan" id="25" onmousedown="md(this)" onmouseup="mu(this)" >, Tomas By</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-15.pdf"><span class="coloringspan" id="26" onmousedown="md(this)" onmouseup="mu(this)" >Sentence Complexity in French: a Corpus-Based Approach</span></span></i><span class="coloringspan" id="27" onmousedown="md(this)" onmouseup="mu(this)" >, Ludovic Tanguy, Nikola Tulechki</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-16.pdf"><span class="coloringspan" id="28" onmousedown="md(this)" onmouseup="mu(this)" >Gathering and Analysis of a Corpus of Polish SMS Dialogues</span></span></i><span class="coloringspan" id="29" onmousedown="md(this)" onmouseup="mu(this)" >, Justyna Wałkowska</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-17.pdf"><span class="coloringspan" id="30" onmousedown="md(this)" onmouseup="mu(this)" >Phonetic Statistics from an Internet Articles Corpus of Polish Language</span></span></i><span class="coloringspan" id="31" onmousedown="md(this)" onmouseup="mu(this)" >, Bartosz Ziółko, Jakub Gałka, Mariusz Ziółko</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-19.pdf"><span class="coloringspan" id="32" onmousedown="md(this)" onmouseup="mu(this)" >Evaluating Full Lemmatization of Croatian Texts</span></span></i><span class="coloringspan" id="33" onmousedown="md(this)" onmouseup="mu(this)" >, Željko Agić, Marko Tadić, Zdravko Dovedan</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-20.pdf"><span class="coloringspan" id="34" onmousedown="md(this)" onmouseup="mu(this)" >The Ambiguity of Disambiguation Evaluation</span></span></i><span class="coloringspan" id="35" onmousedown="md(this)" onmouseup="mu(this)" >, Aleksander Buczyński</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-21.pdf"><span class="coloringspan" id="36" onmousedown="md(this)" onmouseup="mu(this)" >How Valence Information Influences Parsing Polish with Swigra</span></span></i><span class="coloringspan" id="37" onmousedown="md(this)" onmouseup="mu(this)" >, Elżbieta Hajnicz, Marcin Woliński</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-22.pdf"><span class="coloringspan" id="38" onmousedown="md(this)" onmouseup="mu(this)" >Semantic Classes of Czech Verbs</span></span></i><span class="coloringspan" id="39" onmousedown="md(this)" onmouseup="mu(this)" >, Dana Hlavácková, Maria Khokhlova, Karel Pala</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-23.pdf"><span class="coloringspan" id="40" onmousedown="md(this)" onmouseup="mu(this)" >Shallow Transfer Between Slavic Languages</span></span></i><span class="coloringspan" id="41" onmousedown="md(this)" onmouseup="mu(this)" >, Petr Homola, Vladislav Kubon, Jernej Vicic</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-24.pdf"><span class="coloringspan" id="42" onmousedown="md(this)" onmouseup="mu(this)" >Constructing an Electronic Dictionary of Polish Urban Proper Names</span></span></i><span class="coloringspan" id="43" onmousedown="md(this)" onmouseup="mu(this)" >, Małgorzata Marciniak, Joanna Rabiega-Wiśniewska, Agata Savary, Marcin Woliński, Celina Heliasz</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-25.pdf"><span class="coloringspan" id="44" onmousedown="md(this)" onmouseup="mu(this)" >Semi-automatic Expansion of Polish WordNet based on Activation-Area Attachment</span></span></i><span class="coloringspan" id="45" onmousedown="md(this)" onmouseup="mu(this)" >, Maciej Piasecki, Bartosz Broda, Maria Głąbska, Michał Marcińczuk, Stan Szpakowicz</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-27.pdf"><span class="coloringspan" id="46" onmousedown="md(this)" onmouseup="mu(this)" >Non Linear Neural Based Multiscale Principal Component Analysis for Fault Detection</span></span></i><span class="coloringspan" id="47" onmousedown="md(this)" onmouseup="mu(this)" >, Ouassim Bara, Mohamed Tarek Khadir</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-28.pdf"><span class="coloringspan" id="48" onmousedown="md(this)" onmouseup="mu(this)" >An Evolutionary Method for Designing Decision Support System</span></span></i><span class="coloringspan" id="49" onmousedown="md(this)" onmouseup="mu(this)" >, Bruno Golenia, Witold Kosiński, Martyna Weigl</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-29.pdf"><span class="coloringspan" id="50" onmousedown="md(this)" onmouseup="mu(this)" >A New Approach to Synthesis of Static Medical Images</span></span></i><span class="coloringspan" id="51" onmousedown="md(this)" onmouseup="mu(this)" >, Zdzisław S. Hippe, Jerzy W. Grzymała-Busse, Łukasz Piątek</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-30.pdf"><span class="coloringspan" id="52" onmousedown="md(this)" onmouseup="mu(this)" >Hybrid Immune Algorithm for Multimodal Function Optimization</span></span></i><span class="coloringspan" id="53" onmousedown="md(this)" onmouseup="mu(this)" >, Małgorzata Lucińska, Sławomir T. Wierzchoń</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-32.pdf"><span class="coloringspan" id="54" onmousedown="md(this)" onmouseup="mu(this)" >Automatic Web Site Authoring with SiteGuide</span></span></i><span class="coloringspan" id="55" onmousedown="md(this)" onmouseup="mu(this)" >, V. de Boer, V. Hollink, M.W. van Someren</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-33.pdf"><span class="coloringspan" id="56" onmousedown="md(this)" onmouseup="mu(this)" >An Evolutionary Approach to Automatically Optimise Web Content Extraction</span></span></i><span class="coloringspan" id="57" onmousedown="md(this)" onmouseup="mu(this)" >, Thomas Gottron</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-34.pdf"><span class="coloringspan" id="58" onmousedown="md(this)" onmouseup="mu(this)" >Hierarchical and Overlapping Clustering of Retrieved Web Pages</span></span></i><span class="coloringspan" id="59" onmousedown="md(this)" onmouseup="mu(this)" >, Yusuke Kanda, Mineichi Kudo, Hiroshi Tenmoto</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-35.pdf"><span class="coloringspan" id="60" onmousedown="md(this)" onmouseup="mu(this)" >Personalized Search in Folksonomies with Ontological User Profiles</span></span></i><span class="coloringspan" id="61" onmousedown="md(this)" onmouseup="mu(this)" >, Noriko Tomuro, Andriy Shepitsen</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-37.pdf"><span class="coloringspan" id="62" onmousedown="md(this)" onmouseup="mu(this)" >GASPS - Genetic Algorithm Search Path Simulator</span></span></i><span class="coloringspan" id="63" onmousedown="md(this)" onmouseup="mu(this)" >, M. A. Bednarczyk, Z. Kitowski, M. Piotrowski, A. Przybyszewska, T. Puźniakowski, J. Pyrchla, A. Siekielski, J. Sławiński, S. T. Wierzchoń</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-38.pdf"><span class="coloringspan" id="64" onmousedown="md(this)" onmouseup="mu(this)" >Anomaly Detection In Web Applications Using Gene Expression Programming</span></span></i><span class="coloringspan" id="65" onmousedown="md(this)" onmouseup="mu(this)" >, Jaroslaw Skaruz, Franciszek Seredyński</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-39.pdf"><span class="coloringspan" id="66" onmousedown="md(this)" onmouseup="mu(this)" >Ontology Construction and Evolution for a Steam Turbine Diagnostic Maintenance System</span></span></i><span class="coloringspan" id="67" onmousedown="md(this)" onmouseup="mu(this)" >, Mohamed Tarek Khadir, Sihem Klai</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-41.pdf"><span class="coloringspan" id="68" onmousedown="md(this)" onmouseup="mu(this)" >Modelling (Bio)Logical Sequences through Markov Logic Networks</span></span></i><span class="coloringspan" id="69" onmousedown="md(this)" onmouseup="mu(this)" >, Marenglen Biba, Stefano Ferilli, Floriana Esposito</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-42.pdf"><span class="coloringspan" id="70" onmousedown="md(this)" onmouseup="mu(this)" >A Closest Fit Approach to Missing Attribute Values</span></span></i><span class="coloringspan" id="71" onmousedown="md(this)" onmouseup="mu(this)" >, Jerzy W. Grzymała-Busse</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-43.pdf"><span class="coloringspan" id="72" onmousedown="md(this)" onmouseup="mu(this)" >A Comparison of Structural Distance Measures for Causal Bayesian Network Models</span></span></i><span class="coloringspan" id="73" onmousedown="md(this)" onmouseup="mu(this)" >, Martijn de Jongh, Marek J. Drużdżel</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-44.pdf"><span class="coloringspan" id="74" onmousedown="md(this)" onmouseup="mu(this)" >Comparing Performance of Committee Based Approaches to Active Learning</span></span></i><span class="coloringspan" id="75" onmousedown="md(this)" onmouseup="mu(this)" >, Jerzy Stefanowski, Mateusz Pachocki</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-46.pdf"><span class="coloringspan" id="76" onmousedown="md(this)" onmouseup="mu(this)" >Mining Chordal Semantics in a Non-Tagged Music Industry Database</span></span></i><span class="coloringspan" id="77" onmousedown="md(this)" onmouseup="mu(this)" >, Rory Lewis, Amanda Cohen, Wenxin Jiang, Zbigniew Raś</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-47.pdf"><span class="coloringspan" id="78" onmousedown="md(this)" onmouseup="mu(this)" >Music Industry Scalar Analysis Using Unsupervised Fourier Feature Selection</span></span></i><span class="coloringspan" id="79" onmousedown="md(this)" onmouseup="mu(this)" >, Rory Lewis, Jugal Kalita, Sauravjyoti Sarmah, Dhruba Bhattacharyya</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-48.pdf"><span class="coloringspan" id="80" onmousedown="md(this)" onmouseup="mu(this)" >Metaheuristics for the Decomposition of Finite Languages</span></span></i><span class="coloringspan" id="81" onmousedown="md(this)" onmouseup="mu(this)" >, Wojciech Wieczorek</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-49.pdf"><span class="coloringspan" id="82" onmousedown="md(this)" onmouseup="mu(this)" >Toward VO-based Collaboration between Computational Intelligence - Machine Learning and Healthcare Communities</span></span></i><span class="coloringspan" id="83" onmousedown="md(this)" onmouseup="mu(this)" >, Janusz Wojtusiak, Jacek M. Zurada, Jordan M. Malof, Devendra Mehta, Khalid Moidu</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-51.pdf"><span class="coloringspan" id="84" onmousedown="md(this)" onmouseup="mu(this)" >Structural Approach to the Designing of the Complementary Graphs in the GRADIS Agent Framework</span></span></i><span class="coloringspan" id="85" onmousedown="md(this)" onmouseup="mu(this)" >, Leszek Kotulski, Adam Sędziwy</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-52.pdf"><span class="coloringspan" id="86" onmousedown="md(this)" onmouseup="mu(this)" >Towards Java-based Intelligent Control Architecture</span></span></i><span class="coloringspan" id="87" onmousedown="md(this)" onmouseup="mu(this)" >, Konrad Kułakowski</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-53.pdf"><span class="coloringspan" id="88" onmousedown="md(this)" onmouseup="mu(this)" >Invisible Hand Process Simulation Based On Collective Intelligence Computational Model</span></span></i><span class="coloringspan" id="89" onmousedown="md(this)" onmouseup="mu(this)" >, Paweł Skrzyński, Tadeusz Szuba</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-54.pdf"><span class="coloringspan" id="90" onmousedown="md(this)" onmouseup="mu(this)" >Mobile Agent Reputation Based on Future Trust on Local and Global Environment</span></span></i><span class="coloringspan" id="91" onmousedown="md(this)" onmouseup="mu(this)" >, Michał Wolski, Mieczysław A. Kłopotek</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-56.pdf"><span class="coloringspan" id="92" onmousedown="md(this)" onmouseup="mu(this)" >Inference Algorithms for Hierarchical Knowledge Bases</span></span></i><span class="coloringspan" id="93" onmousedown="md(this)" onmouseup="mu(this)" >, Agnieszka Nowak, Roman Simiński, Alicja Wakulicz-Deja</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-57.pdf"><span class="coloringspan" id="94" onmousedown="md(this)" onmouseup="mu(this)" >Inference Processes on Clustered Partial Decision Rules</span></span></i><span class="coloringspan" id="95" onmousedown="md(this)" onmouseup="mu(this)" >, Agnieszka Nowak, Beata Zielosko</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-58.pdf"><span class="coloringspan" id="96" onmousedown="md(this)" onmouseup="mu(this)" >A New Searching Scheme within Bayesian Belief Network for Recommending Words</span></span></i><span class="coloringspan" id="97" onmousedown="md(this)" onmouseup="mu(this)" >, Arkadiusz Sacewicz, Mieczysław A. Kłopotek, Wojciech Froelich</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-59.pdf"><span class="coloringspan" id="98" onmousedown="md(this)" onmouseup="mu(this)" >Decision Units Approach in Knowledge Base Modeling</span></span></i><span class="coloringspan" id="99" onmousedown="md(this)" onmouseup="mu(this)" >, Roman Simiński</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-60.pdf"><span class="coloringspan" id="100" onmousedown="md(this)" onmouseup="mu(this)" >Knowledge Acquisition Problems in Bioinformatics</span></span></i><span class="coloringspan" id="101" onmousedown="md(this)" onmouseup="mu(this)" >, Magdalena A. Tkacz</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-61.pdf"><span class="coloringspan" id="102" onmousedown="md(this)" onmouseup="mu(this)" >Hierarchical Multi-Agent System</span></span></i><span class="coloringspan" id="103" onmousedown="md(this)" onmouseup="mu(this)" >, Alicja Wakulicz-Deja, Małgorzata Przybyła-Kasperek</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-62.pdf"><span class="coloringspan" id="104" onmousedown="md(this)" onmouseup="mu(this)" >Partial and Nondeterministic Decision Rules in Classification Process</span></span></i><span class="coloringspan" id="105" onmousedown="md(this)" onmouseup="mu(this)" >, Beata Zielosko, Barbara Marszał-Paszek, Piotr Paszek</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-64.pdf"><span class="coloringspan" id="106" onmousedown="md(this)" onmouseup="mu(this)" >Traffic Simulation Framework - a Cellular Automaton-Based Tool for Simulating and Investigating Real City Traffic</span></span></i><span class="coloringspan" id="107" onmousedown="md(this)" onmouseup="mu(this)" >, Paweł Gora</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-65.pdf"><span class="coloringspan" id="108" onmousedown="md(this)" onmouseup="mu(this)" >Building Scalable Lazy Rough Classifiers</span></span></i><span class="coloringspan" id="109" onmousedown="md(this)" onmouseup="mu(this)" >, Piotr Kwiatkowski, Hung Son Nguyen</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-66.pdf"><span class="coloringspan" id="110" onmousedown="md(this)" onmouseup="mu(this)" >Debellor: Open Source Modular Platform for Scalable Data Mining</span></span></i><span class="coloringspan" id="111" onmousedown="md(this)" onmouseup="mu(this)" >, Marcin Wojnarski</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-68.pdf"><span class="coloringspan" id="112" onmousedown="md(this)" onmouseup="mu(this)" >Environment Representation and Communication Protocols in Service-Oriented Multirobot System</span></span></i><span class="coloringspan" id="113" onmousedown="md(this)" onmouseup="mu(this)" >, Stanisław Ambroszkiewicz, Waldemar Bartyna, Marek Faderewski, Grzegorz Terlikowski</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-69.pdf"><span class="coloringspan" id="114" onmousedown="md(this)" onmouseup="mu(this)" >Algorithm, Agent and Robots in Cyberspace</span></span></i><span class="coloringspan" id="115" onmousedown="md(this)" onmouseup="mu(this)" >, Krzysztof Cetnarowicz</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-70.pdf"><span class="coloringspan" id="116" onmousedown="md(this)" onmouseup="mu(this)" >Towards Semantic Navigation System</span></span></i><span class="coloringspan" id="117" onmousedown="md(this)" onmouseup="mu(this)" >, Barbara Siemiątkowska, Jacek Szklarski, Michał Gnatowski, Adam Borkowski</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-71.pdf"><span class="coloringspan" id="118" onmousedown="md(this)" onmouseup="mu(this)" >Motion Coordination Method for Numerous Groups of Fast Mobile Robots</span></span></i><span class="coloringspan" id="119" onmousedown="md(this)" onmouseup="mu(this)" >, Wojciech Turek</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-73.pdf"><span class="coloringspan" id="120" onmousedown="md(this)" onmouseup="mu(this)" >Arabic Handwritten Word Recognition Using Classifiers Selection and features Extraction / Selection</span></span></i><span class="coloringspan" id="121" onmousedown="md(this)" onmouseup="mu(this)" >, Nabiha Azizi, Nadir Farah, Mohamed Tarek Khadir, Mokhtar Sellami</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-74.pdf"><span class="coloringspan" id="122" onmousedown="md(this)" onmouseup="mu(this)" >Toposaw - a Dictionary Creation Tool</span></span></i><span class="coloringspan" id="123" onmousedown="md(this)" onmouseup="mu(this)" >, Piotr Sikora, Marcin Woliński</span></li>
+<li><i><span onclick="return false" style="text-decoration:underline; color:blue" href="proceedings/iis09-75.pdf"><span class="coloringspan" id="124" onmousedown="md(this)" onmouseup="mu(this)" >Genetic Algorithm-based Multi-Word Automatic Language Translation</span></span></i><span class="coloringspan" id="125" onmousedown="md(this)" onmouseup="mu(this)" >, Ali Zogheib</span>
