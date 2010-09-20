@@ -45,7 +45,7 @@ public class ConditionalRandomFieldSingleton {
 
 			try {
 				System.load(dir.getCanonicalPath()
-						+ "/kairos/CRF++-0.53/java/libCRFPP.so");
+						+ "/kairos/CRF++-0.54/java/libCRFPP.so");
 			} catch (IOException e) {
 				e.printStackTrace();
 				e.printStackTrace(LogUtil
