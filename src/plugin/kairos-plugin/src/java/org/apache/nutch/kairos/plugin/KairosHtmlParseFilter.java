@@ -42,15 +42,18 @@ public class KairosHtmlParseFilter implements HtmlParseFilter {
 	 */
 	private Configuration conf;
 
+	private static NegativeDictionarySingleton negativeDictionary = NegativeDictionarySingleton
+			.getInstance();
+
 	/**
 	 * Scan the HTML document for paper metadata
 	 */
 	public ParseResult filter(Content content, ParseResult parseResult,
 			HTMLMetaTags metaTags, DocumentFragment doc) {
-		
+
 		Metadata metadata = content.getMetadata();
 		metadata.set("Content-Type", "text/html");
-		
+
 		// Get the content base URL
 		String contentUrl = content.getUrl();
 
@@ -66,7 +69,7 @@ public class KairosHtmlParseFilter implements HtmlParseFilter {
 		// List of HTML segments
 		List<Segment> segmentList = htmlSegmentCreator.createHTMLSegments(doc);
 
-		//LOG.info("SEGMENT SIZE [" + segmentList.size() + "]");
+		// LOG.info("SEGMENT SIZE [" + segmentList.size() + "]");
 
 		// New Conditional Random Field
 		ConditionalRandomFieldSingleton crf = ConditionalRandomFieldSingleton
@@ -123,45 +126,31 @@ public class KairosHtmlParseFilter implements HtmlParseFilter {
 
 							String word = currentTag.word;
 
+							
+							boolean isNegativeWord = negativeDictionary.isNegativeWord(word);
+							
+							
 							// If the guessed label equals title + some
 							// heuristics
-							if (guess.equals("title")) {
+							if (isNegativeWord == false && guess.equals("title")) {
 								// Add the word / token to the title
 								title.add(word);
 							}
 
 							// If the guessed label equals author + some
 							// heuristics
-							if (guess.equals("author")) {
-
-								/*
-								if (currentTag.tokens[5].equals("authorON")
-										&& !currentTag.tokens[20]
-												.equals("affiliationON")) {
-									// Add the word / token to the author
-									author.add(word);
-								}
-								*/
-								
+							if (isNegativeWord == false && guess.equals("author")) {
 								if (currentTag.tokens[5].equals("1")
-										&& !currentTag.tokens[20]
-												.equals("1")) {
+										&& !currentTag.tokens[20].equals("1")) {
 									// Add the word / token to the author
 									author.add(word);
 								}
 
-								/*
-								if (currentTag.tokens[20]
-										.equals("affiliationON")) {
+								if (isNegativeWord == false && currentTag.tokens[20].equals("1")) {
 									affiliation.add(word);
 								}
-								*/
-								
-								if (currentTag.tokens[20]
-														.equals("1")) {
-													affiliation.add(word);
-												}
 							}
+
 						}
 
 						// If we have a title and an author
@@ -186,23 +175,22 @@ public class KairosHtmlParseFilter implements HtmlParseFilter {
 							indexText.append(Utils.NEWLINE);
 
 							/*
-							LOG.info("ADDING METADATA: PROB: "
-									+ currentConditionalOutputProbability
-									+ " [segment:" + j + "| result:" + x
-									+ " size:"
-									+ currentSegment.getSegmentTextSize()
-									+ "] : (" + indexText.toString());
-									*/
+							 * LOG.info("ADDING METADATA: PROB: " +
+							 * currentConditionalOutputProbability +
+							 * " [segment:" + j + "| result:" + x + " size:" +
+							 * currentSegment.getSegmentTextSize() + "] : (" +
+							 * indexText.toString());
+							 */
 						}
 					} else {
 						/*
-						LOG.info("IGNORE METADATA: PROB: "
-								+ currentConditionalOutputProbability
-								+ " [segment:" + j + "| result:" + x + " size:"
-								+ currentSegment.getSegmentTextSize() + "] : ("
-								+ currentSegment.getSegmentTextConcatenated()
-								+ ")  URL: " + contentUrl);
-						*/
+						 * LOG.info("IGNORE METADATA: PROB: " +
+						 * currentConditionalOutputProbability + " [segment:" +
+						 * j + "| result:" + x + " size:" +
+						 * currentSegment.getSegmentTextSize() + "] : (" +
+						 * currentSegment.getSegmentTextConcatenated() +
+						 * ")  URL: " + contentUrl);
+						 */
 					}
 				}
 			}
