@@ -19,6 +19,7 @@ import org.apache.nutch.parse.ParseData;
 import org.apache.nutch.parse.ParseImpl;
 import org.apache.nutch.parse.ParseResult;
 import org.apache.nutch.protocol.Content;
+import org.apache.nutch.util.LogUtil;
 import org.w3c.dom.DocumentFragment;
 
 /**
@@ -44,6 +45,15 @@ public class KairosHtmlParseFilter implements HtmlParseFilter {
 
 	private static NegativeDictionarySingleton negativeDictionary = NegativeDictionarySingleton
 			.getInstance();
+
+	static {
+		try {
+			negativeDictionary.read("kairos/dictionaries/negative.txt");
+		} catch (Exception e) {
+			// Error
+			e.printStackTrace(LogUtil.getErrorStream(LOG));
+		}
+	}
 
 	/**
 	 * Scan the HTML document for paper metadata
@@ -126,27 +136,30 @@ public class KairosHtmlParseFilter implements HtmlParseFilter {
 
 							String word = currentTag.word;
 
-							
-							boolean isNegativeWord = negativeDictionary.isNegativeWord(word);
-							
-							
+							boolean isNegativeWord = negativeDictionary
+									.isNegativeWord(word);
+
+							if (isNegativeWord == true) {
+								continue;
+							}
+
 							// If the guessed label equals title + some
 							// heuristics
-							if (isNegativeWord == false && guess.equals("title")) {
+							if (guess.equals("title")) {
 								// Add the word / token to the title
 								title.add(word);
 							}
 
 							// If the guessed label equals author + some
 							// heuristics
-							if (isNegativeWord == false && guess.equals("author")) {
+							if (guess.equals("author")) {
 								if (currentTag.tokens[5].equals("1")
 										&& !currentTag.tokens[20].equals("1")) {
 									// Add the word / token to the author
 									author.add(word);
 								}
 
-								if (isNegativeWord == false && currentTag.tokens[20].equals("1")) {
+								if (currentTag.tokens[20].equals("1")) {
 									affiliation.add(word);
 								}
 							}
