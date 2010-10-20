@@ -275,7 +275,7 @@ public class ConditionalRandomFieldSingleton {
 						// .x(i, tagger.xsize()) : "";
 
 						// TODO -> If we gonna change the template file
-						// to deactivate certion features then the tag size
+						// to deactivate certain features then the tag size
 						// xsize is wrong
 						String answerLabel = crossValidation == true ? tagger
 								.x(i, 21) : "";

@@ -1,28 +1,26 @@
 package org.apache.nutch.kairos.plugin;
 
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileInputStream;
+import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.StringReader;
-import java.rmi.RemoteException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Properties;
 import java.util.Set;
 import java.util.Map.Entry;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
-import javax.xml.rpc.ServiceException;
 
-import org.apache.axis.encoding.Base64;
+import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -47,9 +45,6 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
-
-import forecite.ForeCiteLocator;
-import forecite.ForeCitePortType;
 
 /**
  * The following is the code for the Indexing Filter extension.
@@ -207,51 +202,49 @@ public class KairosIndexer implements IndexingFilter {
 	private void getMetadataFromParsCit(ScholarlyMetadata scholarlyMetadata,
 			String text) {
 		try {
-			Properties properties = new Properties();
-			properties.load(new FileInputStream(new File(
-					"kairos.properties")));
-			
-			String parscitLocalPath = properties
-					.getProperty("parscitLocalPath");
-
-			String parscitRemoteURL = properties
-					.getProperty("parscitRemoteURL");
+			// Create test temporary file.
+			File input = File.createTempFile("ParsCitInput", ".txt", new File(
+					"tmp"));
 
 			// Create test temporary file.
-			File tempFile = File.createTempFile("ParsCitForeCite", ".txt",
-					new File(parscitLocalPath));
+			File output = File.createTempFile("ParsCitOutput", ".xml",
+					new File("tmp"));
 
-			LOG.info(parscitLocalPath);
-			LOG.info(parscitRemoteURL);
-			LOG.info(text);
-			LOG.info(parscitRemoteURL
-							+ tempFile.getName());
-			
 			// Write the text to a temporary file on disk
-			BufferedWriter out = new BufferedWriter(new FileWriter(tempFile));
+			BufferedWriter out = new BufferedWriter(new FileWriter(input));
 			out.write(text);
 			out.flush();
 			out.close();
 
-			// ForeCite service
-			ForeCiteLocator service = new ForeCiteLocator();
-			ForeCitePortType port;
+			// Execute a command
+			String[] commands = new String[] { "ParsCit/bin/headExtract.pl",
+					input.getAbsolutePath(), output.getAbsolutePath() };
+			Process child = Runtime.getRuntime().exec(commands);
 
 			try {
-				// Get the ForeCite port
-				port = service.getForeCitePort();
+				// Wait for completion
+				child.waitFor();
 
-				try {
+				if (Utils.fileExists(output, false)) {
+					BufferedReader br = new BufferedReader(new FileReader(
+							output));
+					String line;
+
+					StringBuilder xmlText = new StringBuilder();
+					while ((line = br.readLine()) != null) {
+						if (!StringUtils.isEmpty(line)) {
+							xmlText.append(line.trim());
+						}
+					}
+
+					// Close the buffered reader
+					br.close();
+
 					// Get the XML records
-					String xmlRecords = port.extract_header(parscitRemoteURL
-							+ tempFile.getName());
+					String xmlRecords = xmlText.toString();
 
-					// Decode it to a human readable form
-					xmlRecords = new String(Base64.decode(xmlRecords));
-
-					LOG.info(xmlRecords);
 					// If we have XML records
-					if (!StringUtil.isEmpty(xmlRecords)) {
+					if (!StringUtils.isEmpty(xmlRecords)) {
 
 						DocumentBuilderFactory dbf = DocumentBuilderFactory
 								.newInstance();
@@ -264,6 +257,7 @@ public class KairosIndexer implements IndexingFilter {
 									.toString()));
 
 							Document document;
+
 							try {
 								document = db.parse(is);
 
@@ -301,22 +295,20 @@ public class KairosIndexer implements IndexingFilter {
 								// Set the affiliation
 								scholarlyMetadata.setAffiliation(affiliation);
 							} catch (SAXException e) {
-								e.printStackTrace(LogUtil.getErrorStream(LOG));
-							} catch (IOException e) {
-								e.printStackTrace(LogUtil.getErrorStream(LOG));
+								e.printStackTrace(LogUtil.getWarnStream(LOG));
 							}
 						} catch (ParserConfigurationException e) {
-							e.printStackTrace(LogUtil.getErrorStream(LOG));
+							e.printStackTrace(LogUtil.getWarnStream(LOG));
 						}
 					}
-				} catch (RemoteException e) {
-					e.printStackTrace(LogUtil.getErrorStream(LOG));
 				}
-			} catch (ServiceException e) {
-				e.printStackTrace(LogUtil.getErrorStream(LOG));
+			} catch (InterruptedException e) {
+				e.printStackTrace();
 			}
 
-			tempFile.delete();
+			// Delete the files
+			input.delete();
+			output.delete();
 		} catch (IOException e) {
 			e.printStackTrace(LogUtil.getWarnStream(LOG));
 		}
@@ -332,17 +324,10 @@ public class KairosIndexer implements IndexingFilter {
 		// Get the content type
 		String contentType = parse.getData().getMeta("Content-Type");
 
-		LOG.info("COOOOOOOOOOOOOOOOOOOOOOOOOOO " + contentType);
-		
 		// Get the index text which contains scholarly paper metadata
 		String indexText = parse.getText();
 
-		LOG.info("PAAAAAAAAAAAAAAAA " + indexText);
-		
 		Collection<ScholarlyMetadata> metadata = new ArrayList<ScholarlyMetadata>();
-
-		// Contains only unique titles
-		Set<String> titleSet = new HashSet<String>();
 
 		if (!StringUtil.isEmpty(indexText)) {
 			// Contains the conference metadata
@@ -355,6 +340,9 @@ public class KairosIndexer implements IndexingFilter {
 			if (contentType.equals("text/html")) {
 				// If we have text
 				if (!StringUtil.isEmpty(indexText)) {
+					// Contains only unique titles
+					Set<String> titleSet = new HashSet<String>();
+
 					// Get the metadata blocks from the text
 					String[] blocks = indexText.split(Utils.NEWLINE
 							+ Utils.NEWLINE);
@@ -395,7 +383,9 @@ public class KairosIndexer implements IndexingFilter {
 								// Set the affiliation
 								scholarlyMetadata.setAffiliation(affiliation);
 
-								// Add Solr document to Solr documents
+								// Set the URL
+								scholarlyMetadata.setURL(url.toString());
+
 								metadata.add(scholarlyMetadata);
 
 								// Add title line to set
@@ -408,16 +398,16 @@ public class KairosIndexer implements IndexingFilter {
 				ScholarlyMetadata scholarlyMetadata = (ScholarlyMetadata) conferenceMetadata
 						.clone();
 
+				scholarlyMetadata.setURL(url.toString());
+
 				getMetadataFromParsCit(scholarlyMetadata, indexText);
 
-				// Add Solr document to Solr documents
 				metadata.add(scholarlyMetadata);
 			}
 		}
 
 		// Only index if we have more than one scholarly paper metadata
-		if (metadata.size() > 1) {
-
+		if (metadata.size() > 0) {
 			XMLWriterSingleton xmlWriter = XMLWriterSingleton.getInstance();
 
 			for (ScholarlyMetadata currentScholarlyMetadata : metadata) {

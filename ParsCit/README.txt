@@ -1,0 +1,1 @@
+bin/headExtract.pl demodata/E06-1050.txt output.xml

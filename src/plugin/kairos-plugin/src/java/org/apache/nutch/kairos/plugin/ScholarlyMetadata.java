@@ -60,6 +60,8 @@ public class ScholarlyMetadata implements Cloneable {
 
 	private String _contentType = "";
 
+	private String _url;
+
 	public ScholarlyMetadata(String contentType) {
 		if (!StringUtil.isEmpty(contentType)) {
 			this._contentType = contentType;
@@ -72,48 +74,53 @@ public class ScholarlyMetadata implements Cloneable {
 	public String toString() {
 		StringBuilder sb = new StringBuilder();
 
-		if (!StringUtil.isEmpty(this._author)) {
-			sb.append(this._author);
+		if (!StringUtil.isEmpty(_author)) {
+			sb.append(_author);
 		}
 
-		if (!StringUtil.isEmpty(this._title)) {
+		if (!StringUtil.isEmpty(_title)) {
 			sb.append(Utils.NEWLINE);
-			sb.append(this._title);
+			sb.append(_title);
 		}
 
-		if (!StringUtil.isEmpty(this._affiliation)) {
+		if (!StringUtil.isEmpty(_affiliation)) {
 			sb.append(Utils.NEWLINE);
-			sb.append(this._affiliation);
+			sb.append(_affiliation);
 		}
 
-		if (!StringUtil.isEmpty(this._conferenceName)) {
+		if (!StringUtil.isEmpty(_conferenceName)) {
 			sb.append(Utils.NEWLINE);
-			sb.append(this._conferenceName);
+			sb.append(_conferenceName);
 		}
 
-		if (!StringUtil.isEmpty(this._conferenceTitle)) {
+		if (!StringUtil.isEmpty(_conferenceTitle)) {
 			sb.append(Utils.NEWLINE);
-			sb.append(this._conferenceTitle);
+			sb.append(_conferenceTitle);
 		}
 
-		if (!StringUtil.isEmpty(this._conferenceBeginDate)) {
+		if (!StringUtil.isEmpty(_conferenceBeginDate)) {
 			sb.append(Utils.NEWLINE);
-			sb.append(this._conferenceBeginDate);
+			sb.append(_conferenceBeginDate);
 		}
 
-		if (!StringUtil.isEmpty(this._conferenceEndDate)) {
+		if (!StringUtil.isEmpty(_conferenceEndDate)) {
 			sb.append(Utils.NEWLINE);
-			sb.append(this._conferenceEndDate);
+			sb.append(_conferenceEndDate);
 		}
 
-		if (!StringUtil.isEmpty(this._conferencePlace)) {
+		if (!StringUtil.isEmpty(_conferencePlace)) {
 			sb.append(Utils.NEWLINE);
-			sb.append(this._conferencePlace);
+			sb.append(_conferencePlace);
 		}
 
-		if (!StringUtil.isEmpty(this._conferenceURL)) {
+		if (!StringUtil.isEmpty(_conferenceURL)) {
 			sb.append(Utils.NEWLINE);
-			sb.append(this._conferenceURL);
+			sb.append(_conferenceURL);
+		}
+
+		if (!StringUtil.isEmpty(_url)) {
+			sb.append(Utils.NEWLINE);
+			sb.append(_url);
 		}
 
 		if (sb.length() > 0) {
@@ -157,15 +164,16 @@ public class ScholarlyMetadata implements Cloneable {
 	public Object clone() {
 		ScholarlyMetadata clone = new ScholarlyMetadata(this._contentType);
 
-		clone.setAuthor(this._author);
-		clone.setTitle(this._title);
-		clone.setAffiliation(this._affiliation);
-		clone.setConferenceBeginDate(this._conferenceBeginDate);
-		clone.setConferenceEndDate(this._conferenceEndDate);
-		clone.setConferenceName(this._conferenceName);
-		clone.setConferencePlace(this._conferencePlace);
-		clone.setConferenceTitle(this._title);
-		clone.setConferenceURL(this._conferenceURL);
+		clone.setAuthor(_author);
+		clone.setTitle(_title);
+		clone.setAffiliation(_affiliation);
+		clone.setConferenceBeginDate(_conferenceBeginDate);
+		clone.setConferenceEndDate(_conferenceEndDate);
+		clone.setConferenceName(_conferenceName);
+		clone.setConferencePlace(_conferencePlace);
+		clone.setConferenceTitle(_title);
+		clone.setConferenceURL(_conferenceURL);
+		clone.setURL(_url);
 
 		return clone;
 	}
@@ -173,46 +181,50 @@ public class ScholarlyMetadata implements Cloneable {
 	public SolrInputDocument getSolrInputDocument() {
 		SolrInputDocument solrDocument = new SolrInputDocument();
 
-		if (!StringUtil.isEmpty(this._author)) {
-			solrDocument.addField("p_author", this._author);
+		if (!StringUtil.isEmpty(_author)) {
+			solrDocument.addField("p_author", _author);
 		}
 
-		if (!StringUtil.isEmpty(this._title)) {
-			solrDocument.addField("p_title", this._title);
+		if (!StringUtil.isEmpty(_title)) {
+			solrDocument.addField("p_title", _title);
 		}
 
-		if (!StringUtil.isEmpty(this._affiliation)) {
-			solrDocument.addField("p_affiliation", this._affiliation);
+		if (!StringUtil.isEmpty(_affiliation)) {
+			solrDocument.addField("p_affiliation", _affiliation);
 		}
 
-		if (!StringUtil.isEmpty(this._conferenceName)) {
-			solrDocument.addField("c_name", this._conferenceName);
+		if (!StringUtil.isEmpty(_conferenceName)) {
+			solrDocument.addField("c_name", _conferenceName);
 		}
 
-		if (!StringUtil.isEmpty(this._conferenceTitle)) {
-			solrDocument.addField("c_title", this._conferenceTitle);
+		if (!StringUtil.isEmpty(_conferenceTitle)) {
+			solrDocument.addField("c_title", _conferenceTitle);
 		}
 
-		if (!StringUtil.isEmpty(this._conferenceBeginDate)) {
-			solrDocument.addField("c_begin_date", this._conferenceBeginDate);
+		if (!StringUtil.isEmpty(_conferenceBeginDate)) {
+			solrDocument.addField("c_begin_date", _conferenceBeginDate);
 		}
 
-		if (!StringUtil.isEmpty(this._conferenceEndDate)) {
-			solrDocument.addField("c_end_date", this._conferenceEndDate);
+		if (!StringUtil.isEmpty(_conferenceEndDate)) {
+			solrDocument.addField("c_end_date", _conferenceEndDate);
 		}
 
-		if (!StringUtil.isEmpty(this._conferencePlace)) {
-			solrDocument.addField("c_place", this._conferencePlace);
+		if (!StringUtil.isEmpty(_conferencePlace)) {
+			solrDocument.addField("c_place", _conferencePlace);
 		}
 
-		if (!StringUtil.isEmpty(this._conferenceURL)) {
-			solrDocument.addField("c_url", this._conferenceURL);
+		if (!StringUtil.isEmpty(_conferenceURL)) {
+			solrDocument.addField("c_url", _conferenceURL);
+		}
+
+		if (!StringUtil.isEmpty(_url) && !_url.equals(_conferenceURL)) {
+			solrDocument.addField("url", _url);
 		}
 
 		if (solrDocument.getFieldNames().size() > 0) {
 			// solrDocument.addField("id", "hash");
 			solrDocument.addField("date_created", "");
-			solrDocument.addField("content_type", this._contentType);
+			solrDocument.addField("content_type", _contentType);
 			solrDocument.addField("kairos_version", "1.0");
 		}
 
@@ -220,96 +232,104 @@ public class ScholarlyMetadata implements Cloneable {
 	}
 
 	public String getAuthor() {
-		return this._author;
+		return _author;
 	}
 
 	public String getTitle() {
-		return this._title;
+		return _title;
 	}
 
 	public String getAffiliation() {
-		return this._affiliation;
+		return _affiliation;
 	}
 
 	public String getConferenceName() {
-		return this._conferenceName;
+		return _conferenceName;
 	}
 
 	public String getConferenceTitle() {
-		return this._conferenceTitle;
+		return _conferenceTitle;
 	}
 
 	public String getConferenceBeginDate() {
-		return this._conferenceBeginDate;
+		return _conferenceBeginDate;
 	}
 
 	public String getConferenceEndDate() {
-		return this._conferenceEndDate;
+		return _conferenceEndDate;
 	}
 
 	public String getConferencePlace() {
-		return this._conferencePlace;
+		return _conferencePlace;
 	}
 
 	public String getConferenceURL() {
-		return this._conferenceURL;
+		return _conferenceURL;
+	}
+
+	public void setURL(String url) {
+		_url = url;
+	}
+
+	public String getURL() {
+		return _url;
 	}
 
 	public void setAuthor(String author) {
 		if (!StringUtil.isEmpty(author)) {
-			this._author = author.trim();
+			_author = author.trim();
 		}
 	}
 
 	public void setTitle(String title) {
 		if (!StringUtil.isEmpty(title)) {
-			this._title = title.trim();
+			_title = title.trim();
 		}
 	}
 
 	public void setAffiliation(String affiliation) {
 		if (!StringUtil.isEmpty(affiliation)) {
-			this._affiliation = affiliation.trim();
+			_affiliation = affiliation.trim();
 		}
 	}
 
 	public void setConferenceName(String name) {
 		if (!StringUtil.isEmpty(name)) {
-			this._conferenceName = name.trim();
+			_conferenceName = name.trim();
 		}
 	}
 
 	public void setConferenceTitle(String title) {
 		if (!StringUtil.isEmpty(title)) {
-			this._conferenceTitle = title.trim();
+			_conferenceTitle = title.trim();
 		}
 	}
 
 	public void setConferenceBeginDate(String beginDate) {
 		if (!StringUtil.isEmpty(beginDate)) {
-			this._conferenceBeginDate = beginDate.trim();
+			_conferenceBeginDate = beginDate.trim();
 		}
 	}
 
 	public void setConferenceEndDate(String endDate) {
 		if (!StringUtil.isEmpty(endDate)) {
-			this._conferenceEndDate = endDate.trim();
+			_conferenceEndDate = endDate.trim();
 		}
 	}
 
 	public void setConferencePlace(String place) {
 		if (!StringUtil.isEmpty(place)) {
-			this._conferencePlace = place.trim();
+			_conferencePlace = place.trim();
 		}
 	}
 
 	public void setConferenceURL(String url) {
 		if (!StringUtil.isEmpty(url)) {
-			this._conferenceURL = url.trim();
+			_conferenceURL = url.trim();
 		}
 	}
-	
+
 	public boolean hasTitle() {
-		return !StringUtil.isEmpty(this._title);
+		return !StringUtil.isEmpty(_title);
 	}
 }
