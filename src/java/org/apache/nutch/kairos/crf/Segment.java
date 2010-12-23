@@ -2,6 +2,7 @@ package org.apache.nutch.kairos.crf;
 
 import java.util.LinkedList;
 import java.util.List;
+import java.lang.StringBuffer;
 
 import org.apache.commons.lang.StringEscapeUtils;
 
@@ -152,4 +153,16 @@ public class Segment {
 
 		return text.toString().trim();
 	}
+
+        // Thang v110101: add toString method
+        @Override 
+        public String toString(){
+          StringBuffer sB = new StringBuffer("# [Segment " + _domPath + "] ");
+          for(SegmentText segment : _segmentText){
+            sB.append(segment.getText() + " ||| ");
+          }
+          sB.append("\n");
+
+          return sB.toString();
+        }
 }

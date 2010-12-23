@@ -128,7 +128,7 @@ public class HTMLSegmentCreator {
 
 		// If we encounter a text node and it has a value
 		if (nodeName != null && nodeValue != null && nodeName.equals("#text")) {
-			segment.addSegmentText(nodeValue);
+			segment.addSegmentText(nodeValue + " , "); // Thang v110101: add "," separator
 		}
 
 		// Get the next child node

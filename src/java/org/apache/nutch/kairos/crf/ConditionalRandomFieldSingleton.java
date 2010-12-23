@@ -126,7 +126,7 @@ public class ConditionalRandomFieldSingleton {
 	 * Path to the crf_test & crf_train command from the Conditional Random
 	 * Field package CRF++
 	 */
-	private static String pathToCRF = "kairos/CRF++-0.53/bin/";
+	private static String pathToCRF = "kairos/CRF++-0.54/bin/"; // Thang v110101: CRF path, might want to canonicalize into 1 place ?
 
 	/**
 	 * Constructor
