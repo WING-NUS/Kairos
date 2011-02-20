@@ -43,4 +43,11 @@ the CRF++ training data
 ============================
 the trained CRF model to extract scholarly paper metadata
 
++ forecite # Thang v110101 
+============================
+To export Kairos output into format readable by ForeCite system
+
+
+
+
 
